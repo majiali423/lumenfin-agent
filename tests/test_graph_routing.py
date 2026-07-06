@@ -48,6 +48,7 @@ def build_test_config(root: Path) -> AppConfig:
         company_parallelism=4,
         input_guardrail_enabled=True,
         input_guardrail_mode="sanitize",
+        tool_backend="local",
     )
 
 

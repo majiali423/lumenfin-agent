@@ -16,6 +16,7 @@ def build_data_sources(
     embedding_provider: str = "deterministic",
     rag_enabled: bool = True,
     market_provider: str = "yahoo",
+    tool_backend: str | None = None,
 ) -> dict[str, Any]:
     companies = list(result.get("companies") or [])
     document_contexts = list(result.get("document_contexts") or [])
@@ -70,6 +71,7 @@ def build_data_sources(
         "rag": rag_status,
         "llm": llm_backend or result.get("llm_backend") or "unknown",
         "embedding": embedding_provider,
+        "tool_transport": tool_backend or result.get("tool_backend") or "local",
         "pdf_uploaded": has_pdf,
         "structured_uploaded": has_structured_upload,
     }
@@ -112,6 +114,7 @@ def build_run_manifest(
             embedding_provider=embedding_provider,
             rag_enabled=rag_enabled,
             market_provider=market_provider,
+            tool_backend=result.get("tool_backend"),
         ),
         "artifacts": {
             "report": artifacts.get("report_path"),

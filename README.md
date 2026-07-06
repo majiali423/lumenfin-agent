@@ -198,6 +198,8 @@ Eval scripts:
 | Telemetry | `audit_log` latency/tokens on **all pipeline nodes** |
 | Repair loop | Critic-driven router-retry prototype (max 2 iterations) |
 | Structured ingest | JSON metrics API (`/api/v1/analyze-data`) |
+| Tool transport | `local` in-process or `mcp` stdio for quant ratios |
+| MCP tool layer | `mcp_layer/servers` + `scripts/run_mcp_tools_demo.py` |
 
 ### Non-goals (v0.3)
 
@@ -207,6 +209,17 @@ Eval scripts:
 - Investment advice or trade execution
 
 See [docs/architecture_decisions.md](docs/architecture_decisions.md) for design rationale.
+
+### MCP tool layer
+
+Financial primitives are also exposed as MCP servers under `mcp_layer/` (reusable outside LangGraph).
+
+```powershell
+.\.venv\Scripts\python scripts\run_mcp_tools_demo.py
+.\.venv\Scripts\python scripts\run_mcp_agent_demo.py
+```
+
+See [docs/MCP.md](docs/MCP.md).
 
 ---
 

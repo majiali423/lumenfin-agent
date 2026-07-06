@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "lumenfin-safe-calc": {
+      "command": "python",
+      "args": ["mcp_layer/servers/safe_calc_server.py"],
+      "cwd": "."
+    },
+    "lumenfin-finance-db": {
+      "command": "python",
+      "args": ["mcp_layer/servers/finance_db_server.py"],
+      "cwd": "."
+    },
+    "lumenfin-document-search": {
+      "command": "python",
+      "args": ["mcp_layer/servers/document_server.py"],
+      "cwd": "."
+    }
+  }
+}

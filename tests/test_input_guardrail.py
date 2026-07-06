@@ -12,7 +12,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin import LumenFinAgentSystem
-from lumenfin.config import AppConfig
+from dataclasses import replace
 from lumenfin.graph import route_after_input_guardrail
 from lumenfin.input_guardrail import guard_documents, sanitize_document, scan_text
 from lumenfin.llm import LocalFallbackLLMClient
@@ -80,30 +80,8 @@ class InputGuardrailModuleTestCase(unittest.TestCase):
 class InputGuardrailWorkflowTestCase(unittest.TestCase):
     def _build_system(self, *, mode: str) -> LumenFinAgentSystem:
         base = build_test_config(ROOT / "test_artifacts" / f"guardrail-{uuid4().hex[:8]}")
-        config = AppConfig(
-            output_dir=base.output_dir,
-            upload_dir=base.upload_dir,
-            db_path=base.db_path,
-            database_url=base.database_url,
-            redis_url=base.redis_url,
-            redis_queue_name=base.redis_queue_name,
-            neo4j_uri=base.neo4j_uri,
-            neo4j_username=base.neo4j_username,
-            neo4j_password=base.neo4j_password,
-            market_data_provider=base.market_data_provider,
-            alphavantage_api_key=base.alphavantage_api_key,
-            host=base.host,
-            port=base.port,
-            api_key=base.api_key,
-            llm=base.llm,
-            rag_enabled=base.rag_enabled,
-            milvus_uri=base.milvus_uri,
-            milvus_collection=base.milvus_collection,
-            embedding_provider=base.embedding_provider,
-            embedding_dimension=base.embedding_dimension,
-            rag_top_k=base.rag_top_k,
-            critic_max_iterations=base.critic_max_iterations,
-            company_parallelism=base.company_parallelism,
+        config = replace(
+            base,
             input_guardrail_enabled=True,
             input_guardrail_mode=mode,
         )

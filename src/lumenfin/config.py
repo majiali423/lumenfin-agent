@@ -38,6 +38,7 @@ class AppConfig:
     company_parallelism: int
     input_guardrail_enabled: bool
     input_guardrail_mode: str
+    tool_backend: str
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -69,4 +70,5 @@ class AppConfig:
             company_parallelism=int(os.getenv("MAS_COMPANY_PARALLELISM", "4")),
             input_guardrail_enabled=os.getenv("MAS_INPUT_GUARDRAIL_ENABLED", "true").lower() in {"1", "true", "yes"},
             input_guardrail_mode=os.getenv("MAS_INPUT_GUARDRAIL_MODE", "sanitize").lower(),
+            tool_backend=os.getenv("MAS_TOOL_BACKEND", "local").lower(),
         )

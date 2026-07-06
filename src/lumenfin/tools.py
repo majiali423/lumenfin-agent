@@ -75,6 +75,14 @@ def safe_execute_formula(formula: str, variables: dict[str, float]) -> float:
     return round(evaluator.visit(tree), 4)
 
 
+def resolve_safe_formula(formula: str, variables: dict[str, float], backend: str = "local") -> float:
+    if backend == "mcp":
+        from .mcp_bridge import compute_ratio_via_mcp
+
+        return compute_ratio_via_mcp(formula, variables)
+    return safe_execute_formula(formula, variables)
+
+
 KNOWN_ALIASES = {
     "tesla": "Tesla",
     "amazon": "Amazon",

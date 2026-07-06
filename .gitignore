@@ -20,4 +20,5 @@ docs/DEMO.md
 docs/MY_TEST_QUERIES.md
 docs/WHY_NOT_A_TOY.md
 docs/ADR.md
-scripts/rebrand_project.py
+scripts/publish_github.ps1
+scripts/push_without_gh.ps1

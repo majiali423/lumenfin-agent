@@ -824,6 +824,7 @@ function renderManifestPanel(d){
       {k:'RAG',v:ds.rag||'—'},
       {k:'LLM',v:ds.llm||'—'},
       {k:'Embedding',v:ds.embedding||'—'},
+      {k:'Tool transport',v:ds.tool_transport||ds.tool_backend||'—'},
       {k:'PDF',v:ds.pdf_uploaded?'yes':'no'},
       {k:'JSON upload',v:ds.structured_uploaded?'yes':'no'},
     ];

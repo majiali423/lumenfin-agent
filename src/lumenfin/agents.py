@@ -25,6 +25,7 @@ from .tools import (
     extract_companies_from_query,
     generate_scenario_analysis,
     parse_with_fallback,
+    resolve_safe_formula,
     retrieve_company_payload,
     safe_execute_formula,
     summarize_document_context,
@@ -45,6 +46,7 @@ class AgentRuntime:
         company_parallelism: int = 4,
         input_guardrail_enabled: bool = True,
         input_guardrail_mode: GuardrailMode = "sanitize",
+        tool_backend: str = "local",
     ) -> None:
         self.session_memory = session_memory
         self.knowledge_memory = knowledge_memory
@@ -56,6 +58,7 @@ class AgentRuntime:
         self.company_parallelism = max(1, company_parallelism)
         self.input_guardrail_enabled = input_guardrail_enabled
         self.input_guardrail_mode = input_guardrail_mode if input_guardrail_mode in {"sanitize", "block"} else "sanitize"
+        self.tool_backend = tool_backend if tool_backend in {"local", "mcp"} else "local"
 
     def _record(
         self,
@@ -467,7 +470,11 @@ class AgentRuntime:
                             continue
                         if key == "ebitda_margin" and "ebitda" not in base_data:
                             continue
-                        metrics[key] = safe_execute_formula(formula, base_data)
+                        metrics[key] = resolve_safe_formula(
+                            formula,
+                            base_data,
+                            backend=self.tool_backend,
+                        )
                 except (KeyError, ValueError):
                     pass
 
@@ -555,6 +562,7 @@ class AgentRuntime:
             update = {
                 "financial_metrics": financial_metrics,
                 "replan_reason": None,
+                "tool_backend": self.tool_backend,
                 "peer_comparison": {
                     "summary": peer_comparison_text,
                     "metrics": financial_metrics,

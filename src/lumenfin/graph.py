@@ -118,6 +118,7 @@ class LumenFinAgentSystem:
             company_parallelism=self.app_config.company_parallelism,
             input_guardrail_enabled=self.app_config.input_guardrail_enabled,
             input_guardrail_mode=self.app_config.input_guardrail_mode,  # type: ignore[arg-type]
+            tool_backend=self.app_config.tool_backend,
         )
         self.checkpointer = InMemorySaver()
         self.graph = self._build_graph()
