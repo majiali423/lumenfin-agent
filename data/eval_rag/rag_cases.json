@@ -1,0 +1,70 @@
+[
+  {
+    "id": "apple-supply-chain",
+    "session_id": "rag-eval-apple",
+    "company": "Apple",
+    "query": "Apple supply chain risk and revenue trend",
+    "document": {
+      "document_id": "apple-eval",
+      "filename": "Apple_eval.pdf",
+      "detected_companies": ["Apple"],
+      "pages": [
+        "Apple reported revenue of 391 billion USD with services growth accelerating.",
+        "Supply chain concentration in Asia creates operational risk exposure for Apple."
+      ]
+    },
+    "relevant_terms": ["supply chain", "revenue"],
+    "k_values": [1, 3, 5]
+  },
+  {
+    "id": "msft-rnd",
+    "session_id": "rag-eval-msft",
+    "company": "Microsoft",
+    "query": "Microsoft R&D investment intensity",
+    "document": {
+      "document_id": "msft-eval",
+      "filename": "Microsoft_eval.pdf",
+      "detected_companies": ["Microsoft"],
+      "pages": [
+        "Microsoft research and development spending reached 29 billion focusing on cloud and AI.",
+        "Operating margin improved due to Azure scale efficiencies."
+      ]
+    },
+    "relevant_terms": ["research", "development", "r&d"],
+    "k_values": [1, 3, 5]
+  },
+  {
+    "id": "nvidia-gpu-demand",
+    "session_id": "rag-eval-nvda",
+    "company": "NVIDIA",
+    "query": "NVIDIA data center GPU demand and revenue outlook",
+    "document": {
+      "document_id": "nvda-eval",
+      "filename": "NVIDIA_eval.pdf",
+      "detected_companies": ["NVIDIA"],
+      "pages": [
+        "NVIDIA data center revenue surged on sustained GPU demand from hyperscale customers.",
+        "Inventory normalization in gaming segment may pressure near-term margins."
+      ]
+    },
+    "relevant_terms": ["data center", "gpu", "revenue"],
+    "k_values": [1, 3, 5]
+  },
+  {
+    "id": "tsmc-capex",
+    "session_id": "rag-eval-tsmc",
+    "company": "TSMC",
+    "query": "TSMC capital expenditure and supply chain risk",
+    "document": {
+      "document_id": "tsmc-eval",
+      "filename": "TSMC_eval.pdf",
+      "detected_companies": ["TSMC"],
+      "pages": [
+        "TSMC plans record capital expenditure to expand advanced node capacity.",
+        "Geopolitical tension elevates supply chain risk for semiconductor manufacturing."
+      ]
+    },
+    "relevant_terms": ["capital expenditure", "supply chain", "risk"],
+    "k_values": [1, 3, 5]
+  }
+]

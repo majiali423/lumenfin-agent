@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  lumenfin-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MAS_HOST: 0.0.0.0
+      MAS_PORT: 8000
+      MAS_OUTPUT_DIR: /app/outputs
+      MAS_UPLOAD_DIR: /app/uploads
+      MAS_DB_PATH: /app/data/lumenfin.db
+      MAS_DATABASE_URL: postgresql+psycopg://mas_user:mas_password@postgres:5432/lumenfin
+      MAS_REDIS_URL: redis://redis:6379/0
+      MAS_REDIS_QUEUE_NAME: finance-analysis
+      MAS_NEO4J_URI: bolt://neo4j:7687
+      MAS_NEO4J_USERNAME: neo4j
+      MAS_NEO4J_PASSWORD: neo4j_password
+      MAS_MARKET_DATA_PROVIDER: yahoo
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      MAS_API_KEY: ${MAS_API_KEY:-}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    depends_on:
+      - postgres
+      - redis
+      - neo4j
+
+  lumenfin-worker:
+    build: .
+    command: ["python", "start_worker.py"]
+    environment:
+      MAS_OUTPUT_DIR: /app/outputs
+      MAS_UPLOAD_DIR: /app/uploads
+      MAS_DB_PATH: /app/data/lumenfin.db
+      MAS_DATABASE_URL: postgresql+psycopg://mas_user:mas_password@postgres:5432/lumenfin
+      MAS_REDIS_URL: redis://redis:6379/0
+      MAS_REDIS_QUEUE_NAME: finance-analysis
+      MAS_NEO4J_URI: bolt://neo4j:7687
+      MAS_NEO4J_USERNAME: neo4j
+      MAS_NEO4J_PASSWORD: neo4j_password
+      MAS_MARKET_DATA_PROVIDER: yahoo
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    depends_on:
+      - postgres
+      - redis
+      - neo4j
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: lumenfin
+      POSTGRES_USER: mas_user
+      POSTGRES_PASSWORD: mas_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/neo4j_password
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ./data/neo4j:/data

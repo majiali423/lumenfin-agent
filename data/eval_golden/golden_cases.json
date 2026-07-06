@@ -1,0 +1,23 @@
+[
+  {
+    "id": "dual_company_compare",
+    "query": "对比分析 Apple 与 Microsoft 2025 年研发投入与供应链风险，生成合规尽调摘要。",
+    "expect_companies": ["Apple", "Microsoft"],
+    "expect_steps": ["query_planner", "retrieval", "quant", "synthesizer"],
+    "report_markers": ["Executive Summary", "Risk", "Disclaimer"]
+  },
+  {
+    "id": "single_company_deep",
+    "query": "分析 Apple 2025 财报附录中的供应链风险信号。",
+    "expect_companies": ["Apple"],
+    "expect_steps": ["retrieval", "quant", "psychologist", "critic"],
+    "report_markers": ["Financial Performance Analysis", "Compliance"]
+  },
+  {
+    "id": "pdf_upload_style",
+    "query": "基于 Tesla 财报材料评估流动性与风险披露是否充分。",
+    "expect_companies": ["Tesla"],
+    "expect_steps": ["query_planner", "retrieval", "synthesizer"],
+    "report_markers": ["Methodology", "Disclaimer"]
+  }
+]

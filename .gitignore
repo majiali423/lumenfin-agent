@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+outputs/
+!outputs/.gitkeep
+uploads/
+!uploads/.gitkeep
+test_artifacts/
+*.db
+!data/.gitkeep
+.env
+.venv/
+
+# Build artifacts
+*.egg-info/
+
+# Local notes (interview prep, not published)
+docs/INTERVIEW_PITCH.md
+docs/RESUME.md
+docs/DEMO.md
+docs/MY_TEST_QUERIES.md
+docs/WHY_NOT_A_TOY.md
+docs/ADR.md
+scripts/rebrand_project.py

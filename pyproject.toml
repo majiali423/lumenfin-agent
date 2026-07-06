@@ -1,0 +1,33 @@
+[project]
+name = "lumenfin-agent"
+version = "0.1.0"
+description = "LumenFin: evidence-grounded multi-agent financial diligence built with LangGraph."
+requires-python = ">=3.11"
+dependencies = [
+  "langgraph",
+  "networkx",
+  "fastapi",
+  "uvicorn",
+  "httpx",
+  "python-dotenv",
+  "sqlalchemy",
+  "psycopg[binary]",
+  "redis",
+  "rq",
+  "neo4j",
+  "pymupdf",
+  "python-multipart",
+  "yfinance",
+  "pymilvus[milvus_lite]>=2.4.0",
+  "milvus-lite>=3.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
