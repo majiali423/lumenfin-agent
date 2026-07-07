@@ -133,6 +133,14 @@ learning-001_*_state.json
 learning-001_*_manifest.json
 ```
 
+Interview-safe offline demo (no external LLM or market-data API):
+
+```powershell
+.\.venv\Scripts\python scripts\run_portfolio_demo.py --write
+```
+
+This prints a compact JSON summary with workflow status, companies, evaluator score, audit steps, and exported artifact paths.
+
 ### 4. Web UI + PDF upload
 
 ```powershell
@@ -180,6 +188,8 @@ Eval scripts:
 .\.venv\Scripts\python scripts\run_rag_eval.py
 ```
 
+`run_golden_eval.py` is intended as a live-quality regression check. It may call the configured LLM and market-data provider; use `run_portfolio_demo.py --write` for deterministic offline interviews.
+
 ---
 
 ## Capabilities
@@ -189,10 +199,11 @@ Eval scripts:
 | Orchestration | LangGraph `StateGraph`, conditional edges, SQLite HITL checkpoint |
 | Hybrid RAG | Milvus Lite + keyword + RRF; page-level citations in state |
 | Deterministic quant | AST-safe formulas for margins, intensity, derived ratios |
-| Offline tests | 55 unit tests; default harness avoids DeepSeek/Yahoo |
+| Offline tests | 85+ unit tests; default harness avoids DeepSeek/Yahoo |
 | RAG metrics | Recall@K, MRR, citation coverage via `run_rag_eval.py` |
 | HITL | Clarification pause + `/clarify` resume; **SQLite-backed** checkpoint |
 | Run manifest | `*_manifest.json` with latency, tokens, evaluator, `data_sources` |
+| Interview demo | `scripts/run_portfolio_demo.py --write` produces a deterministic offline report + eval artifacts |
 | Input guardrail | PDF injection pattern scan (EN + Unicode CJK patterns) |
 | Parallel fan-out | Per-company thread pool in retrieval / quant / sentiment |
 | Telemetry | `audit_log` latency/tokens on **all pipeline nodes** |

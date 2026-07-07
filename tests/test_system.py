@@ -63,6 +63,24 @@ class OfflineSystemTestCase(unittest.TestCase):
             state_payload = json.loads(Path(artifacts["state_path"]).read_text(encoding="utf-8"))
             self.assertEqual(state_payload["thread_id"], "test-replanner-offline")
 
+    def test_reused_system_starts_each_run_with_fresh_audit_log(self) -> None:
+        app = build_offline_system()
+        first = app.run("Analyze Apple FY2025 supply chain risk.", thread_id="audit-isolation-1")
+        second = app.run("Analyze Tesla FY2025 liquidity risk.", thread_id="audit-isolation-2")
+
+        expected_steps = [
+            "input_guardrail",
+            "query_planner",
+            "supervisor",
+            "retrieval",
+            "quant",
+            "psychologist",
+            "critic",
+            "synthesizer",
+        ]
+        self.assertEqual(first["audit_log"][0]["step"], "input_guardrail")
+        self.assertEqual([event["step"] for event in second["audit_log"]], expected_steps)
+
     def test_api_endpoint_offline(self) -> None:
         tmp_root = ROOT / "test_artifacts" / f"api-test-{uuid4().hex[:8]}"
         tmp_root.mkdir(parents=True, exist_ok=True)

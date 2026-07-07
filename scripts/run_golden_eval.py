@@ -13,12 +13,14 @@ if str(SRC) not in sys.path:
 
 from lumenfin import LumenFinAgentSystem
 from lumenfin.evaluation import evaluate_run_state
+from lumenfin.logging_utils import install_secret_redaction_filter
 from lumenfin.reporting import export_run_artifacts
 from lumenfin.stdio import configure_stdio_utf8
 
 
 def main() -> None:
     configure_stdio_utf8()
+    install_secret_redaction_filter()
     parser = argparse.ArgumentParser(description="Run golden evaluation cases for LumenFin.")
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--min-score", type=int, default=70)
@@ -26,10 +28,10 @@ def main() -> None:
 
     cases_path = ROOT / "data" / "eval_golden" / "golden_cases.json"
     cases = json.loads(cases_path.read_text(encoding="utf-8"))
-    app = LumenFinAgentSystem()
     results: list[dict] = []
 
     for case in cases:
+        app = LumenFinAgentSystem()
         thread_id = f"golden-{case['id']}-{int(time.time())}"
         print(f"Running {case['id']}...", flush=True)
         state = app.run(case["query"], thread_id=thread_id)

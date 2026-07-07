@@ -198,6 +198,7 @@ class LumenFinAgentSystem:
         thread_id: str = "demo-thread",
         document_contexts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        self.reasoning_memory.events.clear()
         initial_state = _base_initial_state(query, thread_id, document_contexts, self.app_config)
         config = {"configurable": {"thread_id": thread_id}}
         result = self.graph.invoke(initial_state, config=config)

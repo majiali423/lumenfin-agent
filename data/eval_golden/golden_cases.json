@@ -15,7 +15,7 @@
   },
   {
     "id": "pdf_upload_style",
-    "query": "基于 Tesla 财报材料评估流动性与风险披露是否充分。",
+    "query": "基于 Tesla FY2025 财报材料评估流动性与风险披露是否充分。",
     "expect_companies": ["Tesla"],
     "expect_steps": ["query_planner", "retrieval", "synthesizer"],
     "report_markers": ["Methodology", "Disclaimer"]
