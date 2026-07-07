@@ -62,6 +62,23 @@ class ReportingDataSourcesTestCase(unittest.TestCase):
         self.assertTrue(sources["market_ok"])
         self.assertEqual(sources["market"], "yahoo")
 
+    def test_uploaded_csv_structured_source(self) -> None:
+        sources = build_data_sources(
+            {
+                "companies": ["NVIDIA"],
+                "document_contexts": [
+                    {
+                        "filename": "nvidia_metrics.csv",
+                        "source_type": "csv",
+                        "metric_hints": {"revenue": 130.5},
+                    }
+                ],
+            }
+        )
+        self.assertEqual(sources["structured"], "uploaded_csv")
+        self.assertTrue(sources["structured_uploaded"])
+        self.assertIn("csv", sources["upload_formats"])
+
     def test_manifest_includes_data_sources(self) -> None:
         manifest = build_run_manifest(
             {"companies": ["NVIDIA"], "workflow_status": "completed"},

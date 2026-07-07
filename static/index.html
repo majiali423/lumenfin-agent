@@ -160,6 +160,12 @@ textarea.sidebar-input{min-height:100px;line-height:1.6;}
 .upload-area.has-files .upload-icon-area{background:var(--success-subtle);color:var(--success);}
 .upload-text{font-size:11.5px;color:var(--muted-foreground);font-weight:500;}
 .upload-hint{font-size:10px;color:#94a3b8;margin-top:3px;}
+.upload-formats{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-top:10px;}
+.upload-format-chip{
+  display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;
+  font-size:9px;font-weight:600;background:var(--card);color:var(--muted-foreground);
+  border:1px solid var(--border);
+}
 .upload-files{font-size:10.5px;color:var(--success);font-weight:600;margin-top:6px;line-height:1.6;}
 
 /* ═══════════ PROGRESS PANEL ═══════════ */
@@ -408,11 +414,18 @@ textarea.sidebar-input{min-height:100px;line-height:1.6;}
         <div class="upload-icon-area">
           <i data-lucide="upload" style="width:16px;height:16px;"></i>
         </div>
-        <div class="upload-text" id="uploadText">Upload PDF financial reports</div>
-        <div class="upload-hint" id="uploadHint">Drag &amp; drop or click to browse</div>
+        <div class="upload-text" id="uploadText">上传尽调材料（多格式）</div>
+        <div class="upload-hint" id="uploadHint">PDF / CSV / Excel / Markdown / JSON</div>
+        <div class="upload-formats" id="uploadFormats">
+          <span class="upload-format-chip">PDF</span>
+          <span class="upload-format-chip">CSV</span>
+          <span class="upload-format-chip">XLSX</span>
+          <span class="upload-format-chip">MD</span>
+          <span class="upload-format-chip">JSON</span>
+        </div>
         <div class="upload-files" id="fileList"></div>
       </div>
-      <input type="file" id="fileInput" accept=".pdf" multiple style="display:none;">
+      <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx,.md,.markdown,.json,application/pdf,text/csv,application/json" multiple style="display:none;">
     </div>
 
     <button class="btn btn-primary btn-cta" id="submitBtn" onclick="runAnalysis()">
@@ -606,20 +619,38 @@ async function checkHealth(){
 async function loadConfig(){try{const r=await fetch('/api/v1/config');const d=await r.json();document.getElementById('configInfo').textContent='Model: '+d.deepseek_model+' | Data: '+d.market_data_provider;}catch(e){}}
 
 // ═══════════ FILE UPLOAD ═══════════
+const SUPPORTED_UPLOAD_SUFFIXES=['.pdf','.csv','.xlsx','.md','.markdown','.json'];
+function isSupportedUploadFile(file){
+  var name=(file&&file.name||'').toLowerCase();
+  return SUPPORTED_UPLOAD_SUFFIXES.some(function(ext){return name.endsWith(ext);});
+}
+function addUploadFiles(fileList){
+  var added=0,skipped=0;
+  for(var i=0;i<fileList.length;i++){
+    var f=fileList[i];
+    if(isSupportedUploadFile(f)){uploadedFiles.push(f);added++;}
+    else skipped++;
+  }
+  if(skipped)showToast('已跳过 '+skipped+' 个不支持的文件（仅 PDF/CSV/XLSX/MD/JSON）','error');
+  if(added)updateFileList();
+}
 const fi=document.getElementById('fileInput');
-fi.addEventListener('change',function(e){for(const f of e.target.files){if(f.type==='application/pdf'||f.name.endsWith('.pdf'))uploadedFiles.push(f);}updateFileList();});
+fi.addEventListener('change',function(e){addUploadFiles(e.target.files);e.target.value='';});
 const uz=document.getElementById('uploadZone');
 uz.addEventListener('dragover',e=>{e.preventDefault();uz.style.borderColor='var(--primary)';});
 uz.addEventListener('dragleave',()=>{uz.style.borderColor=uploadedFiles.length?'rgba(5,150,105,.3)':'';});
-uz.addEventListener('drop',e=>{e.preventDefault();uz.style.borderColor=uploadedFiles.length?'rgba(5,150,105,.3)':'';for(const f of e.dataTransfer.files){if(f.type==='application/pdf'||f.name.endsWith('.pdf'))uploadedFiles.push(f);}updateFileList();});
+uz.addEventListener('drop',e=>{e.preventDefault();uz.style.borderColor=uploadedFiles.length?'rgba(5,150,105,.3)':'';addUploadFiles(e.dataTransfer.files);});
 uz.addEventListener('click',()=>fi.click());
 function updateFileList(){
   var names=uploadedFiles.map(function(f){return f.name;}).join(', ');
   document.getElementById('fileList').textContent=names;
   if(uploadedFiles.length){
-    uz.classList.add('has-files');document.getElementById('uploadText').textContent=uploadedFiles.length+' file(s) selected';
-    document.getElementById('uploadHint').textContent='Click to add more or replace';
-  }else{uz.classList.remove('has-files');document.getElementById('uploadText').textContent='Upload PDF financial reports';document.getElementById('uploadHint').textContent='Drag & drop or click to browse';}
+    uz.classList.add('has-files');document.getElementById('uploadText').textContent=uploadedFiles.length+' 个文件已选择';
+    document.getElementById('uploadHint').textContent='点击可继续添加或替换';
+  }else{
+    uz.classList.remove('has-files');document.getElementById('uploadText').textContent='上传尽调材料（多格式）';
+    document.getElementById('uploadHint').textContent='PDF / CSV / Excel / Markdown / JSON';
+  }
 }
 
 // ═══════════ TOAST ═══════════
@@ -826,7 +857,9 @@ function renderManifestPanel(d){
       {k:'Embedding',v:ds.embedding||'—'},
       {k:'Tool transport',v:ds.tool_transport||ds.tool_backend||'—'},
       {k:'PDF',v:ds.pdf_uploaded?'yes':'no'},
-      {k:'JSON upload',v:ds.structured_uploaded?'yes':'no'},
+      {k:'Structured',v:ds.structured_uploaded?'yes':'no'},
+      {k:'Markdown',v:ds.markdown_uploaded?'yes':'no'},
+      {k:'Formats',v:(ds.upload_formats&&ds.upload_formats.length)?ds.upload_formats.join(', '):'—'},
     ];
     dataSourcesHtml='<div class="manifest-section-title">Data Sources</div><div class="manifest-grid" style="grid-template-columns:repeat(4,1fr);">'+dsRows.map(function(x){
       return'<div class="manifest-item"><div class="manifest-key">'+x.k+'</div><div class="manifest-val">'+x.v+'</div></div>';

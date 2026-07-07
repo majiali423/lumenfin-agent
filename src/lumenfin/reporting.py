@@ -25,22 +25,34 @@ def build_data_sources(
     market_snapshots = result.get("market_snapshots") or {}
 
     structured_source = "none"
+    source_types = {
+        str(doc.get("source_type") or "").strip().lower()
+        for doc in document_contexts
+        if doc.get("source_type")
+    }
     has_structured_upload = any(
-        doc.get("source_type") == "structured_json"
+        doc.get("source_type") in {"structured_json", "csv", "excel"}
         or str(doc.get("filename", "")).endswith("_metrics.json")
         for doc in document_contexts
     )
-    has_pdf = any(
-        doc.get("source_type") != "structured_json"
-        and not str(doc.get("filename", "")).endswith("_metrics.json")
+    has_narrative_upload = any(
+        doc.get("source_type") in {"pdf", "markdown"}
         for doc in document_contexts
     )
+    has_pdf = "pdf" in source_types or any(
+        str(doc.get("filename", "")).lower().endswith(".pdf") for doc in document_contexts
+    )
     if has_structured_upload:
-        structured_source = "uploaded_json"
+        if "csv" in source_types:
+            structured_source = "uploaded_csv"
+        elif "excel" in source_types:
+            structured_source = "uploaded_excel"
+        else:
+            structured_source = "uploaded_json"
     elif any(company in SAMPLE_FINANCIAL_DATA for company in companies):
         structured_source = "sample_db"
-    elif document_contexts and not has_structured_upload:
-        structured_source = "pdf_extracted"
+    elif has_narrative_upload:
+        structured_source = "document_extracted"
 
     rag_used = any(bool(hits) for hits in rag_evidence.values())
     chunks_indexed = int(rag_index_stats.get("chunks_indexed") or 0)
@@ -52,6 +64,8 @@ def build_data_sources(
         rag_status = "indexed_no_hits"
     elif has_pdf:
         rag_status = "pdf_no_index"
+    elif has_narrative_upload:
+        rag_status = "document_no_index"
     else:
         rag_status = "skipped"
 
@@ -74,6 +88,8 @@ def build_data_sources(
         "tool_transport": tool_backend or result.get("tool_backend") or "local",
         "pdf_uploaded": has_pdf,
         "structured_uploaded": has_structured_upload,
+        "upload_formats": sorted(source_types) if source_types else [],
+        "markdown_uploaded": "markdown" in source_types,
     }
 
 

@@ -45,6 +45,7 @@ def parse_pdf_document(file_path: Path) -> dict[str, Any]:
         "excerpt": full_text[:4000],
         "detected_companies": detected_companies,
         "metric_hints": metric_hints,
+        "source_type": "pdf",
     }
 
 

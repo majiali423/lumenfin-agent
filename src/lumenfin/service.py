@@ -7,7 +7,7 @@ from .checkpoint_store import WorkflowCheckpointRepository
 from .config import AppConfig
 from .database import JobRepository
 from .data_ingest import structured_metrics_to_document_contexts
-from .documents import parse_pdf_document
+from .document_ingest import parse_upload_documents
 from .graph import LumenFinAgentSystem
 from .llm import BaseLLMClient
 from .market_data import MarketDataClient
@@ -79,7 +79,9 @@ class LumenFinAnalysisService:
     ) -> dict:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
         system = self._system_for(actual_thread_id)
-        document_contexts = [parse_pdf_document(Path(path)) for path in (document_paths or [])]
+        document_contexts: list[dict] = []
+        for path in document_paths or []:
+            document_contexts.extend(parse_upload_documents(Path(path)))
         if structured_metrics:
             document_contexts.extend(structured_metrics_to_document_contexts(structured_metrics))
         result = system.run(query, thread_id=actual_thread_id, document_contexts=document_contexts)

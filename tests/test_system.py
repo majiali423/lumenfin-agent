@@ -113,6 +113,39 @@ class OfflineSystemTestCase(unittest.TestCase):
             payload = response.json()
             self.assertIn("Apple", payload["final_report"])
 
+    def test_upload_csv_endpoint_offline(self) -> None:
+        tmp_root = ROOT / "test_artifacts" / f"upload-csv-{uuid4().hex[:8]}"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        app = create_app(
+            build_test_config(tmp_root),
+            llm_client=LocalFallbackLLMClient(),
+            market_data_client=FakeMarketDataClient(),
+        )
+        csv_body = (
+            "company,revenue_2025,ebitda_2025\n"
+            "NVIDIA,130.5,75.2\n"
+        ).encode("utf-8")
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/analyze-upload",
+                data={
+                    "query": "请基于上传的 NVIDIA 结构化指标输出尽调速写。",
+                    "thread_id": "upload-csv-offline",
+                    "export_artifacts": "false",
+                },
+                files={"files": ("nvidia_metrics.csv", csv_body, "text/csv")},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            state = payload.get("state") or {}
+            metrics = state.get("financial_metrics") or {}
+            self.assertIn("NVIDIA", metrics)
+            self.assertAlmostEqual(metrics["NVIDIA"]["ebitda_margin"], round(75.2 / 130.5, 4))
+            self.assertIn("NVIDIA", payload.get("final_report", ""))
+            manifest = payload.get("run_manifest") or {}
+            upload_formats = (manifest.get("data_sources") or {}).get("upload_formats") or []
+            self.assertIn("csv", upload_formats)
+
 
 @unittest.skipUnless(os.getenv("RUN_INTEGRATION_TESTS") == "1", "set RUN_INTEGRATION_TESTS=1 for live API tests")
 class IntegrationSystemTestCase(unittest.TestCase):

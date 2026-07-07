@@ -7,6 +7,7 @@
 | 编排 | 单 prompt / ReAct loop | LangGraph 显式状态机 |
 | 数字 | 模型口述 | `quant` 节点 AST 计算 |
 | 证据 | 可选引用 | Hybrid RAG + `rag_evidence` + citation |
+| 上传 | 多为 PDF | PDF / CSV / Excel / Markdown / JSON（统一 `document_context`） |
 | 质量 | 主观阅读 | `golden_eval` / `rag_eval` / trace scorer |
 | 失败 | 胡编或报错 | replanner -> degraded mode |
 

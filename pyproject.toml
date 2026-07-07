@@ -16,6 +16,7 @@ dependencies = [
   "rq",
   "neo4j",
   "pymupdf",
+  "openpyxl>=3.1.0",
   "python-multipart",
   "yfinance",
   "pymilvus[milvus_lite]>=2.4.0",

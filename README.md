@@ -197,7 +197,7 @@ Eval scripts:
 | Parallel fan-out | Per-company thread pool in retrieval / quant / sentiment |
 | Telemetry | `audit_log` latency/tokens on **all pipeline nodes** |
 | Repair loop | Critic-driven router-retry prototype (max 2 iterations) |
-| Structured ingest | JSON metrics API (`/api/v1/analyze-data`) |
+| Structured ingest | JSON metrics API (`/api/v1/analyze-data`) + JSON/CSV/Excel/Markdown file upload |
 | Tool transport | `local` in-process or `mcp` stdio for quant ratios |
 | MCP tool layer | `mcp_layer/servers` + `scripts/run_mcp_tools_demo.py` |
 
@@ -205,7 +205,7 @@ Eval scripts:
 
 - Production multi-tenant auth, LLM-based repair policy, cross-encoder rerank
 - Full LangGraph Postgres channel saver (snapshot checkpoint only)
-- CSV/Excel upload UI (use JSON API or PDF)
+- Image/chart OCR upload (use PDF or structured files)
 - Investment advice or trade execution
 
 See [docs/architecture_decisions.md](docs/architecture_decisions.md) for design rationale.
