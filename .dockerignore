@@ -2,10 +2,13 @@
 __pycache__
 .pytest_cache
 outputs
+output
 uploads
 test_artifacts
 .env
 .venv
+.cursor
+docs/DEBUG_LOG.md
 *.db
 tests
 *.pyc
