@@ -32,6 +32,7 @@ class MilvusRAGStore:
 
     def _ensure_collection(self) -> None:
         if self.client.has_collection(self.collection_name):
+            self._ensure_loaded()
             return
         self.client.create_collection(
             collection_name=self.collection_name,
@@ -39,6 +40,18 @@ class MilvusRAGStore:
             auto_id=False,
             enable_dynamic_field=True,
         )
+        self._ensure_loaded()
+
+    def _ensure_loaded(self) -> None:
+        if not self.client.has_collection(self.collection_name):
+            return
+        try:
+            load_state = self.client.get_load_state(self.collection_name)
+            if isinstance(load_state, dict) and load_state.get("state") == "Loaded":
+                return
+        except Exception:
+            pass
+        self.client.load_collection(self.collection_name)
 
     def reset_collection(self) -> None:
         if self.client.has_collection(self.collection_name):
@@ -75,6 +88,7 @@ class MilvusRAGStore:
             row["vector"] = vector
 
         self.client.upsert(collection_name=self.collection_name, data=rows)
+        self._ensure_loaded()
         return {
             "chunks_indexed": len(rows),
             "documents_indexed": len(documents),
@@ -94,6 +108,7 @@ class MilvusRAGStore:
         filter_expr = f'session_id == "{session_id}"'
         fetch_limit = top_k * 4 if companies else top_k
 
+        self._ensure_loaded()
         results = self.client.search(
             collection_name=self.collection_name,
             data=[query_vector],

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import contextmanager
 from typing import Any, Iterator
 
 from .input_guardrail import GuardrailMode, guard_documents
 from .clarification import merge_clarification_into_query
 from .critic_repair import classify_critic_repair_target
+from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
 from .knowledge_store import KnowledgeStore
 from .llm import BaseLLMClient
-from .market_data import MarketDataClient
+from .market_data import MarketDataClient, summarize_market_snapshots
 from .memory import ReasoningMemory, SessionMemory
 from .observability import StepTimer, merge_telemetry
 from .parallel import map_in_parallel
@@ -249,6 +251,7 @@ class AgentRuntime:
                 "task_brief": task_brief,
                 "retrieved_docs": {},
                 "market_snapshots": {},
+                "market_data_status": {},
                 "appendix_search_done": state.get("appendix_search_done", False),
                 "retries": state.get("retries", 0),
                 "degraded_mode": state.get("degraded_mode", False),
@@ -303,9 +306,10 @@ class AgentRuntime:
                 state.get("target_symbols", {}).get(company),
             )
         except Exception as exc:
+            ticker = state.get("target_symbols", {}).get(company, company)
             live_market = {
                 "provider": getattr(self.market_data_client, "provider", "unknown"),
-                "symbol": state.get("target_symbols", {}).get(company, company),
+                "symbol": ticker,
                 "company": company,
                 "current_price": None,
                 "monthly_return": None,
@@ -316,6 +320,10 @@ class AgentRuntime:
                 "industry": None,
                 "fifty_two_week_high": None,
                 "fifty_two_week_low": None,
+                "status": "failed",
+                "from_cache": False,
+                "fetched_at": None,
+                "provider_chain": [getattr(self.market_data_client, "provider", "unknown")],
                 "error": str(exc),
             }
         payload["live_market"] = live_market
@@ -338,8 +346,30 @@ class AgentRuntime:
             f"Provide a concise ~150-word enterprise profile for {company} covering: "
             f"(1) Core business segments and revenue mix, (2) Competitive moat and market position, "
             f"(3) Key strategic initiatives (R&D, M&A, expansion), (4) Recent material events. "
-            f"Output in Chinese, factual and professional tone."
+            f"Output in English, factual and professional tone."
         )
+        def _looks_non_english(text: str) -> bool:
+            return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+        def _looks_incomplete(text: str) -> bool:
+            cleaned = (text or "").strip()
+            if not cleaned:
+                return True
+            if cleaned[-1] not in ".!?":
+                return True
+            tail = cleaned[-40:].lower()
+            incomplete_markers = (
+                "approximately",
+                "including",
+                "such as",
+                "e.g.",
+                "etc",
+                "and",
+                "or",
+                "with",
+            )
+            return any(tail.endswith(marker) for marker in incomplete_markers)
+
         try:
             profile = self.llm_client.chat(
                 system_prompt="You are an equity research analyst. Write factual, professional company profiles.",
@@ -347,6 +377,26 @@ class AgentRuntime:
                 temperature=0.2,
                 max_tokens=280,
             )
+            if _looks_non_english(profile) or _looks_incomplete(profile):
+                profile = self.llm_client.chat(
+                    system_prompt=(
+                        "You are an equity research analyst. Rewrite the profile in clean, complete English only. "
+                        "Do not include Chinese characters. End with a complete sentence."
+                    ),
+                    user_prompt=profile,
+                    temperature=0.1,
+                    max_tokens=280,
+                )
+            if _looks_non_english(profile) or _looks_incomplete(profile):
+                profile = self.llm_client.chat(
+                    system_prompt=(
+                        "Write exactly 4 complete English sentences summarizing company profile, moat, strategy, "
+                        "and latest material event. No lists. No truncation."
+                    ),
+                    user_prompt=f"Company: {company}. Keep it concise and complete.",
+                    temperature=0.0,
+                    max_tokens=220,
+                )
         except Exception:
             profile = f"Profile generation pending for {company}."
 
@@ -404,14 +454,19 @@ class AgentRuntime:
                     rag_evidence[company] = bundle["rag_hits"]
 
             needs_appendix = any(
-                "appendix" not in p and not p.get("source_documents") and not market_snapshots.get(c)
+                "appendix" not in p
+                and not p.get("source_documents")
+                and not (market_snapshots.get(c) or {}).get("current_price")
                 for c, p in retrieved_docs.items()
             )
+            market_status = summarize_market_snapshots(market_snapshots)
+
             replan_reason = "Appendix data gap detected; switching to targeted supplementary retrieval." if needs_appendix else None
 
             update: FinanceState = {
                 "retrieved_docs": retrieved_docs,
                 "market_snapshots": market_snapshots,
+                "market_data_status": market_status,
                 "knowledge_snapshot": self.knowledge_memory.snapshot(),
                 "replan_reason": replan_reason,
                 "company_profiles": company_profiles,
@@ -429,6 +484,12 @@ class AgentRuntime:
                     f" Hybrid Milvus RAG retrieved {rag_chunks} evidence chunks "
                     f"(vector + keyword RRF, indexed {rag_index_stats.get('chunks_indexed', 0)} chunks)."
                 )
+            if market_status.get("total_count"):
+                detail += (
+                    f" Market API: {market_status['ok_count']}/{market_status['total_count']} "
+                    f"snapshots ok (primary={getattr(self.market_data_client, 'provider', 'unknown')}, "
+                    f"fallback={getattr(self.market_data_client, 'fallback_provider', 'yahoo')})."
+                )
             update.update(self._record("retrieval", "needs_replan" if replan_reason else "ok", detail, state, timer.metrics()))
             self.session_memory.save({**state, **update})
             return update
@@ -445,6 +506,14 @@ class AgentRuntime:
         market = payload["market_data"]
         live_market = state.get("market_snapshots", {}).get(company, {})
         metrics: dict[str, float] = {}
+        metric_confidence: dict[str, dict[str, Any]] = {}
+
+        def set_confidence(metric_key: str, score: float, basis: str) -> None:
+            metric_confidence[metric_key] = {
+                "score": round(score, 2),
+                "level": "High" if score >= 0.85 else ("Medium" if score >= 0.6 else "Low"),
+                "basis": basis,
+            }
 
         base_data: dict[str, float] = {}
         if market.get("revenue_2025"):
@@ -475,30 +544,41 @@ class AgentRuntime:
                             base_data,
                             backend=self.tool_backend,
                         )
+                        set_confidence(key, 0.95, "AST")
                 except (KeyError, ValueError):
                     pass
 
         derived = calculate_derived_ratios(market)
         for key, value in derived.items():
             metrics.setdefault(key, value)
+            if key not in metric_confidence:
+                set_confidence(key, 0.72, "Derived")
 
         cap = live_market.get("market_cap")
+        live_status = str(live_market.get("status") or "ok")
+        live_conf = 0.8 if live_status == "ok" else (0.75 if live_status == "cached" else 0.55)
+        live_basis = "LiveAPI" if live_status == "ok" else f"LiveAPI ({live_status})"
         if cap is not None:
             metrics["market_cap_billion"] = round(float(cap) / 1_000_000_000, 4)
+            set_confidence("market_cap_billion", live_conf, live_basis)
         ret = live_market.get("monthly_return")
         if ret is not None:
             metrics["monthly_return"] = float(ret)
+            set_confidence("monthly_return", live_conf, live_basis)
         cp = live_market.get("current_price")
         if cp is not None:
             metrics["current_price"] = float(cp)
+            set_confidence("current_price", live_conf, live_basis)
         pe = live_market.get("trailing_pe")
         if pe is not None:
             metrics["pe_ratio"] = float(pe)
+            set_confidence("pe_ratio", live_conf, live_basis)
         high = live_market.get("fifty_two_week_high")
         low = live_market.get("fifty_two_week_low")
         price = live_market.get("current_price")
         if all(v is not None for v in (high, low, price)) and float(high) != float(low):
             metrics["range_position"] = round((float(price) - float(low)) / (float(high) - float(low)), 4)
+            set_confidence("range_position", live_conf * 0.97, live_basis)
 
         if not metrics:
             return {
@@ -509,6 +589,7 @@ class AgentRuntime:
             "company": company,
             "metrics": metrics,
             "scenario": generate_scenario_analysis(metrics, company),
+            "metric_confidence": metric_confidence,
         }
 
     def quantitative_analyst(self, state: FinanceState) -> FinanceState:
@@ -527,6 +608,7 @@ class AgentRuntime:
 
             financial_metrics: dict[str, dict[str, float]] = {}
             scenario_analyses: dict[str, dict[str, Any]] = {}
+            metric_confidence: dict[str, dict[str, dict[str, Any]]] = {}
             for result in quant_results:
                 if result.get("replan_reason"):
                     update = {"replan_reason": result["replan_reason"]}
@@ -535,6 +617,7 @@ class AgentRuntime:
                 company = result["company"]
                 financial_metrics[company] = result["metrics"]
                 scenario_analyses[company] = result["scenario"]
+                metric_confidence[company] = result.get("metric_confidence", {})
 
             peer_comparison_text = ""
             try:
@@ -542,7 +625,7 @@ class AgentRuntime:
                 peer_comparison_text = self.llm_client.chat(
                     system_prompt=(
                         "You are a senior quantitative analyst. Based on the provided metrics, "
-                        "write a 2-3 sentence peer comparison in Chinese. Structure: "
+                        "write a 2-3 sentence peer comparison in English. Structure: "
                         "(1) Which company leads on profitability and why, "
                         "(2) Which leads on innovation efficiency, "
                         "(3) Key competitive dynamics revealed by the data."
@@ -561,6 +644,7 @@ class AgentRuntime:
             )
             update = {
                 "financial_metrics": financial_metrics,
+                "metric_confidence": metric_confidence,
                 "replan_reason": None,
                 "tool_backend": self.tool_backend,
                 "peer_comparison": {
@@ -651,7 +735,7 @@ class AgentRuntime:
             avg_risk = sum(sum(s.values()) for s in risk_scores.values()) / max(len(risk_scores) * 5, 1)
             compliance_summary = self.llm_client.chat(
                 system_prompt=(
-                    "You are a financial compliance audit expert. Provide a 2-3 sentence audit opinion in Chinese. "
+                    "You are a financial compliance audit expert. Provide a 2-3 sentence audit opinion in English. "
                     "Address: (1) Data completeness assessment, (2) Risk exposure evaluation, "
                     "(3) Specific compliance recommendations. Be factual and actionable."
                 ),
@@ -725,6 +809,14 @@ class AgentRuntime:
             return self._synthesize_report(state, timer)
 
     def _synthesize_report(self, state: FinanceState, timer: StepTimer) -> FinanceState:
+        def ensure_sentence_complete(text: str) -> str:
+            cleaned = (text or "").strip()
+            if not cleaned:
+                return cleaned
+            if cleaned[-1] not in ".!?。！？)]】":
+                return cleaned + "。"
+            return cleaned
+
         doc_context = ""
         rag_citation_lines: list[str] = []
         if state.get("rag_evidence"):
@@ -755,12 +847,16 @@ class AgentRuntime:
         sentiment_context = json.dumps(state.get("sentiment_analysis", {}), ensure_ascii=False)
         risk_context = json.dumps(state.get("risk_scores", {}), ensure_ascii=False)
         peer_context = state.get("peer_comparison", {}).get("summary", "")
+        has_uploaded_docs = bool(state.get("document_contexts"))
+        market_snapshots = state.get("market_snapshots", {})
+        market_ok = any(snap.get("current_price") is not None for snap in market_snapshots.values())
+        unverified_note = "_Source: LLM knowledge (unverified in this run)._"
 
         # ── Executive Summary (Enhanced) ──
         llm_summary = self.llm_client.chat(
             system_prompt=(
                 "You are the Director of Research at an institutional investment firm. "
-                "Write a 4-5 sentence executive summary in Chinese that demonstrates rigorous analytical reasoning. "
+                "Write a 4-5 sentence executive summary in English that demonstrates rigorous analytical reasoning. "
                 "Structure: (1) Top-line finding with specific metric evidence, "
                 "(2) Risk-return profile characterization, "
                 "(3) Key competitive insight, "
@@ -778,6 +874,7 @@ class AgentRuntime:
             ),
             temperature=0.2, max_tokens=500,
         )
+        llm_summary = ensure_sentence_complete(llm_summary)
 
         # ── Report Construction ──
         sections: list[str] = []
@@ -806,9 +903,11 @@ class AgentRuntime:
 
         S(f"## 3. Company Profiles & Business Overview")
         for company in state["companies"]:
-            profile = state.get("company_profiles", {}).get(company, "Profile not available.")
+            profile = ensure_sentence_complete(state.get("company_profiles", {}).get(company, "Profile not available."))
             S(f"### {company}")
             S(f"{profile}")
+            if not has_uploaded_docs:
+                S(unverified_note)
             S("")
 
         S(f"## 4. Financial Performance Analysis")
@@ -829,27 +928,64 @@ class AgentRuntime:
             if metrics:
                 S(f"**Key Financial Indicators**")
                 S("")
-                S("| Metric | Value | Benchmark | Assessment | Rationale |")
-                S("|--------|-------|-----------|------------|-----------|")
+                S("| Metric | Value | Benchmark | Assessment | Data Quality | Confidence | Basis | Rationale |")
+                S("|--------|-------|-----------|------------|--------------|------------|-------|-----------|")
+
+                metric_conf = state.get("metric_confidence", {}).get(company, {})
+
+                def assess_metric(metric_key: str, value: float) -> tuple[str, str]:
+                    if metric_key == "ebitda_margin":
+                        if value >= 0.25:
+                            return "Strong", "EBITDA margin is well above the >25% benchmark"
+                        if value >= 0.15:
+                            return "Adequate", "EBITDA margin is positive but below top-tier threshold"
+                        return "Weak", "EBITDA margin is below a robust profitability level"
+                    if metric_key == "operating_margin":
+                        if value >= 0.20:
+                            return "Strong", "Operating margin exceeds the >20% benchmark"
+                        if value >= 0.12:
+                            return "Adequate", "Operating margin is moderate versus benchmark"
+                        return "Weak", "Operating margin is below the desired benchmark"
+                    if metric_key == "estimated_net_margin":
+                        if value >= 0.15:
+                            return "Strong", "Estimated net margin exceeds the >15% benchmark"
+                        if value >= 0.08:
+                            return "Adequate", "Estimated net margin is moderate versus benchmark"
+                        return "Weak", "Estimated net margin is below the desired benchmark"
+                    if metric_key == "estimated_fcf_margin":
+                        if value >= 0.10:
+                            return "Strong", "Estimated FCF yield exceeds the >10% benchmark"
+                        if value >= 0.05:
+                            return "Adequate", "Estimated FCF yield is positive but below benchmark"
+                        return "Weak", "Estimated FCF yield is weak versus benchmark"
+                    if metric_key == "r_and_d_intensity":
+                        if 0.05 <= value <= 0.15:
+                            return "Strong", "R&D intensity is in the target 5-15% range"
+                        if 0.03 <= value < 0.05 or 0.15 < value <= 0.20:
+                            return "Adequate", "R&D intensity is outside ideal range but still serviceable"
+                        return "Weak", "R&D intensity is materially outside the target range"
+                    return "—", "No benchmark-based assessment"
 
                 def add_row(metric_key, label, benchmark, value=None):
                     v = value if value is not None else metrics.get(metric_key)
-                    if v is None: return
+                    if v is None:
+                        return
+                    conf = metric_conf.get(metric_key, {})
+                    conf_level = conf.get("level", "N/A")
+                    conf_score = conf.get("score")
+                    conf_display = f"{conf_score:.2f}" if isinstance(conf_score, (float, int)) else "N/A"
+                    basis = str(conf.get("basis", "N/A"))
                     if metric_key in ("ebitda_margin", "r_and_d_intensity", "operating_margin", "estimated_net_margin", "estimated_fcf_margin"):
-                        grade = "Strong" if v > 0.25 else ("Adequate" if v > 0.12 else "Weak")
-                        rationale = (f"EBITDA of {v:.1%} indicates robust operational efficiency" if "EBITDA" in label else
-                                     f"R&D spend at {v:.1%} of revenue" if "R&D" in label else
-                                     f"At {v:.1%}, reflects effective cost management" if "Margin" in label else
-                                     f"FCF generation at {v:.1%} of revenue")
-                        S(f"| {label} | {v:.2%} | {benchmark} | {grade} | {rationale} |")
+                        grade, rationale = assess_metric(metric_key, float(v))
+                        S(f"| {label} | {v:.2%} | {benchmark} | {grade} | {conf_level} | {conf_display} | {basis} | {rationale} |")
                     elif metric_key == "pe_ratio":
-                        S(f"| {label} | {v:.2f}x | {benchmark} | — | Market-implied valuation multiple |")
+                        S(f"| {label} | {v:.2f}x | {benchmark} | — | {conf_level} | {conf_display} | {basis} | Market-implied valuation multiple |")
                     elif metric_key == "monthly_return":
                         direction = "Upward momentum" if v > 0 else "Downward pressure"
-                        S(f"| {label} | {v:.2%} | {benchmark} | — | {direction} |")
+                        S(f"| {label} | {v:.2%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | {direction} |")
                     elif metric_key == "range_position":
                         position = "Near highs" if v > 0.7 else ("Near lows" if v < 0.3 else "Mid-range")
-                        S(f"| {label} | {v:.1%} | {benchmark} | — | 52-week {position} |")
+                        S(f"| {label} | {v:.1%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | 52-week {position} |")
 
                 add_row("ebitda_margin", "EBITDA Margin", ">25%")
                 add_row("operating_margin", "Operating Margin", ">20%")
@@ -930,6 +1066,8 @@ class AgentRuntime:
             S(f"- **Supply Chain Resilience**: {' Well-diversified supply base with multiple contingency options' if risk_level == 'low' else ' Moderate concentration risk requiring active monitoring and dual-sourcing strategies' if risk_level == 'medium' else ' Significant concentration exposure necessitating strategic inventory buffers and alternative supplier development'}")
             S(f"- **Regulatory Landscape**: Technology sector faces evolving antitrust, data privacy, and AI governance frameworks across major jurisdictions")
             S(f"- **Macro Sensitivity**: {' Lower cyclicality due to diversified revenue streams and recurring service income' if ebitda_m > 0.30 else ' Moderate exposure to consumer and enterprise spending cycles'}")
+            if not has_uploaded_docs and not market_ok:
+                S(f"- {unverified_note}")
             S("")
 
         # ── SWOT ──
@@ -942,16 +1080,34 @@ class AgentRuntime:
             risk = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
             ebitda_m = metrics.get("ebitda_margin", 0)
             rd_i = metrics.get("r_and_d_intensity", 0)
+            fcf_m = metrics.get("estimated_fcf_margin", 0)
             tone = sentiment.get("label", "neutral")
+            risk_data = state.get("risk_scores", {}).get(company, {})
+            financial_risk = risk_data.get("financial_risk", 5.0)
 
-            strengths = ["Strong financial fundamentals with healthy margin profile"] if ebitda_m > 0.20 else ["Adequate baseline profitability"]
-            if rd_i > 0.05: strengths.append("Above-peer R&D investment sustaining innovation pipeline")
-            if tone == "bullish": strengths.append("Management demonstrates high conviction and strategic clarity")
-
+            strengths = []
             weaknesses = []
-            if ebitda_m < 0.15: weaknesses.append("Margin profile below industry leadership threshold")
-            if rd_i < 0.03: weaknesses.append("R&D intensity may lag innovation requirements")
-            if risk.get("risk_level") != "low": weaknesses.append(f"Supply chain risk exposure at '{risk.get('risk_level')}' level")
+            if ebitda_m >= 0.35:
+                strengths.append("Exceptionally strong profitability and operating leverage")
+            elif ebitda_m >= 0.20:
+                strengths.append("Solid profitability with scalable operating model")
+            else:
+                weaknesses.append("Profitability remains below top-tier peer levels")
+            if 0.05 <= rd_i <= 0.15:
+                strengths.append("Balanced R&D intensity supports efficient innovation conversion")
+            elif rd_i > 0.15:
+                strengths.append("Aggressive R&D investment signals strong innovation intent")
+                if fcf_m < 0.10:
+                    weaknesses.append("High R&D intensity currently compresses free-cash-flow quality")
+            else:
+                weaknesses.append("R&D intensity may be insufficient for long-cycle technology leadership")
+            if tone == "bullish":
+                strengths.append("Management communication remains constructive with strategic continuity")
+
+            if risk.get("risk_level") != "low":
+                weaknesses.append(f"Supply chain risk exposure remains at '{risk.get('risk_level')}' level")
+            if financial_risk > 5.5:
+                weaknesses.append("Financial risk score indicates elevated balance-sheet/earnings volatility")
 
             opportunities = ["Technology-driven productivity gains and digital transformation", "Emerging market expansion with favorable demographic trends"]
             threats = ["Macroeconomic uncertainty including monetary policy shifts", "Intensifying competitive dynamics and potential disruption", "Evolving regulatory landscape across jurisdictions"]
@@ -1000,9 +1156,18 @@ class AgentRuntime:
             metrics = state.get("financial_metrics", {}).get(company, {})
             sentiment = state.get("sentiment_analysis", {}).get(company, {})
             ebitda_m = metrics.get("ebitda_margin", 0)
+            fcf_m = metrics.get("estimated_fcf_margin", 0)
             tone = sentiment.get("label", "neutral")
+            risk_data = state.get("risk_scores", {}).get(company, {})
+            financial_risk = risk_data.get("financial_risk", 5.0)
+            cautious_gate = financial_risk > 5.5 or fcf_m < 0.10
 
-            if ebitda_m > 0.25 and tone == "bullish":
+            if cautious_gate:
+                bull = (f"Growth optionality exists, but current risk profile is elevated (financial risk {financial_risk:.1f}/10, "
+                        f"FCF yield {fcf_m:.1%}). Recommend cautious accumulation with strict position sizing.")
+                bear = ("Maintain a defensive posture until cash-flow quality and risk metrics improve. "
+                        "Set explicit risk limits and rebalance on adverse execution signals.")
+            elif ebitda_m > 0.25 and tone == "bullish":
                 bull = (f"Strong profitability (EBITDA margin {ebitda_m:.1%}) combined with confident management guidance "
                         f"suggests earnings visibility above consensus. Recommend overweight position with disciplined entry on pullbacks.")
                 bear = (f"Premium valuation may limit near-term upside. Key downside risks include competitive disruption "
@@ -1029,13 +1194,17 @@ class AgentRuntime:
             S("## 9. Competitive Landscape & Peer Benchmarking")
             S("")
             S(state["peer_comparison"]["summary"])
+            if not has_uploaded_docs and not market_ok:
+                S(unverified_note)
             S("")
 
         # ── Compliance ──
         S("## 10. Compliance Review & Data Integrity")
         S("")
         if state.get("compliance_summary"):
-            S(f"**Audit Opinion:** {state['compliance_summary']}")
+            compliance_summary = str(state["compliance_summary"]).strip()
+            compliance_summary = re.sub(r"^\**\s*Audit Opinion:\s*\**\s*", "", compliance_summary, flags=re.IGNORECASE)
+            S(f"**Audit Opinion:** {compliance_summary}")
             S("")
         if state.get("compliance_findings"):
             S("**Identified Issues:**")
@@ -1056,7 +1225,70 @@ class AgentRuntime:
         S("")
         S("**Analytical Methods:** AST-safe expression evaluator for numerical computation; LLM-based deep semantic analysis for sentiment extraction; multi-factor risk scoring model with evidence-based calibration; LangGraph-directed multi-agent orchestration with checkpoint-based state persistence.")
         S("")
-        S("**Data Sources:** Uploaded PDF financial documents (PyMuPDF parsing + Milvus Lite vector index); hybrid retrieval with citation-backed evidence chunks; real-time market data via financial data provider APIs; curated sample financial database; LLM knowledge base for industry context and company profiles.")
+        document_contexts = state.get("document_contexts", [])
+        market_snapshots = state.get("market_snapshots", {})
+        rag_evidence = state.get("rag_evidence", {})
+        companies = state.get("companies", [])
+        sample_companies = [c for c in companies if c in SAMPLE_FINANCIAL_DATA]
+        market_ok = sum(1 for snap in market_snapshots.values() if snap.get("current_price") is not None)
+        market_total = len(market_snapshots)
+        rag_chunks = sum(len(hits) for hits in rag_evidence.values())
+
+        source_parts: list[str] = []
+        if document_contexts:
+            source_types = sorted(
+                {
+                    str(doc.get("source_type") or "unknown")
+                    for doc in document_contexts
+                }
+            )
+            source_parts.append(
+                f"Uploaded documents: {len(document_contexts)} file(s), types={', '.join(source_types)}."
+            )
+        else:
+            source_parts.append("Uploaded documents: none (no user files were provided for this run).")
+
+        if rag_chunks > 0:
+            source_parts.append(f"RAG evidence: Milvus hybrid retrieval returned {rag_chunks} cited chunk(s).")
+        elif document_contexts:
+            source_parts.append("RAG evidence: enabled but no cited chunk was retrieved in this run.")
+        else:
+            source_parts.append("RAG evidence: not applicable because no documents were uploaded.")
+
+        if market_total:
+            source_parts.append(
+                f"Market data API: {market_ok}/{market_total} company snapshots succeeded; "
+                "per-company failures degrade only that entity's live-market metrics."
+            )
+        else:
+            source_parts.append("Market data API: no market snapshots requested.")
+
+        if sample_companies:
+            source_parts.append(f"Structured fundamentals: sample financial database used for {', '.join(sample_companies)}.")
+        else:
+            source_parts.append("Structured fundamentals: derived from uploaded structured documents when available.")
+
+        source_parts.append("Narrative analysis: generated by the configured LLM using retrieved evidence and computed metrics.")
+        S(f"**Data Sources:** {' '.join(source_parts)}")
+        if market_total:
+            S("")
+            S("**Market Data by Company:**")
+            for company in companies:
+                snap = market_snapshots.get(company, {})
+                symbol = snap.get("symbol") or state.get("target_symbols", {}).get(company, company)
+                status = snap.get("status") or ("ok" if snap.get("current_price") is not None else "failed")
+                provider = snap.get("provider") or "unknown"
+                as_of = snap.get("fetched_at") or "n/a"
+                if snap.get("current_price") is not None:
+                    S(
+                        f"- {company} ({symbol}): status={status}, provider={provider}, "
+                        f"as_of={as_of}, price={snap.get('current_price')}."
+                    )
+                else:
+                    err = snap.get("error") or "no live price returned"
+                    S(f"- {company} ({symbol}): status=failed, error={err}.")
+            S("")
+        S("**Source Attribution by Output Type:** Quant tables use deterministic AST calculations on structured inputs; sentiment and profile sections use LLM analysis grounded in retrieved quotes/doc excerpts; risk matrix combines quantitative metrics, supply-chain signals, and sentiment risk flags.")
         S("")
         S("**Disclaimer:** This report is generated by an AI-powered multi-agent system for research and demonstration purposes only. It does not constitute investment advice, a solicitation, or a recommendation to buy or sell any security. All investment decisions involve risk and should be made in consultation with qualified financial professionals. Past performance and AI-generated projections are not indicative of future results.")
 

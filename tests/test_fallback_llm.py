@@ -33,6 +33,20 @@ class FallbackLLMTestCase(unittest.TestCase):
         companies = extract_companies_from_query("NVIDIA FY2025 数据中心 GPU 收入", llm_client=client)
         self.assertEqual(companies, ["NVIDIA"])
 
+    def test_company_extractor_returns_nvidia_and_amd_for_compare_query(self) -> None:
+        query = "Compare NVIDIA and AMD FY2025 R&D intensity"
+        companies = extract_companies_from_query(query)
+        self.assertEqual(companies, ["NVIDIA", "AMD"])
+
+    def test_company_extractor_merges_llm_results_with_heuristics(self) -> None:
+        class MockLLM:
+            def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.0, max_tokens: int = 100) -> str:
+                return '{"companies": ["AMD", "NVIDIA"]}'
+
+        query = "Compare NVIDIA and AMD FY2025 R&D intensity"
+        companies = extract_companies_from_query(query, llm_client=MockLLM())
+        self.assertEqual(companies, ["NVIDIA", "AMD"])
+
 
 if __name__ == "__main__":
     unittest.main()

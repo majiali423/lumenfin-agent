@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 outputs/
 !outputs/.gitkeep
+output/
 uploads/
 !uploads/.gitkeep
 test_artifacts/
@@ -14,6 +15,8 @@ test_artifacts/
 *.egg-info/
 
 # Local notes (interview prep, not published)
+.cursor/
+docs/DEBUG_LOG.md
 docs/INTERVIEW_PITCH.md
 docs/RESUME.md
 docs/DEMO.md

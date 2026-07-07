@@ -51,6 +51,8 @@ def build_provider_registry(
     market = market_data_client or MarketDataClient(
         provider=config.market_data_provider,
         alphavantage_api_key=config.alphavantage_api_key,
+        fallback_provider=config.market_data_fallback,
+        cache_ttl_seconds=config.market_cache_ttl_seconds,
     )
     retriever = build_hybrid_retriever(config)
     embedder = build_embedding_provider(config.embedding_provider, config.embedding_dimension)

@@ -32,8 +32,10 @@ class FinanceState(TypedDict, total=False):
     document_contexts: list[dict[str, Any]]
     retrieved_docs: dict[str, dict[str, Any]]
     market_snapshots: dict[str, dict[str, Any]]
+    market_data_status: dict[str, Any]
     appendix_search_done: bool
     financial_metrics: dict[str, dict[str, float]]
+    metric_confidence: dict[str, dict[str, dict[str, Any]]]
     sentiment_analysis: dict[str, dict[str, Any]]
     compliance_findings: list[str]
     compliance_summary: str

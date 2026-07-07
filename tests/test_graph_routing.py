@@ -33,6 +33,8 @@ def build_test_config(root: Path) -> AppConfig:
         neo4j_username=None,
         neo4j_password=None,
         market_data_provider="fake",
+        market_data_fallback="yahoo",
+        market_cache_ttl_seconds=60,
         alphavantage_api_key=None,
         host="127.0.0.1",
         port=8000,

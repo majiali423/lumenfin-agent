@@ -103,4 +103,30 @@ SAMPLE_FINANCIAL_DATA = {
             "risk_note": "Battery supply, regional demand, and pricing pressure remain key diligence items.",
         },
     },
+    "AMD": {
+        "market_data": {
+            "revenue_2025": 26.0,
+            "ebitda_2025": 5.8,
+            "r_and_d_2025": 6.5,
+            "operating_income_2025": 3.2,
+        },
+        "supply_chain": {
+            "risk_level": "medium",
+            "signals": [
+                "Advanced packaging and foundry allocation remain competitive versus larger peers.",
+                "Client and data center GPU ramps depend on TSMC node transitions.",
+                "Management highlighted improving channel inventory but uneven AI accelerator mix.",
+            ],
+        },
+        "earnings_call_quotes": [
+            "Data center GPU revenue growth accelerated as MI300 adoption expanded.",
+            "Management emphasized roadmap execution across client, gaming, and embedded portfolios.",
+            "Leadership noted competitive intensity in AI accelerators while targeting share gains.",
+        ],
+        "appendix": {
+            "subsidiary_revenue_2025": 2.1,
+            "inventory_days": 52,
+            "risk_note": "Foundry partner concentration and accelerator ramp timing remain key variables.",
+        },
+    },
 }

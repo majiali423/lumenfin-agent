@@ -23,6 +23,8 @@ class AppConfig:
     neo4j_username: str | None
     neo4j_password: str | None
     market_data_provider: str
+    market_data_fallback: str
+    market_cache_ttl_seconds: int
     alphavantage_api_key: str | None
     host: str
     port: int
@@ -55,6 +57,8 @@ class AppConfig:
             neo4j_username=os.getenv("MAS_NEO4J_USERNAME"),
             neo4j_password=os.getenv("MAS_NEO4J_PASSWORD"),
             market_data_provider=os.getenv("MAS_MARKET_DATA_PROVIDER", "yahoo"),
+            market_data_fallback=os.getenv("MAS_MARKET_DATA_FALLBACK", "yahoo"),
+            market_cache_ttl_seconds=int(os.getenv("MAS_MARKET_CACHE_TTL_SECONDS", "60")),
             alphavantage_api_key=os.getenv("ALPHAVANTAGE_API_KEY"),
             host=os.getenv("MAS_HOST", "127.0.0.1"),
             port=int(os.getenv("MAS_PORT", "8000")),

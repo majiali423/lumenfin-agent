@@ -106,6 +106,8 @@ class LumenFinAgentSystem:
         self.market_data_client = market_data_client or MarketDataClient(
             provider=self.app_config.market_data_provider,
             alphavantage_api_key=self.app_config.alphavantage_api_key,
+            fallback_provider=self.app_config.market_data_fallback,
+            cache_ttl_seconds=self.app_config.market_cache_ttl_seconds,
         )
         self.runtime = AgentRuntime(
             session_memory=self.session_memory,

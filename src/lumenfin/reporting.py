@@ -23,6 +23,7 @@ def build_data_sources(
     rag_evidence = result.get("rag_evidence") or {}
     rag_index_stats = result.get("rag_index_stats") or {}
     market_snapshots = result.get("market_snapshots") or {}
+    market_data_status = result.get("market_data_status") or {}
 
     structured_source = "none"
     source_types = {
@@ -71,17 +72,35 @@ def build_data_sources(
 
     market_ok = False
     resolved_market_provider = market_provider
+    market_ok_count = int(market_data_status.get("ok_count") or 0)
+    market_total_count = int(market_data_status.get("total_count") or 0)
     for snapshot in market_snapshots.values():
         if snapshot.get("provider"):
             resolved_market_provider = str(snapshot.get("provider"))
         if snapshot.get("current_price") is not None:
             market_ok = True
-            break
+    if market_total_count and market_ok_count == 0:
+        market_ok = False
+
+    per_company_market = market_data_status.get("companies") or {}
+    if not per_company_market:
+        per_company_market = {
+            company: {
+                "status": snap.get("status") or ("ok" if snap.get("current_price") is not None else "failed"),
+                "provider": snap.get("provider"),
+                "fetched_at": snap.get("fetched_at"),
+                "has_price": snap.get("current_price") is not None,
+            }
+            for company, snap in market_snapshots.items()
+        }
 
     return {
         "structured": structured_source,
         "market": resolved_market_provider,
         "market_ok": market_ok,
+        "market_ok_count": market_ok_count or sum(1 for s in market_snapshots.values() if s.get("current_price") is not None),
+        "market_total_count": market_total_count or len(market_snapshots),
+        "market_by_company": per_company_market,
         "rag": rag_status,
         "llm": llm_backend or result.get("llm_backend") or "unknown",
         "embedding": embedding_provider,

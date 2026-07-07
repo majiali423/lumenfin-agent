@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from lumenfin.market_data import DEFAULT_TICKER_MAP
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class FakeMarketDataClient:
@@ -10,6 +15,7 @@ class FakeMarketDataClient:
 
     backend_name = "fake"
     provider = "fake"
+    fallback_provider = "fake"
 
     def fetch_company_snapshot(self, company: str, symbol: str | None = None) -> dict[str, Any]:
         ticker = symbol or DEFAULT_TICKER_MAP.get(company, company)
@@ -27,6 +33,10 @@ class FakeMarketDataClient:
             "industry": "Consumer Electronics" if company == "Apple" else "Software",
             "fifty_two_week_high": base_price * 1.15,
             "fifty_two_week_low": base_price * 0.82,
+            "status": "ok",
+            "from_cache": False,
+            "fetched_at": _utc_now_iso(),
+            "provider_chain": ["fake"],
         }
 
 

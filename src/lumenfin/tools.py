@@ -90,6 +90,7 @@ KNOWN_ALIASES = {
     "google": "Alphabet",
     "meta": "Meta",
     "nvidia": "NVIDIA",
+    "amd": "AMD",
 }
 
 
@@ -163,51 +164,61 @@ def retrieve_company_payload(
     return result
 
 
+def _append_unique_company(companies: list[str], name: str) -> None:
+    if name and name not in companies:
+        companies.append(name)
+
+
+def _extract_companies_via_llm(query: str, llm_client: Any) -> list[str]:
+    try:
+        prompt = llm_client.chat(
+            system_prompt="你是一个公司名称提取器。从用户查询中提取所有被提及的公司名称。"
+            '返回 JSON 格式: {"companies": ["公司1", "公司2"]}。只返回 JSON，不要其他内容。',
+            user_prompt=query,
+            temperature=0.0,
+            max_tokens=100,
+        )
+        prompt_clean = prompt.strip()
+        if prompt_clean.startswith("```"):
+            prompt_clean = prompt_clean.split("\n", 1)[-1].rsplit("\n", 1)[0]
+        data = json.loads(prompt_clean)
+        return [str(name) for name in data.get("companies", []) if name]
+    except Exception:
+        return []
+
+
 def extract_companies_from_query(
     query: str,
     document_contexts: list[dict[str, Any]] | None = None,
     llm_client: Any | None = None,
 ) -> list[str]:
     """Extract company names from query using sample data, PDF context, and LLM."""
+    companies: list[str] = []
+    lowered = query.lower()
+
     # 1. Check sample data for direct mentions
-    companies = [c for c in SAMPLE_FINANCIAL_DATA if c.lower() in query.lower()]
+    for company in SAMPLE_FINANCIAL_DATA:
+        if company.lower() in lowered:
+            _append_unique_company(companies, company)
 
     # 2. Check known aliases
-    lowered = query.lower()
     for alias, name in KNOWN_ALIASES.items():
-        if alias in lowered and name not in companies:
-            companies.append(name)
+        if alias in lowered:
+            _append_unique_company(companies, name)
 
     # 3. Collect companies detected in uploaded PDFs
     doc_contexts = document_contexts or []
     for doc in doc_contexts:
         for company in doc.get("detected_companies", []):
-            if company not in companies:
-                companies.append(company)
+            _append_unique_company(companies, company)
+
+    # 4. Merge LLM extraction so comparative queries do not stop at the first sample hit
+    if llm_client:
+        for company in _extract_companies_via_llm(query, llm_client):
+            _append_unique_company(companies, company)
 
     if companies:
         return companies
-
-    # 4. Use LLM to extract company names from query
-    if llm_client:
-        try:
-            prompt = llm_client.chat(
-                system_prompt="你是一个公司名称提取器。从用户查询中提取所有被提及的公司名称。"
-                "返回 JSON 格式: {\"companies\": [\"公司1\", \"公司2\"]}。只返回 JSON，不要其他内容。",
-                user_prompt=query,
-                temperature=0.0,
-                max_tokens=100,
-            )
-            # Strip markdown code fences if present
-            prompt_clean = prompt.strip()
-            if prompt_clean.startswith("```"):
-                prompt_clean = prompt_clean.split("\n", 1)[-1].rsplit("\n", 1)[0]
-            data = json.loads(prompt_clean)
-            llm_companies = data.get("companies", [])
-            if llm_companies:
-                return llm_companies
-        except Exception:
-            pass
 
     # 5. Fall back to PDF filename as company name hint
     for doc in doc_contexts:
@@ -222,7 +233,9 @@ def extract_companies_from_query(
 
 def derive_target_symbols(companies: list[str], query: str) -> dict[str, str]:
     symbols = {company: DEFAULT_TICKER_MAP.get(company, company) for company in companies}
-    for token in re.findall(r"\b[A-Z]{1,5}\b", query):
+    explicit_tokens = re.findall(r"\b(?:ticker|symbol)\s*[:=]\s*([A-Z]{1,5})\b", query, flags=re.IGNORECASE)
+    explicit_tokens.extend(re.findall(r"\(([A-Z]{1,5})\)", query))
+    for token in explicit_tokens:
         for company in companies:
             if company not in symbols or symbols[company] == company:
                 symbols[company] = token
@@ -287,12 +300,12 @@ def analyze_sentiment_deep(quotes: list[str], llm_client: Any | None = None) -> 
             joined_quotes = "\n".join(quotes[:5])[:2000]
             response = llm_client.chat(
                 system_prompt=(
-                    "你是管理层语气分析专家。请基于提供的财报引述进行深度分析，"
-                    "返回 JSON 格式: {\"overall_tone\": \"bullish/cautious/neutral\", "
-                    "\"confidence_score\": 0-10, \"key_themes\": [\"主题1\",\"主题2\"], "
-                    "\"risk_flags\": [\"风险1\"], \"strategic_priority\": \"战略重点\"}"
+                    "You are a management tone analysis expert. Analyze the provided earnings-call quotes and "
+                    "return JSON format: {\"overall_tone\": \"bullish/cautious/neutral\", "
+                    "\"confidence_score\": 0-10, \"key_themes\": [\"theme1\",\"theme2\"], "
+                    "\"risk_flags\": [\"risk1\"], \"strategic_priority\": \"priority\"}"
                 ),
-                user_prompt=f"管理层引述:\n{joined_quotes}",
+                user_prompt=f"Earnings call quotes:\n{joined_quotes}",
                 temperature=0.1,
                 max_tokens=250,
             )
@@ -422,11 +435,11 @@ def generate_scenario_analysis(metrics: dict[str, float], company: str) -> dict[
 
     return {
         "base_case": {"revenue_growth": f"{base_growth:.0%}", "probability": f"{base_prob:.0%}",
-                      "narrative": f"经济温和增长，{company}维持现有市场份额与利润率。"},
+                      "narrative": f"Under moderate macro growth, {company} sustains current market share and margins."},
         "bull_case": {"revenue_growth": f"{bull_growth:.0%}", "probability": f"{bull_prob:.0%}",
-                      "narrative": f"技术突破或政策利好推动{company}超预期增长，市场份额扩张。"},
+                      "narrative": f"Technology upside or policy tailwinds drive above-consensus growth and share gains for {company}."},
         "bear_case": {"revenue_growth": f"{bear_growth:.0%}", "probability": f"{bear_prob:.0%}",
-                      "narrative": f"宏观下行或竞争加剧导致{company}收入增速放缓，利润率承压。"},
+                      "narrative": f"Macro slowdown or competitive pressure reduces revenue growth and compresses margins for {company}."},
     }
 
 
