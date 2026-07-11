@@ -17,6 +17,20 @@ LumenFin turns **user queries and uploaded financial PDFs** into a **structured 
 - PDF evidence is retrieved via **Milvus Lite hybrid RAG** (vector + keyword + RRF) with page citations.
 - Missing data triggers **replanner / degraded mode** instead of silent hallucination.
 
+LumenFin can also export its run state into the neutral `FinRun` schema used by
+FinAgentBench:
+
+```powershell
+python run_demo.py --query "Compare Apple and Microsoft FY2025 financial performance, supply chain risk, and market data quality." --thread-id lumenfin-e2e --output-dir outputs
+$state = Get-ChildItem outputs\lumenfin-e2e_*_state.json | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+python scripts\export_finrun.py $state.FullName --out outputs\lumenfin-e2e-finrun.json
+```
+
+The benchmark project can then evaluate either the raw LumenFin `*_state.json`
+with `--adapter lumenfin` or the exported `FinRun` JSON. This keeps LumenFin as
+the generation/runtime project and FinAgentBench as the downstream reliability
+gate.
+
 ---
 
 ## Positioning (vs. a RAG chatbot)
