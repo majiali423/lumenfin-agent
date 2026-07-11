@@ -111,6 +111,31 @@ def _evidence(state: dict[str, Any]) -> list[dict[str, str]]:
                 source_type=str(doc.get("source_type") or "document"),
                 text=str(doc.get("excerpt") or doc.get("text") or ""),
             )
+        supply_chain = payload.get("supply_chain") or {}
+        if supply_chain:
+            signals = [str(signal) for signal in supply_chain.get("signals") or []]
+            text = (
+                f"{company} supply chain risk level is {supply_chain.get('risk_level', 'unknown')}. "
+                f"Signals: {'; '.join(signals)}"
+            )
+            _append_evidence(
+                evidence,
+                seen,
+                company=str(company),
+                citation=f"lumenfin:supply_chain:{company}:FY2025",
+                source_type="sample_db",
+                text=text,
+            )
+        quotes = [str(quote) for quote in payload.get("earnings_call_quotes") or []]
+        if quotes:
+            _append_evidence(
+                evidence,
+                seen,
+                company=str(company),
+                citation=f"lumenfin:earnings_call_quotes:{company}:FY2025",
+                source_type="sample_db",
+                text=f"{company} management commentary: {'; '.join(quotes)}",
+            )
         market_data = payload.get("market_data") or {}
         if market_data:
             text = (
@@ -126,6 +151,48 @@ def _evidence(state: dict[str, Any]) -> list[dict[str, str]]:
                 citation=f"lumenfin:sample_financial_data:{company}:FY2025",
                 source_type="sample_db",
                 text=text,
+            )
+    for company, scores in (state.get("risk_scores") or {}).items():
+        if not isinstance(scores, dict):
+            continue
+        parts = [
+            f"{name}={value}"
+            for name, value in scores.items()
+            if isinstance(value, (int, float))
+        ]
+        if parts:
+            _append_evidence(
+                evidence,
+                seen,
+                company=str(company),
+                citation=f"lumenfin:risk_model:{company}:FY2025",
+                source_type="risk_model",
+                text=(
+                    f"{company} model-derived risk scores are screening indicators, not standalone cited facts: "
+                    + ", ".join(parts)
+                    + "."
+                ),
+            )
+    for company, snapshot in (state.get("market_snapshots") or {}).items():
+        if snapshot.get("current_price") is None:
+            continue
+        details = []
+        for key in ("current_price", "trailing_pe", "monthly_return", "fifty_two_week_high", "fifty_two_week_low"):
+            if snapshot.get(key) is not None:
+                details.append(f"{key}={snapshot.get(key)}")
+        if details:
+            _append_evidence(
+                evidence,
+                seen,
+                company=str(company),
+                citation=f"lumenfin:market_snapshot:{company}:{snapshot.get('fetched_at') or 'latest'}",
+                source_type="market_data",
+                text=(
+                    f"{company} live market snapshot from {snapshot.get('provider') or 'unknown'} "
+                    f"as_of={snapshot.get('fetched_at') or 'n/a'}: "
+                    + ", ".join(details)
+                    + "."
+                ),
             )
     return evidence
 
@@ -165,6 +232,11 @@ def _market_data(state: dict[str, Any]) -> list[dict[str, Any]]:
                 "provider": snapshot.get("provider") or "",
                 "as_of": snapshot.get("fetched_at") or snapshot.get("as_of") or "",
                 "error": snapshot.get("error") or "",
+                "current_price": snapshot.get("current_price"),
+                "trailing_pe": snapshot.get("trailing_pe"),
+                "monthly_return": snapshot.get("monthly_return"),
+                "fifty_two_week_high": snapshot.get("fifty_two_week_high"),
+                "fifty_two_week_low": snapshot.get("fifty_two_week_low"),
             }
         )
     return output

@@ -24,7 +24,10 @@ class FinRunExportTestCase(unittest.TestCase):
         self.assertTrue(any(step["name"] == "retrieval" for step in finrun["steps"]))
         self.assertTrue(any(metric["name"] == "ebitda_margin" for metric in finrun["metrics"]))
         self.assertTrue(any(item["source_type"] == "sample_db" for item in finrun["evidence"]))
+        self.assertTrue(any(item["source_type"] == "risk_model" for item in finrun["evidence"]))
+        self.assertTrue(any(item["source_type"] == "market_data" for item in finrun["evidence"]))
         self.assertEqual(finrun["market_data"][0]["status"], "ok")
+        self.assertEqual(finrun["market_data"][0]["current_price"], 180.0)
 
     def test_export_finrun_script_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,9 +78,15 @@ def _sample_state() -> dict:
                 "source_documents": [
                     {"filename": "apple_2025.md", "excerpt": "Apple reported FY2025 revenue of 412.0 billion USD."}
                 ],
+                "supply_chain": {
+                    "risk_level": "medium",
+                    "signals": ["Supplier concentration remains above target."],
+                },
+                "earnings_call_quotes": ["Management cited services expansion and margin discipline."],
             }
         },
         "financial_metrics": {"Apple": {"ebitda_margin": 0.3427, "r_and_d_intensity": 0.0811}},
+        "risk_scores": {"Apple": {"supply_chain_risk": 5.0, "market_risk": 4.0}},
         "market_snapshots": {"Apple": {"provider": "fake", "status": "ok", "current_price": 180.0}},
         "final_report": "## 1. Executive Summary\nApple analysis.\n\n## 4. Financial Performance Analysis\nEBITDA margin was 34.27%.\n\n## Risk\nMarket risk and data limitation apply.\n\n## Compliance\nResearch output only.\n\n## Methodology\nLumenFin trace.\n\n**Disclaimer:** Not investment advice.",
     }

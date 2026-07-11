@@ -852,29 +852,40 @@ class AgentRuntime:
         market_ok = any(snap.get("current_price") is not None for snap in market_snapshots.values())
         unverified_note = "_Source: LLM knowledge (unverified in this run)._"
 
-        # ── Executive Summary (Enhanced) ──
-        llm_summary = self.llm_client.chat(
-            system_prompt=(
-                "You are the Director of Research at an institutional investment firm. "
-                "Write a 4-5 sentence executive summary in English that demonstrates rigorous analytical reasoning. "
-                "Structure: (1) Top-line finding with specific metric evidence, "
-                "(2) Risk-return profile characterization, "
-                "(3) Key competitive insight, "
-                "(4) Actionable investment implication. "
-                "Use specific numbers from the data. Be decisive and insightful."
-            ),
-            user_prompt=(
-                f"Mission: {state.get('task_brief', '')}\n"
-                f"Company Profiles:\n{profile_context}\n"
-                f"Financial Metrics: {metrics_context}\n"
-                f"Sentiment Analysis: {sentiment_context}\n"
-                f"Risk Scores: {risk_context}\n"
-                f"Peer Comparison: {peer_context}\n"
-                f"{doc_context}{knowledge_hint}"
-            ),
-            temperature=0.2, max_tokens=500,
-        )
-        llm_summary = ensure_sentence_complete(llm_summary)
+        def fmt_pct(value: Any) -> str:
+            return f"{value:.1%}" if isinstance(value, (int, float)) else "n/a"
+
+        def fmt_x(value: Any) -> str:
+            return f"{value:.2f}x" if isinstance(value, (int, float)) else "n/a"
+
+        def build_grounded_summary() -> str:
+            names = list(state["companies"])
+            if not names:
+                return "This run produced a research report, but no target company was available for a grounded executive summary."
+            lines = []
+            for company in names:
+                metrics = state.get("financial_metrics", {}).get(company, {})
+                risks = state.get("risk_scores", {}).get(company, {})
+                supply = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
+                market = state.get("market_snapshots", {}).get(company, {})
+                lines.append(
+                    f"{company}: EBITDA margin {fmt_pct(metrics.get('ebitda_margin'))}, "
+                    f"operating margin {fmt_pct(metrics.get('operating_margin'))}, "
+                    f"R&D intensity {fmt_pct(metrics.get('r_and_d_intensity'))} [metric-derived]; "
+                    f"supply-chain signal {supply.get('risk_level', 'unknown')} and model risk scores "
+                    f"supply_chain={risks.get('supply_chain_risk', 'n/a')}, operational={risks.get('operational_risk', 'n/a')} "
+                    "[risk-model/retrieved-signal]; "
+                    f"P/E {fmt_x(market.get('trailing_pe'))} and 52W range position {fmt_pct(metrics.get('range_position'))} "
+                    "[market-data]."
+                )
+            comparison = " ".join(lines)
+            return (
+                f"{comparison} These figures support a comparison of profitability, market-data context, and risk-screening signals, "
+                "but they do not by themselves prove valuation upside, downside elimination, or an investment recommendation. "
+                "The primary follow-up is to validate medium-confidence derived cash-flow metrics and model-derived risk scores against source filings, segment data, and supply-chain evidence."
+            )
+
+        llm_summary = build_grounded_summary()
 
         # ── Report Construction ──
         sections: list[str] = []
@@ -887,6 +898,8 @@ class AgentRuntime:
         S(f"## 1. Executive Summary")
         S(f"{llm_summary}")
         S("")
+        S("**Evidence Boundary:** Metrics and formula-backed ratios are deterministic outputs from structured inputs. Risk scores, SWOT, scenarios, and positioning language are analytical heuristics unless explicitly tied to retrieved documents, market data, or listed metric inputs. They should be treated as research hypotheses, not facts or investment recommendations.")
+        S("")
         S(f"## 2. Analytical Framework & Methodology")
         S("")
         S("This report employs a **six-layer analytical architecture** powered by a LangGraph-based multi-agent system:")
@@ -897,17 +910,18 @@ class AgentRuntime:
         S("| L2 | Retrieval | Hybrid Milvus RAG (vector + keyword RRF) + structured sample DB + market snapshots | Enriched evidence payloads |")
         S("| L3 | Quantitative Analyst | AST-safe expression engine + derived ratio computation | Five-dimension metrics |")
         S("| L4 | Psychologist | NLP deep sentiment analysis with confidence scoring | Tone intelligence |")
-        S("| L5 | Critic | Multi-factor risk scoring + compliance validation | Risk architecture |")
-        S("| L6 | Synthesizer | Structured reasoning, scenario modeling, evidence mapping | Investment report |")
+        S("| L5 | Critic | Multi-factor risk scoring + compliance validation | Risk architecture with model-derived basis labels |")
+        S("| L6 | Synthesizer | Structured reasoning, scenario modeling, evidence mapping | Research report with source boundaries |")
         S("")
 
         S(f"## 3. Company Profiles & Business Overview")
         for company in state["companies"]:
-            profile = ensure_sentence_complete(state.get("company_profiles", {}).get(company, "Profile not available."))
             S(f"### {company}")
-            S(f"{profile}")
-            if not has_uploaded_docs:
-                S(unverified_note)
+            if has_uploaded_docs:
+                profile = ensure_sentence_complete(state.get("company_profiles", {}).get(company, "Profile not available."))
+                S(f"{profile}")
+            else:
+                S("No uploaded company profile document was provided. This report excludes unverified business-description claims from the evidence-backed analysis and relies on structured metrics, supply-chain signals, management-commentary samples, and market snapshots listed below.")
             S("")
 
         S(f"## 4. Financial Performance Analysis")
@@ -1008,7 +1022,8 @@ class AgentRuntime:
                 reasoning_lines.append(f"2. **Innovation Capacity**: R&D intensity of {rd_i:.1%} "
                     f"{'demonstrates commitment to sustaining competitive advantage through innovation.' if rd_i > 0.06 else 'may constrain long-term innovation trajectory relative to peers.'}")
                 reasoning_lines.append(f"3. **Risk Integration**: Supply chain risk is rated '{risk_level}'. "
-                    f"{'This represents a manageable operational risk factor.' if risk_level == 'low' else 'This requires active monitoring and mitigation strategies.' if risk_level == 'medium' else 'This is a material risk factor that warrants hedging or diversification.'}")
+                    f"{'This represents a manageable operational risk factor.' if risk_level == 'low' else 'This requires active monitoring and mitigation strategies.' if risk_level == 'medium' else 'This is a material risk factor that warrants hedging or diversification.'} "
+                    "[retrieved-evidence if supply-chain text was retrieved; otherwise model-derived screening signal]")
 
                 if sentiment.get("confidence_score"):
                     cs = sentiment["confidence_score"]
@@ -1037,21 +1052,60 @@ class AgentRuntime:
             if risk_data:
                 S(f"**Risk Exposure Matrix**")
                 S("")
-                S("| Dimension | Score (1-10) | Level |")
-                S("|-----------|-------------|-------|")
+                S("*Risk scores are model-derived screening indicators. They combine available financial metrics, supply-chain signals, sentiment flags, and data-quality checks; they are not standalone cited facts.*")
+                S("")
+                S("| Dimension | Score (1-10) | Level | Basis |")
+                S("|-----------|-------------|-------|-------|")
                 dim_labels = {"financial_risk": "Financial", "operational_risk": "Operational",
                               "market_risk": "Market", "regulatory_risk": "Regulatory",
                               "supply_chain_risk": "Supply Chain"}
+                dim_basis = {
+                    "financial_risk": "metric-derived from profitability, leverage proxies, and cash-flow quality",
+                    "operational_risk": "heuristic from operating profile and retrieved risk signals",
+                    "market_risk": "market-data/heuristic from live snapshot availability and price context",
+                    "regulatory_risk": "sector heuristic unless retrieved regulatory evidence is present",
+                    "supply_chain_risk": "retrieved supply-chain signal when available; otherwise heuristic",
+                }
                 for dim, label in dim_labels.items():
                     score = risk_data.get(dim, 5.0)
                     level = "Low Risk" if score < 3.5 else ("Moderate" if score < 6.5 else "Elevated")
-                    S(f"| {label} | {score:.1f} | {level} |")
+                    S(f"| {label} | {score:.1f} | {level} | {dim_basis[dim]} |")
+                S("")
+                supply_chain = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
+                supply_signals = supply_chain.get("signals") or []
+                S("**Risk Decision Triggers**")
+                S("")
+                S("| Risk Area | Evidence Signal | Review Trigger | Potential Financial Channel |")
+                S("|-----------|-----------------|----------------|-----------------------------|")
+                if supply_chain:
+                    S(
+                        f"| Supply chain | risk_level={supply_chain.get('risk_level', 'unknown')}; "
+                        f"{'; '.join(str(signal) for signal in supply_signals[:2])} | "
+                        "Escalate if concentration remains medium/high or inventory days rise | "
+                        "gross margin pressure, delivery delays, or working-capital drag |"
+                    )
+                if live_market:
+                    pe = live_market.get("trailing_pe")
+                    range_pos = metrics.get("range_position")
+                    range_display = f"{range_pos:.1%}" if isinstance(range_pos, (int, float)) else "n/a"
+                    S(
+                        f"| Market valuation | P/E={pe if pe is not None else 'n/a'}; "
+                        f"52W range position={range_display} | "
+                        "Review market risk if valuation is high while market/range momentum is stretched | "
+                        "market multiple compression or downside asymmetry |"
+                    )
+                if metric_conf.get("estimated_fcf_margin", {}).get("level") == "Medium":
+                    S(
+                        "| Cash-flow estimate | estimated FCF margin uses derived inputs with medium confidence | "
+                        "Require source financial statements before using in valuation | "
+                        "valuation sensitivity and liquidity assessment error |"
+                    )
                 S("")
 
         # ── Industry & Macro Context ──
         S("## 5. Industry Dynamics & Macroeconomic Context")
         S("")
-        S("*The following context integrates LLM knowledge with structured data analysis to provide a comprehensive operating environment assessment.*")
+        S("*This section is limited to metric-derived and retrieved-signal observations. Broader sector claims are intentionally excluded unless supported by uploaded or retrieved evidence.*")
         S("")
         for company in state["companies"]:
             metrics = state.get("financial_metrics", {}).get(company, {})
@@ -1061,11 +1115,10 @@ class AgentRuntime:
             ebitda_m = metrics.get("ebitda_margin", 0)
             rd_i = metrics.get("r_and_d_intensity", 0)
             risk_level = risk.get("risk_level", "unknown")
-            S(f"- **Sector Position**: {' Market leader with significant pricing power' if ebitda_m > 0.25 else ' Competitive player with margin expansion potential'}")
-            S(f"- **Innovation Trajectory**: {' Heavy R&D investment (' + str(round(rd_i*100,1)) + '% of revenue) supports technology leadership in core markets' if rd_i > 0.06 else ' Moderate R&D intensity may require strategic increases to maintain competitive parity'}")
-            S(f"- **Supply Chain Resilience**: {' Well-diversified supply base with multiple contingency options' if risk_level == 'low' else ' Moderate concentration risk requiring active monitoring and dual-sourcing strategies' if risk_level == 'medium' else ' Significant concentration exposure necessitating strategic inventory buffers and alternative supplier development'}")
-            S(f"- **Regulatory Landscape**: Technology sector faces evolving antitrust, data privacy, and AI governance frameworks across major jurisdictions")
-            S(f"- **Macro Sensitivity**: {' Lower cyclicality due to diversified revenue streams and recurring service income' if ebitda_m > 0.30 else ' Moderate exposure to consumer and enterprise spending cycles'}")
+            S(f"- **Sector Position [metric-derived]**: {'Profitability is above the internal benchmark, which may indicate pricing power or scale economics' if ebitda_m > 0.25 else 'Profitability is below top-tier benchmark, leaving room for margin improvement'}")
+            S(f"- **Innovation Trajectory [metric-derived]**: {'R&D intensity of ' + str(round(rd_i*100,1)) + '% of revenue supports an innovation-capacity hypothesis' if rd_i > 0.06 else 'R&D intensity is moderate and should be validated against peer spend'}")
+            S(f"- **Supply Chain Resilience [retrieved-evidence/heuristic]**: {'Supply-chain signal is low risk in the retrieved payload' if risk_level == 'low' else 'Supply-chain signal indicates concentration or execution risk that requires validation' if risk_level == 'medium' else 'Supply-chain signal indicates elevated concentration exposure that requires evidence-backed mitigation review'}")
+            S(f"- **Evidence Gap [data-quality]**: No company-specific regulatory filing, customer-mix schedule, or segment macro sensitivity document was retrieved in this run.")
             if not has_uploaded_docs and not market_ok:
                 S(f"- {unverified_note}")
             S("")
@@ -1109,9 +1162,20 @@ class AgentRuntime:
             if financial_risk > 5.5:
                 weaknesses.append("Financial risk score indicates elevated balance-sheet/earnings volatility")
 
-            opportunities = ["Technology-driven productivity gains and digital transformation", "Emerging market expansion with favorable demographic trends"]
-            threats = ["Macroeconomic uncertainty including monetary policy shifts", "Intensifying competitive dynamics and potential disruption", "Evolving regulatory landscape across jurisdictions"]
-            if risk.get("risk_level") == "high": threats.append("Concentrated supply chain presents operational vulnerability")
+            opportunities = []
+            threats = []
+            if ebitda_m >= 0.25:
+                opportunities.append("[metric-derived] strong profitability provides capacity for reinvestment")
+            if rd_i >= 0.05:
+                opportunities.append("[metric-derived] R&D intensity supports an innovation-capacity screen")
+            if risk.get("risk_level") != "low":
+                threats.append(f"[retrieved-signal] supply chain risk level is {risk.get('risk_level')}")
+            if financial_risk > 5.5:
+                threats.append("[risk-model] elevated financial risk score requires validation")
+            if not opportunities:
+                opportunities.append("No evidence-backed opportunities identified at current data resolution")
+            if not threats:
+                threats.append("No evidence-backed threats identified at current data resolution")
 
             swot[company] = {
                 "strengths": "; ".join(strengths) + ".",
@@ -1133,23 +1197,23 @@ class AgentRuntime:
         # ── Scenario Analysis ──
         S("## 7. Scenario Analysis & Forward Projections")
         S("")
-        S("*The following scenarios are derived from current financial metrics and industry dynamics. They represent analytical projections, not forecasts.*")
+        S("*No evidence-backed revenue forecast or management guidance was retrieved for this run. The table below is a sensitivity framework showing which variables should be stressed, not a probability forecast, price target, or recommendation.*")
         S("")
         for company in state["companies"]:
             metrics = state.get("financial_metrics", {}).get(company, {})
-            scenario = generate_scenario_analysis(metrics, company)
             S(f"### {company}")
             S("")
-            S("| Scenario | Revenue Growth | Probability | Key Narrative |")
-            S("|----------|---------------|-------------|---------------|")
-            for case_name in ["base_case", "bull_case", "bear_case"]:
-                c = scenario[case_name]
-                label = {"base_case": "Base Case", "bull_case": "Bull Case", "bear_case": "Bear Case"}[case_name]
-                S(f"| {label} | {c['revenue_growth']} | {c['probability']} | {c['narrative']} |")
+            S("| Sensitivity | Evidence-Backed Input | Stress Direction | Why It Matters |")
+            S("|-------------|-----------------------|------------------|----------------|")
+            S(f"| Profitability | EBITDA margin {metrics.get('ebitda_margin', 0):.1%} | test margin compression | affects earnings quality and valuation support |")
+            S(f"| R&D efficiency | R&D intensity {metrics.get('r_and_d_intensity', 0):.1%} | test lower innovation conversion | affects long-cycle competitiveness hypothesis |")
+            S(f"| Cash-flow quality | estimated FCF margin {metrics.get('estimated_fcf_margin', 0):.1%} | test lower conversion due to medium-confidence estimate | affects valuation and liquidity interpretation |")
             S("")
 
         # ── Investment Thesis ──
-        S("## 8. Investment Thesis & Positioning")
+        S("## 8. Research Thesis & Positioning")
+        S("")
+        S("*This section expresses research positioning considerations only. It does not recommend buying, selling, holding, overweighting, or allocating to any security.*")
         S("")
         investment_thesis: dict[str, dict[str, str]] = {}
         for company in state["companies"]:
@@ -1164,28 +1228,28 @@ class AgentRuntime:
 
             if cautious_gate:
                 bull = (f"Growth optionality exists, but current risk profile is elevated (financial risk {financial_risk:.1f}/10, "
-                        f"FCF yield {fcf_m:.1%}). Recommend cautious accumulation with strict position sizing.")
+                        f"FCF yield {fcf_m:.1%}). Treat any constructive thesis as conditional on improved cash-flow quality and risk evidence.")
                 bear = ("Maintain a defensive posture until cash-flow quality and risk metrics improve. "
-                        "Set explicit risk limits and rebalance on adverse execution signals.")
+                        "Use explicit risk limits in any separate portfolio process.")
             elif ebitda_m > 0.25 and tone == "bullish":
                 bull = (f"Strong profitability (EBITDA margin {ebitda_m:.1%}) combined with confident management guidance "
-                        f"suggests earnings visibility above consensus. Recommend overweight position with disciplined entry on pullbacks.")
+                        f"supports a quality-screening thesis, subject to valuation and independent evidence review.")
                 bear = (f"Premium valuation may limit near-term upside. Key downside risks include competitive disruption "
-                        f"and macro-driven multiple compression. Position size should account for these tail risks.")
+                        f"and macro-driven multiple compression.")
             elif ebitda_m > 0.15:
-                bull = (f"Solid financial foundation with manageable risk profile. Suitable as core portfolio holding "
-                        f"for medium-to-long-term investors seeking quality compounders.")
+                bull = (f"Solid financial foundation with manageable risk profile. This can remain on a "
+                        f"quality-compounder research screen pending valuation and risk review.")
                 bear = (f"Limited near-term catalysts for re-rating. Margin improvement trajectory may be gradual. "
-                        f"Consider pairing with higher-growth names for portfolio balance.")
+                        f"Compare against higher-growth peers before drawing allocation conclusions.")
             else:
                 bull = (f"Potential value unlock if operational turnaround materializes. Current metrics may understate "
-                        f"recovery optionality. Tactical opportunity for risk-tolerant investors.")
-                bear = (f"Weak profitability metrics suggest structural challenges. Recommend awaiting definitive "
-                        f"evidence of business improvement before committing capital.")
+                        f"recovery optionality, but this remains a hypothesis requiring evidence.")
+                bear = (f"Weak profitability metrics suggest structural challenges. A positive research view would require "
+                        f"definitive evidence of business improvement.")
 
             investment_thesis[company] = {"bull_case": bull, "bear_case": bear}
             S(f"### {company}")
-            S(f"- **Investment Rationale (Bull Case):** {bull}")
+            S(f"- **Research Rationale (Bull Case):** {bull}")
             S(f"- **Risk Considerations (Bear Case):** {bear}")
             S("")
 
@@ -1201,7 +1265,7 @@ class AgentRuntime:
         # ── Compliance ──
         S("## 10. Compliance Review & Data Integrity")
         S("")
-        if state.get("compliance_summary"):
+        if state.get("compliance_summary") and state.get("compliance_findings"):
             compliance_summary = str(state["compliance_summary"]).strip()
             compliance_summary = re.sub(r"^\**\s*Audit Opinion:\s*\**\s*", "", compliance_summary, flags=re.IGNORECASE)
             S(f"**Audit Opinion:** {compliance_summary}")
@@ -1217,7 +1281,7 @@ class AgentRuntime:
                     "report generated with acknowledged compliance gaps.*"
                 )
         else:
-            S("All core compliance and data integrity checks passed. No material gaps detected.")
+            S("Core rule-based compliance checks passed. Semantic review should still validate whether all qualitative claims are supported by cited evidence.")
         S("")
 
         # ── Methodology & Disclaimer ──
@@ -1288,7 +1352,7 @@ class AgentRuntime:
                     err = snap.get("error") or "no live price returned"
                     S(f"- {company} ({symbol}): status=failed, error={err}.")
             S("")
-        S("**Source Attribution by Output Type:** Quant tables use deterministic AST calculations on structured inputs; sentiment and profile sections use LLM analysis grounded in retrieved quotes/doc excerpts; risk matrix combines quantitative metrics, supply-chain signals, and sentiment risk flags.")
+        S("**Source Attribution by Output Type:** Quant tables use deterministic AST calculations on structured inputs. Market rows use live snapshot fields when available. Company profiles, industry context, SWOT opportunities/threats, scenario narratives, and research thesis language are LLM-assisted hypotheses unless a row explicitly cites retrieved evidence or metric-derived basis. Risk matrix values are model-derived screening indicators and should not be treated as independently cited facts.")
         S("")
         S("**Disclaimer:** This report is generated by an AI-powered multi-agent system for research and demonstration purposes only. It does not constitute investment advice, a solicitation, or a recommendation to buy or sell any security. All investment decisions involve risk and should be made in consultation with qualified financial professionals. Past performance and AI-generated projections are not indicative of future results.")
 
