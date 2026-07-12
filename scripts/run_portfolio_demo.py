@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a deterministic offline portfolio demo for interviews."""
+"""Run a deterministic offline portfolio demo."""
 from __future__ import annotations
 
 import argparse
@@ -110,7 +110,7 @@ def build_offline_config(output_dir: Path) -> AppConfig:
 
 def main() -> int:
     configure_stdio_utf8()
-    parser = argparse.ArgumentParser(description="Run an offline LumenFin interview demo.")
+    parser = argparse.ArgumentParser(description="Run an offline LumenFin portfolio demo.")
     parser.add_argument(
         "--query",
         default="Compare Apple, Microsoft, and Tesla FY2025 profitability, R&D intensity, liquidity, and supply-chain risk.",

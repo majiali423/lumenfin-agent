@@ -147,7 +147,7 @@ learning-001_*_state.json
 learning-001_*_manifest.json
 ```
 
-Interview-safe offline demo (no external LLM or market-data API):
+Deterministic offline demo (no external LLM or market-data API):
 
 ```powershell
 .\.venv\Scripts\python scripts\run_portfolio_demo.py --write
@@ -202,7 +202,7 @@ Eval scripts:
 .\.venv\Scripts\python scripts\run_rag_eval.py
 ```
 
-`run_golden_eval.py` is intended as a live-quality regression check. It may call the configured LLM and market-data provider; use `run_portfolio_demo.py --write` for deterministic offline interviews.
+`run_golden_eval.py` is intended as a live-quality regression check. It may call the configured LLM and market-data provider; use `run_portfolio_demo.py --write` for a deterministic offline portfolio demo.
 
 ---
 
@@ -217,7 +217,7 @@ Eval scripts:
 | RAG metrics | Recall@K, MRR, citation coverage via `run_rag_eval.py` |
 | HITL | Clarification pause + `/clarify` resume; **SQLite-backed** checkpoint |
 | Run manifest | `*_manifest.json` with latency, tokens, evaluator, `data_sources` |
-| Interview demo | `scripts/run_portfolio_demo.py --write` produces a deterministic offline report + eval artifacts |
+| Offline portfolio demo | `scripts/run_portfolio_demo.py --write` produces a deterministic offline report + eval artifacts |
 | Input guardrail | PDF injection pattern scan (EN + Unicode CJK patterns) |
 | Parallel fan-out | Per-company thread pool in retrieval / quant / sentiment |
 | Telemetry | `audit_log` latency/tokens on **all pipeline nodes** |
