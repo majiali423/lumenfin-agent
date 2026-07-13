@@ -15,12 +15,21 @@ from lumenfin.reporting import build_data_sources, build_run_manifest
 class ReportingDataSourcesTestCase(unittest.TestCase):
     def test_sample_db_structured_source(self) -> None:
         sources = build_data_sources(
-            {"companies": ["NVIDIA"], "document_contexts": []},
+            {"companies": ["NVIDIA"], "document_contexts": [], "data_mode": "demo"},
             llm_backend="local-fallback",
         )
         self.assertEqual(sources["structured"], "sample_db")
+        self.assertEqual(sources["data_mode"], "demo")
         self.assertEqual(sources["rag"], "skipped")
         self.assertFalse(sources["structured_uploaded"])
+
+    def test_live_mode_does_not_label_sample_db(self) -> None:
+        sources = build_data_sources(
+            {"companies": ["NVIDIA"], "document_contexts": [], "data_mode": "live"},
+            llm_backend="deepseek",
+        )
+        self.assertEqual(sources["structured"], "none")
+        self.assertEqual(sources["data_mode"], "live")
 
     def test_uploaded_json_structured_source(self) -> None:
         sources = build_data_sources(

@@ -88,6 +88,7 @@ def _base_initial_state(query: str, thread_id: str, document_contexts: list[dict
         "run_started_at": utc_now_iso(),
         "input_guardrail_findings": [],
         "input_guardrail_summary": {},
+        "data_mode": app_config.data_mode,
     }
 
 
@@ -102,7 +103,10 @@ class LumenFinAgentSystem:
         self.session_memory = SessionMemory()
         self.knowledge_memory = self._build_knowledge_store()
         self.reasoning_memory = ReasoningMemory()
-        self.llm_client = llm_client or build_llm_client()
+        self.llm_client = llm_client or build_llm_client(
+            self.app_config.llm,
+            allow_local_fallback=self.app_config.allows_local_fallback(),
+        )
         self.market_data_client = market_data_client or MarketDataClient(
             provider=self.app_config.market_data_provider,
             alphavantage_api_key=self.app_config.alphavantage_api_key,
@@ -121,6 +125,8 @@ class LumenFinAgentSystem:
             input_guardrail_enabled=self.app_config.input_guardrail_enabled,
             input_guardrail_mode=self.app_config.input_guardrail_mode,  # type: ignore[arg-type]
             tool_backend=self.app_config.tool_backend,
+            allow_sample_data=self.app_config.allows_sample_data(),
+            data_mode=self.app_config.data_mode,
         )
         self.checkpointer = InMemorySaver()
         self.graph = self._build_graph()
@@ -288,6 +294,7 @@ class LumenFinAgentSystem:
         final_result["thread_id"] = thread_id
         final_result["checkpoint_count"] = len(self.session_memory.checkpoints)
         final_result["llm_backend"] = self.llm_client.backend_name
+        final_result.setdefault("data_mode", self.app_config.data_mode)
         final_result.setdefault("run_started_at", utc_now_iso())
         final_result["run_ended_at"] = utc_now_iso()
         if final_result.get("workflow_status") == "needs_clarification":

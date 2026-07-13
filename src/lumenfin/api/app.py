@@ -33,12 +33,20 @@ def create_app(
 ) -> FastAPI:
     configure_logging()
     app_config = config or AppConfig.from_env()
+    if app_config.requires_api_key() and not app_config.api_key:
+        raise RuntimeError(
+            "MAS_API_KEY is required when APP_ENV is not dev/test. "
+            "Set MAS_API_KEY or use APP_ENV=dev for local demos."
+        )
     service = LumenFinAnalysisService(
         app_config,
         llm_client=llm_client,
         market_data_client=market_data_client,
     )
-    auth_dependency = build_api_key_dependency(app_config.api_key)
+    auth_dependency = build_api_key_dependency(
+        app_config.api_key,
+        require_key=app_config.requires_api_key(),
+    )
 
     app = FastAPI(
         title="LumenFin API",
@@ -101,7 +109,19 @@ def create_app(
             "market_data_provider": app_config.market_data_provider,
         }
 
-    def _to_response(payload: dict) -> AnalyzeResponse:
+    def _compact_state(result: dict) -> dict:
+        return {
+            "run_id": result.get("run_id"),
+            "thread_id": result.get("thread_id"),
+            "companies": result.get("companies"),
+            "workflow_status": result.get("workflow_status"),
+            "degraded_mode": result.get("degraded_mode"),
+            "data_mode": result.get("data_mode") or app_config.data_mode,
+            "llm_backend": result.get("llm_backend"),
+            "clarification_questions": result.get("clarification_questions", []),
+        }
+
+    def _to_response(payload: dict, *, include_state: bool = False) -> AnalyzeResponse:
         result = payload["result"]
         artifacts = payload.get("artifacts", {})
         run_manifest = load_run_manifest(artifacts) or build_run_manifest(
@@ -133,7 +153,7 @@ def create_app(
             compliance_summary=result.get("compliance_summary"),
             audit_log=result.get("audit_log", []),
             artifacts=artifacts,
-            state=result,
+            state=result if include_state else _compact_state(result),
             chart_data=result.get("chart_data"),
             run_telemetry=result.get("run_telemetry"),
             run_manifest=run_manifest,
@@ -148,7 +168,7 @@ def create_app(
             thread_id=payload.thread_id,
             export_artifacts=payload.export_artifacts,
         )
-        return _to_response(response)
+        return _to_response(response, include_state=payload.include_state)
 
     @app.post("/api/v1/clarify", response_model=AnalyzeResponse)
     def clarify(payload: ClarifyRequest, _: None = Depends(auth_dependency)) -> AnalyzeResponse:
@@ -160,7 +180,7 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _to_response(response)
+        return _to_response(response, include_state=payload.include_state)
 
     @app.post("/api/v1/analyze-data", response_model=AnalyzeResponse)
     def analyze_data(payload: AnalyzeDataRequest, _: None = Depends(auth_dependency)) -> AnalyzeResponse:
@@ -170,24 +190,30 @@ def create_app(
             export_artifacts=payload.export_artifacts,
             structured_metrics=payload.company_metrics,
         )
-        return _to_response(response)
+        return _to_response(response, include_state=payload.include_state)
 
     @app.post("/api/v1/analyze-upload", response_model=AnalyzeResponse)
     async def analyze_upload(
         query: str = Form(...),
         thread_id: str | None = Form(default=None),
         export_artifacts: bool = Form(default=True),
+        include_state: bool = Form(default=False),
         files: list[UploadFile] = File(...),
         _: None = Depends(auth_dependency),
     ) -> AnalyzeResponse:
-        saved_paths = service.save_uploaded_files([(upload.filename or "document.pdf", await upload.read()) for upload in files])
+        try:
+            saved_paths = service.save_uploaded_files(
+                [(upload.filename or "document.pdf", await upload.read()) for upload in files]
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         response = service.analyze(
             query=query,
             thread_id=thread_id,
             export_artifacts=export_artifacts,
             document_paths=saved_paths,
         )
-        return _to_response(response)
+        return _to_response(response, include_state=include_state)
 
     @app.post("/api/v1/jobs", response_model=SubmitJobResponse, status_code=202)
     def submit_job(

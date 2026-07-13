@@ -98,21 +98,24 @@ def retrieve_company_payload(
     company: str,
     include_appendix: bool = False,
     document_contexts: list[dict[str, Any]] | None = None,
+    *,
+    allow_sample_data: bool = True,
 ) -> dict[str, Any]:
     """Build a company payload from sample data, PDF documents, or both."""
-    has_sample_data = company in SAMPLE_FINANCIAL_DATA
+    has_sample_data = allow_sample_data and company in SAMPLE_FINANCIAL_DATA
     if has_sample_data:
         payload = SAMPLE_FINANCIAL_DATA[company]
         result: dict[str, Any] = {
             "market_data": dict(payload["market_data"]),
             "supply_chain": dict(payload["supply_chain"]),
             "earnings_call_quotes": list(payload["earnings_call_quotes"]),
+            "structured_source": "sample_db",
         }
         if include_appendix:
             result["appendix"] = dict(payload["appendix"])
         return result
 
-    # For companies without sample data, extract from uploaded PDFs
+    # For companies without sample data (or when sample is disabled), extract from uploaded docs
     doc_contexts = document_contexts or []
     market_data: dict[str, float] = {}
     supply_chain_signals: list[str] = []
@@ -158,6 +161,7 @@ def retrieve_company_payload(
             "signals": supply_chain_signals or ["PDF 文档中未检测到明确供应链信号。"],
         },
         "earnings_call_quotes": earnings_quotes or ["文档已上传，请基于 PDF 内容进行分析。"],
+        "structured_source": "document_extracted" if market_data or earnings_quotes else "none",
     }
     if include_appendix:
         result["appendix"] = {}

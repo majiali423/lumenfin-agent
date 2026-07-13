@@ -47,7 +47,10 @@ def build_provider_registry(
     llm_client: BaseLLMClient | None = None,
     market_data_client: MarketDataClient | None = None,
 ) -> ProviderRegistry:
-    llm = llm_client or build_llm_client(config.llm)
+    llm = llm_client or build_llm_client(
+        config.llm,
+        allow_local_fallback=config.allows_local_fallback(),
+    )
     market = market_data_client or MarketDataClient(
         provider=config.market_data_provider,
         alphavantage_api_key=config.alphavantage_api_key,

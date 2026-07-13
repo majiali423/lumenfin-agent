@@ -155,6 +155,7 @@ class OfflineSystemTestCase(unittest.TestCase):
                     "query": "请基于上传的 NVIDIA 结构化指标输出尽调速写。",
                     "thread_id": "upload-csv-offline",
                     "export_artifacts": "false",
+                    "include_state": "true",
                 },
                 files={"files": ("nvidia_metrics.csv", csv_body, "text/csv")},
             )

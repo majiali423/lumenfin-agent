@@ -218,10 +218,22 @@ class LumenFinAnalysisService:
         return self.repository.list_jobs(limit=limit)
 
     def save_uploaded_files(self, files: list[tuple[str, bytes]]) -> list[str]:
+        allowed_suffixes = {".pdf", ".md", ".txt", ".csv", ".xlsx", ".xls", ".json"}
+        if len(files) > self.config.max_upload_files:
+            raise ValueError(
+                f"Too many uploads: {len(files)} files exceeds limit of {self.config.max_upload_files}."
+            )
         self.config.upload_dir.mkdir(parents=True, exist_ok=True)
         saved_paths: list[str] = []
         for filename, content in files:
-            unique_name = f"{uuid4().hex[:8]}_{filename}"
+            suffix = Path(filename).suffix.lower()
+            if suffix not in allowed_suffixes:
+                raise ValueError(f"Unsupported upload type for '{filename}'. Allowed: {sorted(allowed_suffixes)}")
+            if len(content) > self.config.max_upload_bytes:
+                raise ValueError(
+                    f"Upload '{filename}' is {len(content)} bytes; max is {self.config.max_upload_bytes}."
+                )
+            unique_name = f"{uuid4().hex[:8]}_{Path(filename).name}"
             target_path = self.config.upload_dir / unique_name
             target_path.write_bytes(content)
             saved_paths.append(str(target_path))

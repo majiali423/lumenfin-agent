@@ -160,10 +160,17 @@ class LocalFallbackLLMClient(BaseLLMClient):
 
 
 class ResilientLLMClient(BaseLLMClient):
-    def __init__(self, primary: BaseLLMClient | None, fallback: BaseLLMClient | None = None) -> None:
+    def __init__(
+        self,
+        primary: BaseLLMClient | None,
+        fallback: BaseLLMClient | None = None,
+        *,
+        allow_fallback: bool = True,
+    ) -> None:
         super().__init__()
         self.primary = primary
         self.fallback = fallback or LocalFallbackLLMClient()
+        self.allow_fallback = allow_fallback
         self.backend_name = primary.backend_name if primary else self.fallback.backend_name
         self.model_name = getattr(primary, "model_name", self.fallback.model_name)
 
@@ -183,10 +190,16 @@ class ResilientLLMClient(BaseLLMClient):
         }
 
     def _active_client(self) -> BaseLLMClient:
-        return self.primary or self.fallback
+        if self.primary is not None:
+            return self.primary
+        if not self.allow_fallback:
+            raise RuntimeError("No primary LLM configured and local fallback is disabled.")
+        return self.fallback
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 600) -> str:
         if self.primary is None:
+            if not self.allow_fallback:
+                raise RuntimeError("No primary LLM configured and local fallback is disabled.")
             self.backend_name = self.fallback.backend_name
             self.model_name = self.fallback.model_name
             before = dict(self.fallback._usage_totals)
@@ -201,6 +214,8 @@ class ResilientLLMClient(BaseLLMClient):
             self._sync_usage_from(self.primary, before)
             return content
         except Exception:
+            if not self.allow_fallback:
+                raise
             self.backend_name = self.fallback.backend_name
             self.model_name = self.fallback.model_name
             before = dict(self.fallback._usage_totals)
@@ -214,7 +229,15 @@ class ResilientLLMClient(BaseLLMClient):
         self._add_usage(delta_prompt, delta_completion)
 
 
-def build_llm_client(settings: LLMSettings | None = None) -> ResilientLLMClient:
+def build_llm_client(
+    settings: LLMSettings | None = None,
+    *,
+    allow_local_fallback: bool = True,
+) -> ResilientLLMClient:
     settings = settings or LLMSettings.from_env()
     primary = DeepSeekChatClient(settings) if settings.api_key else None
-    return ResilientLLMClient(primary=primary, fallback=LocalFallbackLLMClient())
+    return ResilientLLMClient(
+        primary=primary,
+        fallback=LocalFallbackLLMClient(),
+        allow_fallback=allow_local_fallback,
+    )

@@ -11,12 +11,20 @@ class AnalyzeDataRequest(BaseModel):
     )
     thread_id: Optional[str] = Field(default=None, description="Optional workflow thread id.")
     export_artifacts: bool = Field(default=True, description="Whether to persist report and state files.")
+    include_state: bool = Field(
+        default=False,
+        description="When true, return the full internal run state. Default is a compact summary only.",
+    )
 
 
 class AnalyzeRequest(BaseModel):
     query: str = Field(..., description="User query for financial multi-agent analysis.")
     thread_id: Optional[str] = Field(default=None, description="Optional workflow thread id.")
     export_artifacts: bool = Field(default=True, description="Whether to persist report and state files.")
+    include_state: bool = Field(
+        default=False,
+        description="When true, return the full internal run state. Default is a compact summary only.",
+    )
 
 
 class AnalyzeResponse(BaseModel):
@@ -44,6 +52,10 @@ class ClarifyRequest(BaseModel):
         description="Structured answers, e.g. {\"company\": \"Apple\", \"time_range\": \"FY2025\"}.",
     )
     export_artifacts: bool = Field(default=True, description="Whether to persist report and state files.")
+    include_state: bool = Field(
+        default=False,
+        description="When true, return the full internal run state. Default is a compact summary only.",
+    )
 
 
 class HealthResponse(BaseModel):

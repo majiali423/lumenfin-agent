@@ -65,6 +65,16 @@ class FailureInjectionTestCase(unittest.TestCase):
         self.assertIn("NVIDIA", content)
         self.assertEqual(client.backend_name, "local-fallback")
 
+    def test_llm_timeout_fails_loud_when_fallback_disabled(self) -> None:
+        client = ResilientLLMClient(
+            primary=TimeoutLLMClient(),
+            fallback=LocalFallbackLLMClient(),
+            allow_fallback=False,
+        )
+        with self.assertRaises(Exception):
+            client.chat("system", "NVIDIA FY2025 revenue analysis executive summary in Chinese.")
+        self.assertEqual(client.backend_name, "timeout-llm")
+
     def test_market_provider_unauthorized_is_handled_by_agent_runtime(self) -> None:
         config = build_test_config(ROOT / "test_artifacts" / f"market-fail-{uuid4().hex[:8]}")
         app = LumenFinAgentSystem(

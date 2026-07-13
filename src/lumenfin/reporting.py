@@ -24,6 +24,8 @@ def build_data_sources(
     rag_index_stats = result.get("rag_index_stats") or {}
     market_snapshots = result.get("market_snapshots") or {}
     market_data_status = result.get("market_data_status") or {}
+    data_mode = str(result.get("data_mode") or "demo").lower()
+    allow_sample = data_mode == "demo"
 
     structured_source = "none"
     source_types = {
@@ -50,7 +52,7 @@ def build_data_sources(
             structured_source = "uploaded_excel"
         else:
             structured_source = "uploaded_json"
-    elif any(company in SAMPLE_FINANCIAL_DATA for company in companies):
+    elif allow_sample and any(company in SAMPLE_FINANCIAL_DATA for company in companies):
         structured_source = "sample_db"
     elif has_narrative_upload:
         structured_source = "document_extracted"
@@ -95,6 +97,7 @@ def build_data_sources(
         }
 
     return {
+        "data_mode": data_mode,
         "structured": structured_source,
         "market": resolved_market_provider,
         "market_ok": market_ok,

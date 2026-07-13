@@ -29,6 +29,11 @@ class AppConfig:
     host: str
     port: int
     api_key: str | None
+    app_env: str
+    data_mode: str
+    allow_local_fallback: bool | None
+    max_upload_bytes: int
+    max_upload_files: int
     llm: LLMSettings
     rag_enabled: bool
     milvus_uri: str
@@ -42,10 +47,29 @@ class AppConfig:
     input_guardrail_mode: str
     tool_backend: str
 
+    def allows_sample_data(self) -> bool:
+        return self.data_mode == "demo"
+
+    def allows_local_fallback(self) -> bool:
+        if self.allow_local_fallback is not None:
+            return self.allow_local_fallback
+        return self.data_mode == "demo" or self.app_env in {"dev", "test"}
+
+    def requires_api_key(self) -> bool:
+        return self.app_env not in {"dev", "test"}
+
     @classmethod
     def from_env(cls) -> "AppConfig":
         raw_output_dir = os.getenv("MAS_OUTPUT_DIR", "outputs")
         raw_db_path = os.getenv("MAS_DB_PATH", "data/lumenfin.db")
+        data_mode = os.getenv("DATA_MODE", "demo").strip().lower()
+        if data_mode not in {"demo", "live"}:
+            data_mode = "demo"
+        app_env = os.getenv("APP_ENV", "dev").strip().lower() or "dev"
+        allow_raw = os.getenv("ALLOW_LOCAL_FALLBACK")
+        allow_local_fallback = None
+        if allow_raw is not None and allow_raw.strip() != "":
+            allow_local_fallback = allow_raw.strip().lower() in {"1", "true", "yes"}
         return cls(
             output_dir=Path(raw_output_dir),
             upload_dir=Path(os.getenv("MAS_UPLOAD_DIR", "uploads")),
@@ -62,7 +86,12 @@ class AppConfig:
             alphavantage_api_key=os.getenv("ALPHAVANTAGE_API_KEY"),
             host=os.getenv("MAS_HOST", "127.0.0.1"),
             port=int(os.getenv("MAS_PORT", "8000")),
-            api_key=os.getenv("MAS_API_KEY"),
+            api_key=os.getenv("MAS_API_KEY") or None,
+            app_env=app_env,
+            data_mode=data_mode,
+            allow_local_fallback=allow_local_fallback,
+            max_upload_bytes=int(os.getenv("MAS_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024))),
+            max_upload_files=int(os.getenv("MAS_MAX_UPLOAD_FILES", "5")),
             llm=LLMSettings.from_env(),
             rag_enabled=os.getenv("MAS_RAG_ENABLED", "true").lower() in {"1", "true", "yes"},
             milvus_uri=os.getenv("MAS_MILVUS_URI", "data/milvus_lite.db"),

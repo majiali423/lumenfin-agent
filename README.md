@@ -228,10 +228,12 @@ Eval scripts:
 
 ### Non-goals (v0.3)
 
-- Production multi-tenant auth, LLM-based repair policy, cross-encoder rerank
-- Full LangGraph Postgres channel saver (snapshot checkpoint only)
+- Production multi-tenant auth / RBAC (local demos may leave `MAS_API_KEY` empty when `APP_ENV=dev|test`; non-dev requires a key)
+- Full LangGraph Postgres channel saver (snapshot checkpoint only; compose Postgres is optional infra, not a completed multi-tenant store)
+- Shared Milvus Lite across API + CLI + worker processes (Lite uses a single-writer file lock; production needs a real Milvus service)
 - Image/chart OCR upload (use PDF or structured files)
 - Investment advice or trade execution
+- Silent sample fundamentals in `DATA_MODE=live` (demo mode keeps the sample DB and labels it explicitly)
 
 See [docs/architecture_decisions.md](docs/architecture_decisions.md) for design rationale.
 
