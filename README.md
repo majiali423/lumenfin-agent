@@ -129,7 +129,9 @@ copy .env.example .env
 # Edit .env - set DEEPSEEK_API_KEY=sk-...
 ```
 
-Without a key, the system uses `local-fallback` (good for wiring tests; weaker reports).
+In `APP_ENV=dev|test`, running without a DeepSeek key uses `local-fallback`
+(good for wiring tests; weaker reports). In non-dev environments, local fallback
+is disabled unless `ALLOW_LOCAL_FALLBACK=true` is set explicitly.
 
 ### 3. CLI demo
 
@@ -229,6 +231,7 @@ Eval scripts:
 ### Non-goals (v0.3)
 
 - Production multi-tenant auth / RBAC (local demos may leave `MAS_API_KEY` empty when `APP_ENV=dev|test`; non-dev requires a key)
+- Production defaults to `DATA_MODE=live` and disables local LLM fallback unless explicitly overridden for a demo.
 - Full LangGraph Postgres channel saver (snapshot checkpoint only; compose Postgres is optional infra, not a completed multi-tenant store)
 - Shared Milvus Lite across API + CLI + worker processes (Lite uses a single-writer file lock; production needs a real Milvus service)
 - Image/chart OCR upload (use PDF or structured files)

@@ -53,6 +53,8 @@ class AppConfig:
     def allows_local_fallback(self) -> bool:
         if self.allow_local_fallback is not None:
             return self.allow_local_fallback
+        if self.requires_api_key():
+            return False
         return self.data_mode == "demo" or self.app_env in {"dev", "test"}
 
     def requires_api_key(self) -> bool:
@@ -62,10 +64,11 @@ class AppConfig:
     def from_env(cls) -> "AppConfig":
         raw_output_dir = os.getenv("MAS_OUTPUT_DIR", "outputs")
         raw_db_path = os.getenv("MAS_DB_PATH", "data/lumenfin.db")
-        data_mode = os.getenv("DATA_MODE", "demo").strip().lower()
-        if data_mode not in {"demo", "live"}:
-            data_mode = "demo"
         app_env = os.getenv("APP_ENV", "dev").strip().lower() or "dev"
+        default_data_mode = "demo" if app_env in {"dev", "test"} else "live"
+        data_mode = os.getenv("DATA_MODE", default_data_mode).strip().lower()
+        if data_mode not in {"demo", "live"}:
+            data_mode = default_data_mode
         allow_raw = os.getenv("ALLOW_LOCAL_FALLBACK")
         allow_local_fallback = None
         if allow_raw is not None and allow_raw.strip() != "":

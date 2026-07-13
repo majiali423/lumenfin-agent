@@ -4,6 +4,7 @@ import sys
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,7 @@ if str(SRC) not in sys.path:
 from fastapi.testclient import TestClient
 
 from lumenfin.api.app import create_app
+from lumenfin.config import AppConfig
 from lumenfin.llm import LocalFallbackLLMClient
 from lumenfin.tools import retrieve_company_payload
 from tests.support.fakes import FakeMarketDataClient
@@ -21,6 +23,40 @@ from tests.test_graph_routing import build_test_config
 
 
 class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
+    def test_production_env_defaults_to_live_data_and_no_local_fallback(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "APP_ENV": "production",
+                "MAS_API_KEY": "prod-key",
+                "DEEPSEEK_API_KEY": "",
+            },
+            clear=True,
+        ):
+            config = AppConfig.from_env()
+
+        self.assertEqual(config.app_env, "production")
+        self.assertEqual(config.data_mode, "live")
+        self.assertFalse(config.allows_sample_data())
+        self.assertFalse(config.allows_local_fallback())
+
+    def test_production_demo_and_fallback_require_explicit_opt_in(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "APP_ENV": "production",
+                "MAS_API_KEY": "prod-key",
+                "DATA_MODE": "demo",
+                "ALLOW_LOCAL_FALLBACK": "true",
+            },
+            clear=True,
+        ):
+            config = AppConfig.from_env()
+
+        self.assertEqual(config.data_mode, "demo")
+        self.assertTrue(config.allows_sample_data())
+        self.assertTrue(config.allows_local_fallback())
+
     def test_live_mode_skips_sample_financial_payload(self) -> None:
         demo = retrieve_company_payload("Apple", allow_sample_data=True)
         live = retrieve_company_payload("Apple", allow_sample_data=False)
