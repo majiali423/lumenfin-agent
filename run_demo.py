@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from lumenfin.stdio import configure_stdio_utf8
 
 def main() -> None:
     configure_stdio_utf8()
+    for noisy in ("grpc", "grpc._server", "pymilvus"):
+        logging.getLogger(noisy).setLevel(logging.ERROR)
 
     parser = argparse.ArgumentParser(description="Run the LumenFin agent demo.")
     parser.add_argument(
@@ -42,7 +45,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     if not args.query.strip():
-        parser.error('Missing --query. Examples: docs/MY_TEST_QUERIES.md')
+        parser.error("Missing --query. Examples: docs/MY_TEST_QUERIES.md")
 
     config = AppConfig.from_env()
     output_dir = Path(args.output_dir) if args.output_dir else config.output_dir
@@ -54,11 +57,19 @@ def main() -> None:
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        print(result["final_report"])
+        print(
+            result.get("final_report")
+            or f"(no final_report; workflow_status={result.get('workflow_status')})"
+        )
         print(f"\n[LLM] backend={result.get('llm_backend', 'unknown')}")
-        print(f"\n[Artifacts] report={artifacts['report_path']}")
-        print(f"[Artifacts] audit={artifacts['audit_path']}")
-        print(f"[Artifacts] state={artifacts['state_path']}")
+        print(f"[Workflow] status={result.get('workflow_status')}")
+        if result.get("missing_fields"):
+            print(f"[HITL] missing_fields={result.get('missing_fields')}")
+            print(f"[HITL] questions={result.get('clarification_questions')}")
+        print(f"\n[Artifacts] report={artifacts.get('report_path')}")
+        print(f"[Artifacts] audit={artifacts.get('audit_path')}")
+        print(f"[Artifacts] state={artifacts.get('state_path')}")
+        print(f"[Artifacts] manifest={artifacts.get('manifest_path')}")
 
 
 if __name__ == "__main__":

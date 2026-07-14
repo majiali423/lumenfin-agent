@@ -82,6 +82,10 @@ The local fallback is not a local LLM. It is a rule-based degraded client used o
 
 Most digital annual reports contain extractable text. PyMuPDF is fast, local, and simple to deploy for this use case.
 
+## 6b. Fail-loud When Fundamentals Are Missing
+
+Demo sample rows and uploaded PDFs are the only structured inputs for AST ratios. If a company resolves (e.g. `腾讯控股` → `Tencent`) but has neither sample fundamentals nor extractable PDF metrics, retrieval sets `fatal_data_gap` and the graph routes `retrieval → synthesizer` with `workflow_status=incomplete_data`. The synthesizer writes an honest incomplete report and does **not** ask the LLM to invent numbers. FinAgentBench is expected to fail-closed on that export (`structured_source=none`). This is preferred to silent degraded loops through replanner/quant/critic.
+
 OCR is intentionally not part of the MVP because it adds cost, deployment complexity, and another source of extraction error. OCR can be added later for scanned documents.
 
 ## 7. Why Numerical Computation Is Not Delegated To The LLM

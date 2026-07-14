@@ -20,6 +20,7 @@ def build_data_sources(
 ) -> dict[str, Any]:
     companies = list(result.get("companies") or [])
     document_contexts = list(result.get("document_contexts") or [])
+    retrieved_docs = result.get("retrieved_docs") or {}
     rag_evidence = result.get("rag_evidence") or {}
     rag_index_stats = result.get("rag_index_stats") or {}
     market_snapshots = result.get("market_snapshots") or {}
@@ -54,6 +55,16 @@ def build_data_sources(
             structured_source = "uploaded_json"
     elif allow_sample and any(company in SAMPLE_FINANCIAL_DATA for company in companies):
         structured_source = "sample_db"
+    elif any(
+        str((retrieved_docs.get(c) or {}).get("structured_source") or "") == "sec_companyfacts"
+        for c in companies
+    ):
+        structured_source = "sec_companyfacts"
+    elif any(
+        str((retrieved_docs.get(c) or {}).get("structured_source") or "") == "yahoo_fundamentals"
+        for c in companies
+    ):
+        structured_source = "yahoo_fundamentals"
     elif has_narrative_upload:
         structured_source = "document_extracted"
 
@@ -191,12 +202,18 @@ def export_run_artifacts(
     artifacts: dict[str, str] = {}
 
     workflow_status = result.get("workflow_status")
-    if workflow_status == "completed":
+    exportable = workflow_status in {
+        "completed",
+        "incomplete_data",
+        "needs_clarification",
+        "blocked_by_guardrail",
+    }
+    if exportable:
         report_path = output_dir / f"{base_name}_report.md"
         audit_path = output_dir / f"{base_name}_audit.json"
         state_path = output_dir / f"{base_name}_state.json"
 
-        report_path.write_text(result.get("final_report", ""), encoding="utf-8")
+        report_path.write_text(result.get("final_report", "") or "", encoding="utf-8")
         audit_path.write_text(
             json.dumps(result.get("audit_log", []), ensure_ascii=False, indent=2),
             encoding="utf-8",

@@ -38,6 +38,7 @@ class FinanceState(TypedDict, total=False):
     metric_confidence: dict[str, dict[str, dict[str, Any]]]
     sentiment_analysis: dict[str, dict[str, Any]]
     compliance_findings: list[str]
+    compliance_violations: list[dict[str, Any]]
     compliance_summary: str
     report_sections: list[str]
     executive_summary: str
@@ -49,7 +50,8 @@ class FinanceState(TypedDict, total=False):
     replan_reason: Optional[str]
     retries: int
     degraded_mode: bool
-    # Enriched fields
+    fatal_data_gap: bool
+    data_gap_detail: str
     company_profiles: dict[str, str]
     swot_analysis: dict[str, dict[str, str]]
     risk_scores: dict[str, dict[str, float]]
@@ -69,3 +71,5 @@ class FinanceState(TypedDict, total=False):
     run_ended_at: str
     input_guardrail_findings: list[dict[str, Any]]
     input_guardrail_summary: dict[str, Any]
+    retrieval_provenance: dict[str, dict[str, Any]]
+    data_mode: str

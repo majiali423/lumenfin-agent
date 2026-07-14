@@ -11,7 +11,13 @@ from .data_ingest import (
     normalize_metric_hints,
     structured_metrics_to_document_contexts,
 )
-from .documents import COMPANY_HINTS, _extract_metric_hints, parse_pdf_document
+from .documents import (
+    COMPANY_HINTS,
+    _extract_metric_hints,
+    detect_companies_from_text,
+    extract_metric_hints_for_company,
+    parse_pdf_document,
+)
 
 COMPANY_COLUMNS = frozenset(
     {"company", "company_name", "ticker", "symbol", "name", "公司", "企业"}
@@ -20,16 +26,8 @@ METRIC_NAME_COLUMNS = frozenset({"metric", "metrics", "indicator", "field", "指
 METRIC_VALUE_COLUMNS = frozenset({"value", "amount", "数值", "值"})
 
 SUPPORTED_SUFFIXES = frozenset(
-    {".pdf", ".csv", ".xlsx", ".md", ".markdown", ".json"}
+    {".pdf", ".csv", ".xlsx", ".md", ".markdown", ".json", ".txt"}
 )
-
-
-def detect_companies_from_text(text: str, filename: str = "") -> list[str]:
-    lowered = text.lower()
-    name_lower = filename.lower()
-    return sorted(
-        {name for key, name in COMPANY_HINTS.items() if key in lowered or key in name_lower}
-    )
 
 
 def _normalize_header(name: str) -> str:
@@ -51,6 +49,9 @@ def _build_document_context(
     page_list = pages if pages is not None else [text]
     companies = detected_companies or detect_companies_from_text(text, filename)
     hints = metric_hints if metric_hints is not None else {}
+    per_company = {
+        company: extract_metric_hints_for_company(text, company) for company in companies
+    }
     ctx: dict[str, Any] = {
         "document_id": document_id,
         "filename": filename,
@@ -60,6 +61,7 @@ def _build_document_context(
         "excerpt": text[:4000],
         "detected_companies": companies,
         "metric_hints": hints,
+        "per_company_metric_hints": per_company,
         "source_type": source_type,
     }
     if path is not None:
@@ -277,6 +279,22 @@ def parse_markdown_document(file_path: Path) -> dict[str, Any]:
     )
 
 
+def parse_text_document(file_path: Path) -> dict[str, Any]:
+    text = file_path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ValueError(f"Text file is empty: {file_path.name}")
+    return _build_document_context(
+        document_id=file_path.stem,
+        filename=file_path.name,
+        text=text,
+        source_type="text",
+        path=str(file_path),
+        pages=[text],
+        detected_companies=detect_companies_from_text(text, file_path.name),
+        metric_hints=_extract_metric_hints(text),
+    )
+
+
 def parse_json_documents(file_path: Path) -> list[dict[str, Any]]:
     company_metrics = load_metrics_json_file(file_path)
     contexts = structured_metrics_to_document_contexts(company_metrics)
@@ -305,6 +323,8 @@ def parse_upload_documents(file_path: Path) -> list[dict[str, Any]]:
         return parse_excel_documents(path)
     if suffix in {".md", ".markdown"}:
         return [parse_markdown_document(path)]
+    if suffix == ".txt":
+        return [parse_text_document(path)]
     if suffix == ".json":
         return parse_json_documents(path)
     raise ValueError(f"Unsupported upload type: {suffix}")

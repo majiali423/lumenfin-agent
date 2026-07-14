@@ -28,6 +28,14 @@ class FinRunExportTestCase(unittest.TestCase):
         self.assertTrue(any(item["source_type"] == "market_data" for item in finrun["evidence"]))
         self.assertEqual(finrun["market_data"][0]["status"], "ok")
         self.assertEqual(finrun["market_data"][0]["current_price"], 180.0)
+        self.assertEqual(finrun["metadata"]["data_mode"], "demo")
+        self.assertEqual(finrun["metadata"]["compliance_violations"], [])
+        self.assertEqual(
+            finrun["metadata"]["retrieval_provenance"]["Apple"]["structured_source"],
+            "sample_db",
+        )
+        metric = next(item for item in finrun["metrics"] if item["name"] == "ebitda_margin")
+        self.assertEqual(metric["confidence"]["structured_source"], "sample_db")
 
     def test_export_finrun_script_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -83,7 +91,21 @@ def _sample_state() -> dict:
                     "signals": ["Supplier concentration remains above target."],
                 },
                 "earnings_call_quotes": ["Management cited services expansion and margin discipline."],
+                "structured_source": "sample_db",
+                "provenance": {
+                    "structured_source": "sample_db",
+                    "market_provider": "fake",
+                    "market_status": "ok",
+                    "data_mode": "demo",
+                },
+                "confidence": {"overall": 0.85, "market_data": 1.0, "live_market": 1.0, "rag_coverage": 0.0},
             }
+        },
+        "data_mode": "demo",
+        "input_guardrail_summary": {"allowed": True, "mode": "sanitize", "finding_count": 0, "critical_count": 0},
+        "compliance_violations": [],
+        "retrieval_provenance": {
+            "Apple": {"structured_source": "sample_db", "market_provider": "fake", "market_status": "ok", "data_mode": "demo"}
         },
         "financial_metrics": {"Apple": {"ebitda_margin": 0.3427, "r_and_d_intensity": 0.0811}},
         "risk_scores": {"Apple": {"supply_chain_risk": 5.0, "market_risk": 4.0}},

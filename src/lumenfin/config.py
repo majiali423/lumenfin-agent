@@ -46,6 +46,8 @@ class AppConfig:
     input_guardrail_enabled: bool
     input_guardrail_mode: str
     tool_backend: str
+    fetch_live_fundamentals: bool
+    fetch_sec_fundamentals: bool
 
     def allows_sample_data(self) -> bool:
         return self.data_mode == "demo"
@@ -107,4 +109,22 @@ class AppConfig:
             input_guardrail_enabled=os.getenv("MAS_INPUT_GUARDRAIL_ENABLED", "true").lower() in {"1", "true", "yes"},
             input_guardrail_mode=os.getenv("MAS_INPUT_GUARDRAIL_MODE", "sanitize").lower(),
             tool_backend=os.getenv("MAS_TOOL_BACKEND", "local").lower(),
+            fetch_live_fundamentals=(
+                os.getenv(
+                    "MAS_FETCH_LIVE_FUNDAMENTALS",
+                    "true" if data_mode == "live" else "false",
+                )
+                .strip()
+                .lower()
+                in {"1", "true", "yes"}
+            ),
+            fetch_sec_fundamentals=(
+                os.getenv(
+                    "MAS_FETCH_SEC_FUNDAMENTALS",
+                    "true" if data_mode == "live" else "false",
+                )
+                .strip()
+                .lower()
+                in {"1", "true", "yes"}
+            ),
         )

@@ -22,6 +22,11 @@ DEFAULT_TICKER_MAP = {
     "TSMC": "TSM",
     "Tencent": "TCEHY",
     "腾讯": "0700.HK",
+    "Broadcom": "AVGO",
+    "Alibaba": "BABA",
+    "Oracle": "ORCL",
+    "Shopify": "SHOP",
+    "Block": "XYZ",
 }
 
 

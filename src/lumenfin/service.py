@@ -129,7 +129,12 @@ class LumenFinAnalysisService:
     ) -> dict:
         artifacts: dict[str, str] = {}
         workflow_status = result.get("workflow_status", "completed")
-        if export_artifacts and workflow_status in {"completed", "needs_clarification", "blocked_by_guardrail"}:
+        if export_artifacts and workflow_status in {
+            "completed",
+            "incomplete_data",
+            "needs_clarification",
+            "blocked_by_guardrail",
+        }:
             artifacts = export_run_artifacts(
                 result=result,
                 output_dir=self.config.output_dir,

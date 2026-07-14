@@ -39,6 +39,8 @@ def route_after_query_planner(state: FinanceState) -> str:
 
 
 def route_after_retrieval(state: FinanceState) -> str:
+    if state.get("fatal_data_gap"):
+        return "synthesizer"
     return "replanner" if state.get("replan_reason") else "quant"
 
 
@@ -73,10 +75,14 @@ def _base_initial_state(query: str, thread_id: str, document_contexts: list[dict
         "audit_log": [],
         "reasoning_memory": [],
         "compliance_findings": [],
+        "compliance_violations": [],
+        "retrieval_provenance": {},
         "report_sections": [],
         "appendix_search_done": False,
         "retries": 0,
         "degraded_mode": False,
+        "fatal_data_gap": False,
+        "data_gap_detail": "",
         "rag_evidence": {},
         "rag_index_stats": {},
         "critic_iterations": 0,
@@ -127,6 +133,8 @@ class LumenFinAgentSystem:
             tool_backend=self.app_config.tool_backend,
             allow_sample_data=self.app_config.allows_sample_data(),
             data_mode=self.app_config.data_mode,
+            fetch_live_fundamentals=self.app_config.fetch_live_fundamentals,
+            fetch_sec_fundamentals=self.app_config.fetch_sec_fundamentals,
         )
         self.checkpointer = InMemorySaver()
         self.graph = self._build_graph()
@@ -173,7 +181,7 @@ class LumenFinAgentSystem:
         workflow.add_conditional_edges(
             "retrieval",
             route_after_retrieval,
-            {"quant": "quant", "replanner": "replanner"},
+            {"quant": "quant", "replanner": "replanner", "synthesizer": "synthesizer"},
         )
         workflow.add_conditional_edges(
             "quant",
@@ -300,5 +308,7 @@ class LumenFinAgentSystem:
         if final_result.get("workflow_status") == "needs_clarification":
             final_result.setdefault("final_report", "")
         if final_result.get("workflow_status") == "blocked_by_guardrail":
+            final_result.setdefault("final_report", "")
+        if final_result.get("workflow_status") == "incomplete_data":
             final_result.setdefault("final_report", "")
         return final_result

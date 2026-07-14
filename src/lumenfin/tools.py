@@ -89,8 +89,29 @@ KNOWN_ALIASES = {
     "alphabet": "Alphabet",
     "google": "Alphabet",
     "meta": "Meta",
+    "meta platforms": "Meta",
+    "facebook": "Meta",
     "nvidia": "NVIDIA",
     "amd": "AMD",
+    "tencent": "Tencent",
+    "腾讯": "Tencent",
+    "腾讯控股": "Tencent",
+    "apple": "Apple",
+    "microsoft": "Microsoft",
+    "tsla": "Tesla",
+    "nvda": "NVIDIA",
+    "tsmc": "TSMC",
+    "taiwan semiconductor": "TSMC",
+    "samsung": "Samsung",
+    "byd": "BYD",
+    "比亚迪": "BYD",
+    "broadcom": "Broadcom",
+    "avgo": "Broadcom",
+    "alibaba": "Alibaba",
+    "阿里巴巴": "Alibaba",
+    "oracle": "Oracle",
+    "shopify": "Shopify",
+    "block": "Block",
 }
 
 
@@ -100,23 +121,78 @@ def retrieve_company_payload(
     document_contexts: list[dict[str, Any]] | None = None,
     *,
     allow_sample_data: bool = True,
+    ticker: str | None = None,
+    fetch_live_fundamentals: bool = False,
+    fetch_sec_fundamentals: bool = False,
 ) -> dict[str, Any]:
-    """Build a company payload from sample data, PDF documents, or both."""
+    """Build a company payload from documents / SEC / Yahoo / sample.
+
+    Preference order:
+    1) document-extracted metrics from uploads
+    2) SEC EDGAR companyfacts (US filers; when fetch_sec_fundamentals=True)
+    3) Yahoo annual income statement (when fetch_live_fundamentals=True)
+    4) sample_db (when allow_sample_data=True)
+    """
+    doc_contexts = document_contexts or []
+    document_payload = _payload_from_documents(company, doc_contexts, include_appendix=include_appendix)
+    has_document_metrics = bool(document_payload.get("market_data"))
+    if has_document_metrics:
+        return document_payload
+
+    from .market_data import DEFAULT_TICKER_MAP
+
+    symbol = (ticker or DEFAULT_TICKER_MAP.get(company) or company).strip()
+
+    def _merge_live(live: dict[str, Any]) -> dict[str, Any]:
+        result = dict(live)
+        if document_payload.get("earnings_call_quotes"):
+            result["earnings_call_quotes"] = list(document_payload["earnings_call_quotes"])
+        if document_payload.get("supply_chain", {}).get("signals"):
+            result["supply_chain"] = dict(document_payload["supply_chain"])
+        if document_payload.get("source_documents"):
+            result["source_documents"] = list(document_payload.get("source_documents") or [])
+        return result
+
+    if fetch_sec_fundamentals:
+        from .sec_fundamentals import fetch_sec_companyfacts_fundamentals
+
+        sec_live = fetch_sec_companyfacts_fundamentals(symbol)
+        if sec_live and sec_live.get("market_data"):
+            return _merge_live(sec_live)
+
+    if fetch_live_fundamentals:
+        from .fundamentals import fetch_yahoo_fundamentals
+
+        yahoo_live = fetch_yahoo_fundamentals(symbol)
+        if yahoo_live and yahoo_live.get("market_data"):
+            return _merge_live(yahoo_live)
+
     has_sample_data = allow_sample_data and company in SAMPLE_FINANCIAL_DATA
     if has_sample_data:
         payload = SAMPLE_FINANCIAL_DATA[company]
-        result: dict[str, Any] = {
+        result = {
             "market_data": dict(payload["market_data"]),
             "supply_chain": dict(payload["supply_chain"]),
             "earnings_call_quotes": list(payload["earnings_call_quotes"]),
             "structured_source": "sample_db",
         }
+        if document_payload.get("earnings_call_quotes"):
+            result["earnings_call_quotes"] = list(document_payload["earnings_call_quotes"])
+        if document_payload.get("supply_chain", {}).get("signals"):
+            result["supply_chain"] = dict(document_payload["supply_chain"])
         if include_appendix:
             result["appendix"] = dict(payload["appendix"])
         return result
 
-    # For companies without sample data (or when sample is disabled), extract from uploaded docs
-    doc_contexts = document_contexts or []
+    return document_payload
+
+
+def _payload_from_documents(
+    company: str,
+    doc_contexts: list[dict[str, Any]],
+    *,
+    include_appendix: bool,
+) -> dict[str, Any]:
     market_data: dict[str, float] = {}
     supply_chain_signals: list[str] = []
     earnings_quotes: list[str] = []
@@ -128,8 +204,17 @@ def retrieve_company_payload(
         text = doc.get("text", "")
         excerpt = doc.get("excerpt", "")[:3000]
 
-        # Use PDF-extracted metrics as market data
-        for key, value in doc.get("metric_hints", {}).items():
+        scoped = (doc.get("per_company_metric_hints") or {}).get(company) or {}
+        if not scoped and text:
+            from .documents import extract_metric_hints_for_company
+
+            scoped = extract_metric_hints_for_company(text, company)
+        # Prefer company-scoped hints so multi-issuer PDFs do not assign one firm's
+        # first revenue hit to every detected peer.
+        hint_source = scoped or (
+            doc.get("metric_hints", {}) if len(detected) <= 1 else {}
+        )
+        for key, value in hint_source.items():
             if key == "revenue":
                 market_data["revenue_2025"] = value
             elif key == "ebitda":
@@ -137,40 +222,88 @@ def retrieve_company_payload(
             elif key == "r_and_d":
                 market_data["r_and_d_2025"] = value
 
-        # Extract narrative as earnings call quotes
         if excerpt:
             earnings_quotes.append(excerpt[:500])
 
-        # Attempt to infer supply chain risk from text
         lowered_text = text.lower()
-        risk_signals = []
         if any(w in lowered_text for w in ["supply chain risk", "供应链风险", "supply constraint", "logistics"]):
-            risk_signals.append("PDF 文档中包含供应链相关讨论。")
-
-        if risk_signals:
-            supply_chain_signals = risk_signals
+            supply_chain_signals.append("PDF 文档中包含供应链相关讨论。")
 
     if market_data:
         operating_income = market_data.get("ebitda_2025", 0) * 0.65
         market_data["operating_income_2025"] = round(operating_income, 1)
 
-    result = {
+    return {
         "market_data": market_data,
         "supply_chain": {
             "risk_level": "medium" if supply_chain_signals else "unknown",
-            "signals": supply_chain_signals or ["PDF 文档中未检测到明确供应链信号。"],
+            "signals": supply_chain_signals or (["PDF 文档中未检测到明确供应链信号。"] if doc_contexts else []),
         },
-        "earnings_call_quotes": earnings_quotes or ["文档已上传，请基于 PDF 内容进行分析。"],
+        "earnings_call_quotes": earnings_quotes or (
+            ["文档已上传，请基于 PDF 内容进行分析。"] if doc_contexts else []
+        ),
         "structured_source": "document_extracted" if market_data or earnings_quotes else "none",
+        **({"appendix": {}} if include_appendix else {}),
     }
-    if include_appendix:
-        result["appendix"] = {}
-    return result
 
 
 def _append_unique_company(companies: list[str], name: str) -> None:
     if name and name not in companies:
         companies.append(name)
+
+
+def is_plausible_company_label(name: str) -> bool:
+    """Drop OCR/LLM mojibake labels that break live provenance gates."""
+    raw = (name or "").strip()
+    if len(raw) < 2 or len(raw) > 80:
+        return False
+    if "\ufffd" in raw or "?" in raw:
+        return False
+    if raw in KNOWN_ALIASES or raw in KNOWN_ALIASES.values():
+        return True
+    lowered = raw.lower()
+    if lowered in KNOWN_ALIASES:
+        return True
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9 .,&'-]{1,60}", raw):
+        return True
+    if re.fullmatch(r"[\u4e00-\u9fffA-Za-z0-9]{2,20}", raw):
+        return True
+    return False
+
+
+def _canonicalize_company_name(name: str) -> str:
+    raw = (name or "").strip()
+    if not raw:
+        return raw
+    lowered = raw.lower()
+    if raw in KNOWN_ALIASES:
+        return KNOWN_ALIASES[raw]
+    if lowered in KNOWN_ALIASES:
+        return KNOWN_ALIASES[lowered]
+    return raw
+
+
+def canonicalize_companies(companies: list[str]) -> list[str]:
+    """Dedupe company labels via aliases (e.g. 腾讯控股 -> Tencent)."""
+    canonical: list[str] = []
+    for company in companies:
+        cleaned = _canonicalize_company_name(str(company))
+        if not is_plausible_company_label(cleaned):
+            continue
+        _append_unique_company(canonical, cleaned)
+    return canonical
+
+
+def has_computable_fundamentals(payload: dict[str, Any] | None) -> bool:
+    """True when AST quant can compute at least one core ratio from structured inputs."""
+    market = (payload or {}).get("market_data") or {}
+    revenue = market.get("revenue_2025")
+    if revenue in (None, "", 0):
+        return False
+    return any(
+        market.get(key) not in (None, "")
+        for key in ("ebitda_2025", "operating_income_2025", "r_and_d_2025")
+    )
 
 
 def _extract_companies_via_llm(query: str, llm_client: Any) -> list[str]:
@@ -200,40 +333,36 @@ def extract_companies_from_query(
     companies: list[str] = []
     lowered = query.lower()
 
-    # 1. Check sample data for direct mentions
+    # 1. Check sample data for direct mentions (name detection only; sample values gated elsewhere)
     for company in SAMPLE_FINANCIAL_DATA:
         if company.lower() in lowered:
             _append_unique_company(companies, company)
 
-    # 2. Check known aliases
-    for alias, name in KNOWN_ALIASES.items():
-        if alias in lowered:
+    # 2. Check known aliases + shared COMPANY_HINTS (CJK aliases match original text too)
+    from .documents import COMPANY_HINTS
+
+    for alias, name in {**KNOWN_ALIASES, **COMPANY_HINTS}.items():
+        if alias in lowered or alias in query:
             _append_unique_company(companies, name)
 
     # 3. Collect companies detected in uploaded PDFs
     doc_contexts = document_contexts or []
     for doc in doc_contexts:
         for company in doc.get("detected_companies", []):
-            _append_unique_company(companies, company)
+            _append_unique_company(companies, _canonicalize_company_name(str(company)))
 
     # 4. Merge LLM extraction so comparative queries do not stop at the first sample hit
     if llm_client:
         for company in _extract_companies_via_llm(query, llm_client):
-            _append_unique_company(companies, company)
+            _append_unique_company(companies, _canonicalize_company_name(str(company)))
 
-    if companies:
-        return companies
-
-    # 5. Fall back to PDF filename as company name hint
-    for doc in doc_contexts:
-        filename = doc.get("filename", "")
-        if filename:
-            name = Path(filename).stem
-            if name and len(name) < 50:
-                return [name]
-
-    return []
-
+    # Canonicalize + dedupe (e.g. LLM emits 腾讯控股 while alias already added Tencent)
+    return canonicalize_companies(companies) if companies else (
+        [_canonicalize_company_name(Path(doc.get("filename", "")).stem)
+         for doc in doc_contexts
+         if doc.get("filename") and len(Path(doc.get("filename", "")).stem) < 50][:1]
+        or []
+    )
 
 def derive_target_symbols(companies: list[str], query: str) -> dict[str, str]:
     symbols = {company: DEFAULT_TICKER_MAP.get(company, company) for company in companies}

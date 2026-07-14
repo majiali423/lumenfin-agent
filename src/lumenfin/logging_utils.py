@@ -50,6 +50,9 @@ def configure_logging() -> None:
     handler = logging.StreamHandler(stream=sys.stdout)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    # Milvus Lite / gRPC noise: AllocTimestamp is unimplemented in Lite and not actionable.
+    for noisy in ("grpc", "grpc._server", "pymilvus", "milvus_lite"):
+        logging.getLogger(noisy).setLevel(logging.ERROR)
 
 
 async def request_logging_middleware(request: Request, call_next):

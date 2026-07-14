@@ -1,0 +1,17 @@
+{
+  "root": "C:\\a_project\\Projects\\lumenfin-agent\\fixtures\\stress",
+  "files": [
+    "MANIFEST.json",
+    "alibaba_research_note.md",
+    "broadcom_metrics.json",
+    "byd_zh_en_memo.pdf",
+    "empty_metrics.csv",
+    "injection_payload.pdf",
+    "meta_metrics.xlsx",
+    "notes.txt",
+    "nvda_fy2025_excerpt_multipage.pdf",
+    "oracle_sparse_fluff.pdf",
+    "peer_metrics.csv",
+    "semiconductor_peer_blend.pdf"
+  ]
+}

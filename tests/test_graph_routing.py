@@ -15,8 +15,10 @@ from lumenfin.config import AppConfig
 from lumenfin.graph import (
     route_after_critic,
     route_after_repair,
+    route_after_retrieval,
 )
-from lumenfin.critic_repair import classify_critic_repair_target
+from lumenfin.critic_repair import classify_critic_repair_target, classify_critic_violations
+from lumenfin.artifacts import Violation
 from lumenfin.llm import LLMSettings
 
 
@@ -88,9 +90,24 @@ class GraphRoutingTestCase(unittest.TestCase):
         findings = ["Apple: missing sentiment analysis."]
         self.assertEqual(classify_critic_repair_target(findings), "psychologist")
 
+    def test_violation_based_repair_prefers_quant_over_sentiment(self) -> None:
+        violations = [
+            Violation(code="missing_sentiment_analysis", severity="medium", message="sentiment"),
+            Violation(code="missing_quantitative_results", severity="high", message="quant"),
+        ]
+        self.assertEqual(classify_critic_violations(violations), "quant")
+
     def test_repair_routes_to_configured_target(self) -> None:
         state = {"critic_repair_target": "quant"}
         self.assertEqual(route_after_repair(state), "quant")
+
+    def test_retrieval_routes_to_synthesizer_on_fatal_data_gap(self) -> None:
+        state = {"fatal_data_gap": True, "replan_reason": "should be ignored"}
+        self.assertEqual(route_after_retrieval(state), "synthesizer")
+
+    def test_retrieval_routes_to_quant_when_healthy(self) -> None:
+        state = {"fatal_data_gap": False, "replan_reason": None}
+        self.assertEqual(route_after_retrieval(state), "quant")
 
 
 if __name__ == "__main__":

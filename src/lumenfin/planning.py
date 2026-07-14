@@ -110,7 +110,11 @@ def _has_explicit_company_signal(query: str, document_contexts: list[dict[str, A
     lower = query.lower()
     if any(company.lower() in lower for company in SAMPLE_FINANCIAL_DATA):
         return True
-    if any(alias in lower for alias in KNOWN_ALIASES):
+    # Alias keys may be CJK; match against both lowercased and original query text.
+    from .documents import COMPANY_HINTS
+
+    alias_keys = set(KNOWN_ALIASES) | set(COMPANY_HINTS)
+    if any(alias in lower or alias in query for alias in alias_keys):
         return True
     return any(doc.get("detected_companies") or doc.get("filename") for doc in document_contexts)
 
@@ -145,7 +149,22 @@ def _detect_missing_fields(companies: list[str], document_contexts: list[dict[st
     if not companies and not document_contexts:
         missing.append("company")
     lower = query.lower()
-    if not any(token in lower for token in ("2024", "2025", "2026", "fy", "财年", "年度", "year")):
+    time_tokens = (
+        "2024",
+        "2025",
+        "2026",
+        "fy",
+        "财年",
+        "年度",
+        "year",
+        "annual",
+        "latest",
+        "ttm",
+        "季度",
+        "年报",
+        "季报",
+    )
+    if not any(token in lower for token in time_tokens):
         if not document_contexts:
             missing.append("time_range")
     return missing

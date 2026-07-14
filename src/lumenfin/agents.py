@@ -7,7 +7,9 @@ from typing import Any, Iterator
 
 from .input_guardrail import GuardrailMode, guard_documents
 from .clarification import merge_clarification_into_query
-from .critic_repair import classify_critic_repair_target
+from .critic_repair import classify_critic_violations, compliance_messages
+from .critic_checks import run_critic_checks
+from .artifacts import RetrievalArtifact, RetrievalProvenance, score_retrieval_confidence
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
 from .knowledge_store import KnowledgeStore
 from .llm import BaseLLMClient
@@ -23,15 +25,16 @@ from .tools import (
     analyze_sentiment_deep,
     build_chart_data,
     calculate_derived_ratios,
+    canonicalize_companies,
     derive_target_symbols,
     extract_companies_from_query,
     generate_scenario_analysis,
+    has_computable_fundamentals,
     parse_with_fallback,
     resolve_safe_formula,
     retrieve_company_payload,
     safe_execute_formula,
     summarize_document_context,
-    validate_report,
 )
 
 
@@ -51,6 +54,8 @@ class AgentRuntime:
         tool_backend: str = "local",
         allow_sample_data: bool = True,
         data_mode: str = "demo",
+        fetch_live_fundamentals: bool = False,
+        fetch_sec_fundamentals: bool = False,
     ) -> None:
         self.session_memory = session_memory
         self.knowledge_memory = knowledge_memory
@@ -65,6 +70,8 @@ class AgentRuntime:
         self.tool_backend = tool_backend if tool_backend in {"local", "mcp"} else "local"
         self.allow_sample_data = allow_sample_data
         self.data_mode = data_mode if data_mode in {"demo", "live"} else "demo"
+        self.fetch_live_fundamentals = bool(fetch_live_fundamentals)
+        self.fetch_sec_fundamentals = bool(fetch_sec_fundamentals)
 
     def _record(
         self,
@@ -95,9 +102,11 @@ class AgentRuntime:
     def input_guardrail(self, state: FinanceState) -> FinanceState:
         documents = state.get("document_contexts", [])
         if not self.input_guardrail_enabled or not documents:
+            empty = guard_documents([], mode=self.input_guardrail_mode)
+            summary = empty.to_dict()
             update: FinanceState = {
-                "input_guardrail_findings": [],
-                "input_guardrail_summary": {"allowed": True, "mode": self.input_guardrail_mode, "finding_count": 0},
+                "input_guardrail_findings": summary["findings"],
+                "input_guardrail_summary": summary,
             }
             update.update(self._record("input_guardrail", "ok", "No uploaded documents to scan.", state))
             return update
@@ -208,6 +217,7 @@ class AgentRuntime:
                 for company in doc.get("detected_companies", []):
                     if company not in companies:
                         companies.append(company)
+            companies = canonicalize_companies(companies)
 
             plan = [
                 "Phase 1 — Data Acquisition: PDF financial reports, real-time market data, sample database fusion",
@@ -281,7 +291,7 @@ class AgentRuntime:
         document_contexts: list[dict[str, Any]],
         session_id: str,
         include_appendix: bool,
-    ) -> dict[str, Any]:
+    ) -> RetrievalArtifact:
         rag_hits: list[dict[str, Any]] = []
         if self.rag_enabled and self.hybrid_retriever and document_contexts:
             rag_hits = self.hybrid_retriever.retrieve_for_company(
@@ -304,6 +314,9 @@ class AgentRuntime:
             include_appendix=include_appendix,
             document_contexts=document_contexts,
             allow_sample_data=self.allow_sample_data,
+            ticker=state.get("target_symbols", {}).get(company),
+            fetch_live_fundamentals=self.fetch_live_fundamentals,
+            fetch_sec_fundamentals=self.fetch_sec_fundamentals,
         )
         try:
             live_market = self.market_data_client.fetch_company_snapshot(
@@ -339,6 +352,12 @@ class AgentRuntime:
                 "ebitda_2025": document_summary["metric_hints"].get("ebitda", payload["market_data"].get("ebitda_2025")),
                 "r_and_d_2025": document_summary["metric_hints"].get("r_and_d", payload["market_data"].get("r_and_d_2025")),
             })
+            # Prefer labeling documents as the structured source when filings contributed metrics.
+            if any(
+                document_summary["metric_hints"].get(key) is not None
+                for key in ("revenue", "ebitda", "r_and_d")
+            ):
+                payload["structured_source"] = "document_extracted"
         if payload["source_documents"]:
             payload["earnings_call_quotes"] = payload["earnings_call_quotes"] or [
                 doc["excerpt"][:300] for doc in payload["source_documents"] if doc.get("excerpt")
@@ -406,13 +425,37 @@ class AgentRuntime:
             profile = f"Profile generation pending for {company}."
 
         self.knowledge_memory.ingest_company_document(company, payload)
-        return {
-            "company": company,
-            "payload": payload,
-            "market_snapshot": live_market,
-            "profile": profile,
-            "rag_hits": rag_hits,
-        }
+        structured_source = str(payload.get("structured_source") or "none")
+        provenance = RetrievalProvenance(
+            structured_source=structured_source,  # type: ignore[arg-type]
+            market_provider=str(live_market.get("provider") or "unknown"),
+            market_status=str(live_market.get("status") or "unknown"),
+            rag_enabled=bool(rag_hits),
+            rag_hit_count=len(rag_hits),
+            document_count=len(document_contexts),
+            data_mode=self.data_mode,
+        )
+        confidence = score_retrieval_confidence(
+            market_data=payload.get("market_data") or {},
+            live_market=live_market,
+            rag_hits=rag_hits,
+        )
+        appendix = dict(payload.get("appendix") or {})
+        return RetrievalArtifact(
+            company=company,
+            market_data=dict(payload.get("market_data") or {}),
+            supply_chain=dict(payload.get("supply_chain") or {}),
+            earnings_call_quotes=list(payload.get("earnings_call_quotes") or []),
+            source_documents=list(payload.get("source_documents") or []),
+            market_snapshot=live_market,
+            profile=profile,
+            rag_hits=rag_hits,
+            provenance=provenance,
+            confidence=confidence,
+            structured_source=structured_source,  # type: ignore[arg-type]
+            appendix=appendix,
+            fundamentals_meta=dict(payload.get("fundamentals_meta") or {}),
+        )
 
     def retrieval(self, state: FinanceState) -> FinanceState:
         with self._track_step("retrieval") as timer:
@@ -450,13 +493,15 @@ class AgentRuntime:
             market_snapshots: dict[str, dict[str, Any]] = {}
             company_profiles: dict[str, str] = {}
             rag_evidence: dict[str, list[dict[str, Any]]] = {}
-            for bundle in bundles:
-                company = bundle["company"]
-                retrieved_docs[company] = bundle["payload"]
-                market_snapshots[company] = bundle["market_snapshot"]
-                company_profiles[company] = bundle["profile"]
-                if bundle["rag_hits"]:
-                    rag_evidence[company] = bundle["rag_hits"]
+            retrieval_provenance: dict[str, dict[str, Any]] = {}
+            for artifact in bundles:
+                company = artifact.company
+                retrieved_docs[company] = artifact.to_legacy_payload()
+                market_snapshots[company] = artifact.market_snapshot
+                company_profiles[company] = artifact.profile
+                retrieval_provenance[company] = artifact.provenance.to_dict()
+                if artifact.rag_hits:
+                    rag_evidence[company] = artifact.rag_hits
 
             needs_appendix = any(
                 "appendix" not in p
@@ -466,7 +511,28 @@ class AgentRuntime:
             )
             market_status = summarize_market_snapshots(market_snapshots)
 
-            replan_reason = "Appendix data gap detected; switching to targeted supplementary retrieval." if needs_appendix else None
+            computable_companies = [
+                company
+                for company, payload in retrieved_docs.items()
+                if has_computable_fundamentals(payload)
+            ]
+            fatal_data_gap = bool(retrieved_docs) and not computable_companies
+            if fatal_data_gap:
+                # Fail-loud: do not silent-replanner loop when no AST-computable fundamentals exist.
+                replan_reason = None
+                data_gap_detail = (
+                    "No computable structured fundamentals for "
+                    f"{', '.join(retrieved_docs)} (structured_source has no revenue/EBITDA/R&D inputs). "
+                    "Upload a filing PDF with extractable metrics, or analyze a demo sample company "
+                    "(Apple/Microsoft/NVIDIA/...). Refusing to invent numbers."
+                )
+            else:
+                replan_reason = (
+                    "Appendix data gap detected; switching to targeted supplementary retrieval."
+                    if needs_appendix
+                    else None
+                )
+                data_gap_detail = ""
 
             update: FinanceState = {
                 "retrieved_docs": retrieved_docs,
@@ -477,25 +543,34 @@ class AgentRuntime:
                 "company_profiles": company_profiles,
                 "rag_evidence": rag_evidence,
                 "rag_index_stats": rag_index_stats,
+                "retrieval_provenance": retrieval_provenance,
+                "fatal_data_gap": fatal_data_gap,
+                "data_gap_detail": data_gap_detail,
+                "degraded_mode": True if fatal_data_gap else state.get("degraded_mode", False),
             }
             rag_chunks = sum(len(hits) for hits in rag_evidence.values())
-            detail = (
-                "Data fusion complete: real-time market data, PDF document parsing, "
-                f"and LLM-generated corporate profiles for {len(state['companies'])} entities integrated "
-                f"(parallel fan-out, workers={min(self.company_parallelism, len(state['companies']))})."
-            )
-            if rag_chunks:
-                detail += (
-                    f" Hybrid Milvus RAG retrieved {rag_chunks} evidence chunks "
-                    f"(vector + keyword RRF, indexed {rag_index_stats.get('chunks_indexed', 0)} chunks)."
+            if fatal_data_gap:
+                detail = f"FATAL DATA GAP: {data_gap_detail}"
+                status = "incomplete_data"
+            else:
+                detail = (
+                    "Data fusion complete: real-time market data, PDF document parsing, "
+                    f"and LLM-generated corporate profiles for {len(state['companies'])} entities integrated "
+                    f"(parallel fan-out, workers={min(self.company_parallelism, len(state['companies']))})."
                 )
-            if market_status.get("total_count"):
-                detail += (
-                    f" Market API: {market_status['ok_count']}/{market_status['total_count']} "
-                    f"snapshots ok (primary={getattr(self.market_data_client, 'provider', 'unknown')}, "
-                    f"fallback={getattr(self.market_data_client, 'fallback_provider', 'yahoo')})."
-                )
-            update.update(self._record("retrieval", "needs_replan" if replan_reason else "ok", detail, state, timer.metrics()))
+                if rag_chunks:
+                    detail += (
+                        f" Hybrid Milvus RAG retrieved {rag_chunks} evidence chunks "
+                        f"(vector + keyword RRF, indexed {rag_index_stats.get('chunks_indexed', 0)} chunks)."
+                    )
+                if market_status.get("total_count"):
+                    detail += (
+                        f" Market API: {market_status['ok_count']}/{market_status['total_count']} "
+                        f"snapshots ok (primary={getattr(self.market_data_client, 'provider', 'unknown')}, "
+                        f"fallback={getattr(self.market_data_client, 'fallback_provider', 'yahoo')})."
+                    )
+                status = "needs_replan" if replan_reason else "ok"
+            update.update(self._record("retrieval", status, detail, state, timer.metrics()))
             self.session_memory.save({**state, **update})
             return update
 
@@ -701,15 +776,11 @@ class AgentRuntime:
     # ═══════════════════════════════════════════════════════════════
     def critic(self, state: FinanceState) -> FinanceState:
         with self._track_step("critic") as timer:
-            findings: list[str] = []
+            violations = run_critic_checks(state)
+            findings = compliance_messages(violations)
             risk_scores: dict[str, dict[str, float]] = {}
 
             for company in state["companies"]:
-                if company not in state.get("financial_metrics", {}):
-                    findings.append(f"{company}: missing quantitative results.")
-                if company not in state.get("sentiment_analysis", {}):
-                    findings.append(f"{company}: missing sentiment analysis.")
-
                 supply_chain = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
                 risk_level = supply_chain.get("risk_level", "low")
                 sentiment = state.get("sentiment_analysis", {}).get(company, {})
@@ -733,10 +804,6 @@ class AgentRuntime:
                 scores["supply_chain_risk"] = round({"low": 2.0, "medium": 5.0, "high": 8.0}.get(risk_level, 5.0), 1)
                 risk_scores[company] = scores
 
-            report_stub = "\n".join(state.get("report_sections", []))
-            if report_stub:
-                findings.extend(validate_report(report_stub))
-
             avg_risk = sum(sum(s.values()) for s in risk_scores.values()) / max(len(risk_scores) * 5, 1)
             compliance_summary = self.llm_client.chat(
                 system_prompt=(
@@ -756,11 +823,12 @@ class AgentRuntime:
 
             update: FinanceState = {
                 "compliance_findings": findings,
+                "compliance_violations": [item.to_dict() for item in violations],
                 "compliance_summary": compliance_summary,
                 "risk_scores": risk_scores,
             }
-            if findings:
-                update["critic_repair_target"] = classify_critic_repair_target(findings)
+            if violations:
+                update["critic_repair_target"] = classify_critic_violations(violations)
             status = "needs_fix" if findings else "ok"
             detail = (f"Risk architecture mapped: composite score {avg_risk:.1f}/10. "
                       f"{len(findings)} compliance issues identified." if findings else
@@ -821,6 +889,62 @@ class AgentRuntime:
             if cleaned[-1] not in ".!?。！？)]】":
                 return cleaned + "。"
             return cleaned
+
+        sections: list[str] = []
+        def S(line: str = "") -> None:
+            sections.append(line)
+
+        fatal_data_gap = bool(state.get("fatal_data_gap"))
+        if fatal_data_gap:
+            companies = ", ".join(state.get("companies") or []) or "(none)"
+            detail = state.get("data_gap_detail") or (
+                "No computable structured fundamentals were available. "
+                "Upload a filing PDF with extractable metrics, or analyze a demo sample company."
+            )
+            S("# Incomplete Diligence Output (Fail-Loud Data Gap)")
+            S("")
+            S(f"**Companies:** {companies}")
+            S("")
+            S(detail)
+            S("")
+            S(
+                "**Data limitation risk:** Market snapshots / LLM general knowledge alone are not "
+                "enough for AST ratio computation. This run refused to invent financials."
+            )
+            S("")
+            S(
+                "**Action Required:** Upload source filings (PDF) with extractable FY metrics, or query a "
+                "company covered by the demo sample database (Apple / Microsoft / NVIDIA / AMD / Tesla / …). "
+                "Chinese or HK names (e.g. 腾讯控股 → Tencent) still need PDF or sample fundamentals."
+            )
+            S("")
+            S(
+                "**Gate expectation:** FinAgentBench should fail-closed "
+                "(`structured_source=none`, missing checkable metrics / pipeline steps)."
+            )
+            final_report = "\n".join(sections)
+            update: FinanceState = {
+                "report_sections": sections,
+                "executive_summary": detail,
+                "final_report": final_report,
+                "llm_backend": self.llm_client.backend_name,
+                "swot_analysis": {},
+                "investment_thesis": {},
+                "chart_data": {},
+                "workflow_status": "incomplete_data",
+                "degraded_mode": True,
+            }
+            update.update(
+                self._record(
+                    "synthesizer",
+                    "incomplete_data",
+                    "Fail-loud incomplete report: no computable fundamentals; skipped inventing metrics.",
+                    state,
+                    timer.metrics(),
+                )
+            )
+            self.session_memory.save({**state, **update})
+            return update
 
         doc_context = ""
         rag_citation_lines: list[str] = []
@@ -893,9 +1017,6 @@ class AgentRuntime:
         llm_summary = build_grounded_summary()
 
         # ── Report Construction ──
-        sections: list[str] = []
-        S = sections.append  # shorthand
-
         S("# LumenFin Intelligence Report")
         S("")
         S("**Report Type:** Investment-Grade Research | **Classification:** AI-Generated, For Reference Only")
@@ -1058,6 +1179,13 @@ class AgentRuntime:
                 S(f"**Risk Exposure Matrix**")
                 S("")
                 S("*Risk scores are model-derived screening indicators. They combine available financial metrics, supply-chain signals, sentiment flags, and data-quality checks; they are not standalone cited facts.*")
+                S("")
+                S(
+                    "**Data limitation risk:** Structured fundamentals and cited filings may be incomplete, "
+                    "sample-backed, or only partially extracted from uploaded PDFs. Treat missing coverage as a "
+                    "material data limitation rather than a verified financial fact. Market risk remains relevant "
+                    "because live snapshots can change between retrieval and report generation."
+                )
                 S("")
                 S("| Dimension | Score (1-10) | Level | Basis |")
                 S("|-----------|-------------|-------|-------|")
@@ -1335,10 +1463,32 @@ class AgentRuntime:
         else:
             source_parts.append("Market data API: no market snapshots requested.")
 
+        yahoo_companies = [
+            c
+            for c in companies
+            if str((state.get("retrieved_docs") or {}).get(c, {}).get("structured_source") or "")
+            == "yahoo_fundamentals"
+        ]
+        sec_companies = [
+            c
+            for c in companies
+            if str((state.get("retrieved_docs") or {}).get(c, {}).get("structured_source") or "")
+            == "sec_companyfacts"
+        ]
         if sample_companies:
             source_parts.append(
                 f"Structured fundamentals: DEMO sample financial database used for {', '.join(sample_companies)} "
                 f"(data_mode={self.data_mode})."
+            )
+        elif sec_companies:
+            source_parts.append(
+                f"Structured fundamentals: SEC EDGAR companyfacts for {', '.join(sec_companies)} "
+                f"(structured_source=sec_companyfacts, data_mode={self.data_mode})."
+            )
+        elif yahoo_companies:
+            source_parts.append(
+                f"Structured fundamentals: Yahoo Finance annual income statement for "
+                f"{', '.join(yahoo_companies)} (structured_source=yahoo_fundamentals, data_mode={self.data_mode})."
             )
         else:
             source_parts.append(
@@ -1370,7 +1520,7 @@ class AgentRuntime:
         S("")
         if self.data_mode == "demo" or sample_companies:
             S(
-                "**Disclaimer:** DEMO MODE — some or all structured fundamentals may come from the built-in sample database, "
+                "**Disclaimer:** DEMO MODE -- some or all structured fundamentals may come from the built-in sample database, "
                 "not audited filings. This report is for research and demonstration only. It does not constitute investment advice."
             )
         else:
@@ -1400,8 +1550,9 @@ class AgentRuntime:
             "chart_data": chart_data,
             "workflow_status": "completed",
         }
-        update.update(self._record("synthesizer", "ok",
-            "Investment-grade report assembled: SWOT, Scenario Analysis (Base/Bull/Bear), Investment Thesis, Peer Benchmarking, Compliance Review, and structured Chart Data.",
-            state, timer.metrics()))
+        synth_detail = (
+            "Investment-grade report assembled: SWOT, Scenario Analysis (Base/Bull/Bear), Investment Thesis, Peer Benchmarking, Compliance Review, and structured Chart Data."
+        )
+        update.update(self._record("synthesizer", "ok", synth_detail, state, timer.metrics()))
         self.session_memory.save({**state, **update})
         return update
