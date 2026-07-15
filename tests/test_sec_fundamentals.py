@@ -90,6 +90,62 @@ class SecFundamentalsTests(unittest.TestCase):
         self.assertAlmostEqual(payload["market_data"]["r_and_d_2025"], 12.914, places=3)
         self.assertIn("ebitda_2025", payload["market_data"])
 
+    def test_fetch_sec_retries_transient_facts_failure(self) -> None:
+        facts = {
+            "entityName": "NVIDIA CORP",
+            "facts": {
+                "us-gaap": {
+                    "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                        "units": {
+                            "USD": [
+                                {
+                                    "end": "2025-01-26",
+                                    "val": 130497000000,
+                                    "fy": 2025,
+                                    "fp": "FY",
+                                    "form": "10-K",
+                                    "filed": "2025-02-26",
+                                }
+                            ]
+                        }
+                    },
+                    "OperatingIncomeLoss": {
+                        "units": {
+                            "USD": [
+                                {
+                                    "end": "2025-01-26",
+                                    "val": 81453000000,
+                                    "fy": 2025,
+                                    "fp": "FY",
+                                    "form": "10-K",
+                                    "filed": "2025-02-26",
+                                }
+                            ]
+                        }
+                    },
+                }
+            },
+        }
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = facts
+        ok_resp.raise_for_status = MagicMock()
+
+        mock_client = MagicMock()
+        mock_client.get.side_effect = [TimeoutError("temporary SEC timeout"), ok_resp]
+
+        with (
+            patch("lumenfin.sec_fundamentals.resolve_cik", return_value="0001045810"),
+            patch("lumenfin.sec_fundamentals.time.sleep", return_value=None),
+        ):
+            payload = fetch_sec_companyfacts_fundamentals("NVDA", client=mock_client)
+
+        assert payload is not None
+        self.assertEqual(mock_client.get.call_count, 2)
+        self.assertEqual(payload["structured_source"], "sec_companyfacts")
+        self.assertAlmostEqual(payload["market_data"]["revenue_2025"], 130.497, places=3)
+
     def test_retrieve_prefers_sec_over_yahoo(self) -> None:
         sec = {
             "market_data": {"revenue_2025": 1.0, "operating_income_2025": 0.4, "r_and_d_2025": 0.2},

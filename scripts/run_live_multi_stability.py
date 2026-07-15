@@ -23,7 +23,7 @@ GENERIC_CASE = FAB / "fixtures/case_lumenfin_generic.json"
 OUT = ROOT / "outputs" / "e2e_live_multi"
 REPORT = OUT / "live_multi_stability_report.json"
 
-# Mix: mega-cap, semis, software, consumer, one likely SEC miss (non-US) for fallback realism.
+# Mix: mega-cap, semis, software, consumer, one non-US fallback, and one private-company fail-closed case.
 CASES: list[dict[str, Any]] = [
     {
         "id": "live-nvda",
@@ -85,6 +85,16 @@ CASES: list[dict[str, Any]] = [
         "expect_companies": ["TSMC"],
         # TSMC may miss SEC (non-US). Accept yahoo_fundamentals or incomplete_data.
         "expect_source": "any_live_or_incomplete",
+    },
+    {
+        "id": "live-openai-private-negative",
+        "query": (
+            "Analyze OpenAI FY2025 annual profitability, operating margin, and R&D intensity using live "
+            "fundamentals only. Do not use estimates if source financial statements are unavailable."
+        ),
+        "expect_companies": ["OpenAI"],
+        # Private-company financial statements are not public structured fundamentals; require fail-closed.
+        "expect_source": "incomplete_required",
     },
 ]
 
@@ -174,6 +184,17 @@ def _judge(case: dict[str, Any], result: CaseResult, state: dict[str, Any]) -> N
     if result.workflow_status == "needs_clarification":
         result.notes.append("unexpected_hitl")
         result.ok = False
+        return
+
+    if source_mode == "incomplete_required":
+        result.ok = (
+            result.workflow_status == "incomplete_data"
+            and expected.issubset(got)
+            and all(result.sources.get(c) == "none" for c in expected if c in got)
+            and result.gate_passed is False
+        )
+        if result.ok:
+            result.notes.append("fail_closed_ok_for_unavailable_private_company_fundamentals")
         return
 
     if source_mode == "any_live_or_incomplete":

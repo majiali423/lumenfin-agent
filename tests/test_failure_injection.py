@@ -6,7 +6,10 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -14,7 +17,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin import LumenFinAgentSystem
-from lumenfin.llm import LocalFallbackLLMClient, ResilientLLMClient
+from lumenfin.llm import DeepSeekChatClient, LLMSettings, LocalFallbackLLMClient, ResilientLLMClient
 from lumenfin.reporting import export_run_artifacts
 from tests.support.fakes import (
     FakeMarketDataClient,
@@ -74,6 +77,33 @@ class FailureInjectionTestCase(unittest.TestCase):
         with self.assertRaises(Exception):
             client.chat("system", "NVIDIA FY2025 revenue analysis executive summary in Chinese.")
         self.assertEqual(client.backend_name, "timeout-llm")
+
+    def test_deepseek_client_retries_transient_timeout(self) -> None:
+        settings = LLMSettings(
+            api_key="test-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            timeout_seconds=1,
+            max_retries=2,
+            retry_backoff_seconds=0,
+        )
+        ok_response = MagicMock()
+        ok_response.raise_for_status = MagicMock()
+        ok_response.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+        }
+        mock_http = MagicMock()
+        mock_http.__enter__.return_value.post.side_effect = [httpx.ReadTimeout("temporary"), ok_response]
+
+        with (
+            patch("lumenfin.llm.httpx.Client", return_value=mock_http),
+            patch("lumenfin.llm.time.sleep", return_value=None),
+        ):
+            content = DeepSeekChatClient(settings).chat("system", "user")
+
+        self.assertEqual(content, "ok")
+        self.assertEqual(mock_http.__enter__.return_value.post.call_count, 2)
 
     def test_market_provider_unauthorized_is_handled_by_agent_runtime(self) -> None:
         config = build_test_config(ROOT / "test_artifacts" / f"market-fail-{uuid4().hex[:8]}")

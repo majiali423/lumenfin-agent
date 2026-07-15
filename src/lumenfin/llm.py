@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -29,6 +30,8 @@ class LLMSettings:
     base_url: str
     model: str
     timeout_seconds: float
+    max_retries: int = 3
+    retry_backoff_seconds: float = 0.5
 
     @classmethod
     def from_env(cls) -> "LLMSettings":
@@ -36,11 +39,15 @@ class LLMSettings:
         base_url = os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
         model = os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
         timeout_str = os.getenv("DEEPSEEK_TIMEOUT_SECONDS") or "45"
+        retries_str = os.getenv("DEEPSEEK_MAX_RETRIES") or "3"
+        backoff_str = os.getenv("DEEPSEEK_RETRY_BACKOFF_SECONDS") or "0.5"
         return cls(
             api_key=api_key,
             base_url=base_url,
             model=model,
             timeout_seconds=float(timeout_str),
+            max_retries=max(1, int(retries_str)),
+            retry_backoff_seconds=max(0.0, float(backoff_str)),
         )
 
 
@@ -92,10 +99,21 @@ class DeepSeekChatClient(BaseLLMClient):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        with httpx.Client(timeout=self.settings.timeout_seconds) as client:
-            response = client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
+        last_error: Exception | None = None
+        for attempt in range(self.settings.max_retries):
+            try:
+                with httpx.Client(timeout=self.settings.timeout_seconds) as client:
+                    response = client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt < self.settings.max_retries - 1:
+                    time.sleep(self.settings.retry_backoff_seconds * (2**attempt))
+        else:
+            assert last_error is not None
+            raise last_error
         usage = data.get("usage", {})
         self._add_usage(
             int(usage.get("prompt_tokens", 0)),

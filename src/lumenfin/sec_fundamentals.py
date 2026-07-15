@@ -37,6 +37,8 @@ _DEPR_TAGS = (
 _ticker_cik_cache: dict[str, str] | None = None
 _ticker_cik_fetched_at = 0.0
 _TICKER_CACHE_TTL_SEC = 24 * 3600
+_HTTP_RETRIES = 3
+_HTTP_BACKOFF_SEC = 0.5
 
 
 def _user_agent() -> str:
@@ -57,6 +59,30 @@ def _headers() -> dict[str, str]:
     }
 
 
+def _get_json_with_retries(
+    http: httpx.Client,
+    url: str,
+    *,
+    allow_404: bool = False,
+) -> dict[str, Any] | None:
+    """Fetch SEC JSON with bounded retries for transient provider failures."""
+    last_error: Exception | None = None
+    for attempt in range(_HTTP_RETRIES):
+        try:
+            resp = http.get(url)
+            if allow_404 and resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            payload = resp.json()
+            return payload if isinstance(payload, dict) else None
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            if attempt < _HTTP_RETRIES - 1:
+                time.sleep(_HTTP_BACKOFF_SEC * (2**attempt))
+    logger.warning("SEC JSON fetch failed after %s attempts for %s: %s", _HTTP_RETRIES, url, last_error)
+    return None
+
+
 def resolve_cik(ticker: str, *, client: httpx.Client | None = None) -> str | None:
     """Map ticker → zero-padded 10-digit CIK."""
     global _ticker_cik_cache, _ticker_cik_fetched_at
@@ -69,9 +95,11 @@ def resolve_cik(ticker: str, *, client: httpx.Client | None = None) -> str | Non
         owns_client = client is None
         http = client or httpx.Client(timeout=30.0, headers=_headers())
         try:
-            resp = http.get(_TICKERS_URL)
-            resp.raise_for_status()
-            payload = resp.json()
+            payload = _get_json_with_retries(http, _TICKERS_URL)
+            if payload is None:
+                if _ticker_cik_cache is None:
+                    return None
+                return (_ticker_cik_cache or {}).get(symbol)
             mapping: dict[str, str] = {}
             for row in payload.values() if isinstance(payload, dict) else []:
                 if not isinstance(row, dict):
@@ -208,11 +236,9 @@ def fetch_sec_companyfacts_fundamentals(
         cik = resolve_cik(symbol, client=http)
         if not cik:
             return None
-        resp = http.get(_FACTS_URL.format(cik=cik))
-        if resp.status_code == 404:
+        facts = _get_json_with_retries(http, _FACTS_URL.format(cik=cik), allow_404=True)
+        if facts is None:
             return None
-        resp.raise_for_status()
-        facts = resp.json()
         gaap = ((facts.get("facts") or {}).get("us-gaap") or {})
         if not isinstance(gaap, dict) or not gaap:
             return None

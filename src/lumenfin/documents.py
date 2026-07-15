@@ -36,6 +36,8 @@ COMPANY_HINTS = {
     "shopify": "Shopify",
     "block": "Block",
     "square": "Block",
+    "openai": "OpenAI",
+    "openai inc": "OpenAI",
 }
 
 

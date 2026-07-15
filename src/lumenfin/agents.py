@@ -220,7 +220,7 @@ class AgentRuntime:
             companies = canonicalize_companies(companies)
 
             plan = [
-                "Phase 1 — Data Acquisition: PDF financial reports, real-time market data, sample database fusion",
+                "Phase 1 — Data Acquisition: uploaded filings, SEC/Yahoo fundamentals, real-time market data",
                 "Phase 2 — Quantitative Engine: Five-dimensional metric computation (Profitability, Liquidity, Solvency, Efficiency, Valuation)",
                 "Phase 3 — Sentiment Intelligence: NLP-based management tone analysis with confidence scoring and thematic extraction",
                 "Phase 4 — Risk Architecture: Multi-dimensional risk assessment with correlation mapping and stress testing",
@@ -520,11 +520,20 @@ class AgentRuntime:
             if fatal_data_gap:
                 # Fail-loud: do not silent-replanner loop when no AST-computable fundamentals exist.
                 replan_reason = None
+                if self.data_mode == "demo":
+                    action_hint = (
+                        "Upload a filing PDF with extractable metrics, or analyze a company covered by "
+                        "the demo sample database. Refusing to invent numbers."
+                    )
+                else:
+                    action_hint = (
+                        "Upload source filings with extractable metrics, retry the live fundamentals provider, "
+                        "or explicitly switch to DATA_MODE=demo for demonstrations. Refusing to invent numbers."
+                    )
                 data_gap_detail = (
                     "No computable structured fundamentals for "
                     f"{', '.join(retrieved_docs)} (structured_source has no revenue/EBITDA/R&D inputs). "
-                    "Upload a filing PDF with extractable metrics, or analyze a demo sample company "
-                    "(Apple/Microsoft/NVIDIA/...). Refusing to invent numbers."
+                    f"{action_hint}"
                 )
             else:
                 replan_reason = (
@@ -899,7 +908,7 @@ class AgentRuntime:
             companies = ", ".join(state.get("companies") or []) or "(none)"
             detail = state.get("data_gap_detail") or (
                 "No computable structured fundamentals were available. "
-                "Upload a filing PDF with extractable metrics, or analyze a demo sample company."
+                "Upload a filing PDF with extractable metrics or retry the configured live fundamentals provider."
             )
             S("# Incomplete Diligence Output (Fail-Loud Data Gap)")
             S("")
@@ -912,11 +921,16 @@ class AgentRuntime:
                 "enough for AST ratio computation. This run refused to invent financials."
             )
             S("")
-            S(
-                "**Action Required:** Upload source filings (PDF) with extractable FY metrics, or query a "
-                "company covered by the demo sample database (Apple / Microsoft / NVIDIA / AMD / Tesla / …). "
-                "Chinese or HK names (e.g. 腾讯控股 → Tencent) still need PDF or sample fundamentals."
-            )
+            if self.data_mode == "demo":
+                S(
+                    "**Action Required:** Upload source filings (PDF) with extractable FY metrics, or query a "
+                    "company covered by the demo sample database."
+                )
+            else:
+                S(
+                    "**Action Required:** Upload source filings (PDF) with extractable FY metrics, or retry the "
+                    "configured live fundamentals provider. To use local demo coverage, switch DATA_MODE=demo explicitly."
+                )
             S("")
             S(
                 "**Gate expectation:** FinAgentBench should fail-closed "
@@ -1033,7 +1047,7 @@ class AgentRuntime:
         S("| Layer | Agent | Methodology | Output |")
         S("|-------|-------|-------------|--------|")
         S("| L1 | Supervisor | Strategic task decomposition, dimension identification | Analysis blueprint |")
-        S("| L2 | Retrieval | Hybrid Milvus RAG (vector + keyword RRF) + structured sample DB + market snapshots | Enriched evidence payloads |")
+        S("| L2 | Retrieval | Hybrid Milvus RAG (vector + keyword RRF) + SEC/Yahoo/document fundamentals + market snapshots | Enriched evidence payloads |")
         S("| L3 | Quantitative Analyst | AST-safe expression engine + derived ratio computation | Five-dimension metrics |")
         S("| L4 | Psychologist | NLP deep sentiment analysis with confidence scoring | Tone intelligence |")
         S("| L5 | Critic | Multi-factor risk scoring + compliance validation | Risk architecture with model-derived basis labels |")
@@ -1181,8 +1195,8 @@ class AgentRuntime:
                 S("*Risk scores are model-derived screening indicators. They combine available financial metrics, supply-chain signals, sentiment flags, and data-quality checks; they are not standalone cited facts.*")
                 S("")
                 S(
-                    "**Data limitation risk:** Structured fundamentals and cited filings may be incomplete, "
-                    "sample-backed, or only partially extracted from uploaded PDFs. Treat missing coverage as a "
+                    "**Data limitation risk:** Structured fundamentals and cited filings may be incomplete "
+                    "or only partially extracted from uploaded filings. Treat missing coverage as a "
                     "material data limitation rather than a verified financial fact. Market risk remains relevant "
                     "because live snapshots can change between retrieval and report generation."
                 )

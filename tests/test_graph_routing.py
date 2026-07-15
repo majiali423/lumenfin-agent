@@ -58,6 +58,8 @@ def build_test_config(root: Path) -> AppConfig:
         input_guardrail_enabled=True,
         input_guardrail_mode="sanitize",
         tool_backend="local",
+        fetch_live_fundamentals=False,
+        fetch_sec_fundamentals=False,
     )
 
 

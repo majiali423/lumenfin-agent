@@ -36,6 +36,12 @@ class QueryPlanningTestCase(unittest.TestCase):
         self.assertTrue(plan.clarification_questions)
         self.assertIn("company_identification", plan.required_skills)
 
+    def test_query_plan_recognizes_private_company_without_ticker_hint(self) -> None:
+        plan = build_query_plan("Analyze OpenAI FY2025 profitability using live fundamentals only.")
+
+        self.assertEqual(plan.companies, ["OpenAI"])
+        self.assertNotIn("company", plan.missing_fields)
+
     def test_skill_specs_are_registry_backed(self) -> None:
         specs = get_skill_specs(["financial_ratios", "unknown"])
 
