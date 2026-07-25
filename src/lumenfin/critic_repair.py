@@ -23,7 +23,7 @@ def classify_critic_repair_target(findings: list[str]) -> str:
         codes.append("missing_data_provenance")
     if codes:
         return resolve_repair_target_from_codes(codes)
-    return "retrieval"
+    return "quant"
 
 
 def classify_critic_violations(violations: list[Violation]) -> str:

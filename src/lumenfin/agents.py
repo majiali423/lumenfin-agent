@@ -5,7 +5,7 @@ import re
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from .input_guardrail import GuardrailMode, guard_documents
+from .input_guardrail import GuardrailMode, guard_documents, sanitize_retrieval_hits
 from .clarification import merge_clarification_into_query
 from .critic_repair import classify_critic_violations, compliance_messages
 from .critic_checks import run_critic_checks
@@ -19,22 +19,39 @@ from .observability import StepTimer, merge_telemetry
 from .parallel import map_in_parallel
 from .planning import build_query_plan
 from .rag.hybrid_retriever import HybridEvidenceRetriever
+from .rag.dedupe import dedupe_cross_company_rag_hits
+from .rag.telemetry import summarize_rag_telemetry
+from .repair_policies import RETRIEVAL_WORTHY_CODES
+from .reporting import format_rag_citation_section
+from .claims import (
+    binding_summary,
+    build_claims,
+    claim_to_dict,
+    filter_verified,
+    format_verified_claims_ledger,
+    verified_by_entity,
+)
 from .skills import get_skill_specs
 from .state import FinanceState
+from .metrics_schema import get_fundamental, set_fundamental
 from .tools import (
     analyze_sentiment_deep,
     build_chart_data,
+    build_coverage_matrix,
     calculate_derived_ratios,
     canonicalize_companies,
+    classify_quant_status,
     derive_target_symbols,
     extract_companies_from_query,
     generate_scenario_analysis,
     has_computable_fundamentals,
-    parse_with_fallback,
+    is_partial_compare_gap,
+    non_comparable_companies,
     resolve_safe_formula,
     retrieve_company_payload,
     safe_execute_formula,
     summarize_document_context,
+    has_supply_chain_signal,
 )
 
 
@@ -48,9 +65,12 @@ class AgentRuntime:
         market_data_client: MarketDataClient,
         hybrid_retriever: HybridEvidenceRetriever | None = None,
         rag_enabled: bool = True,
+        rag_index_mode: str = "sync_on_run",
         company_parallelism: int = 4,
+        profile_llm_max_attempts: int = 1,
         input_guardrail_enabled: bool = True,
         input_guardrail_mode: GuardrailMode = "sanitize",
+        rag_sanitize_hits: bool = True,
         tool_backend: str = "local",
         allow_sample_data: bool = True,
         data_mode: str = "demo",
@@ -64,9 +84,12 @@ class AgentRuntime:
         self.market_data_client = market_data_client
         self.hybrid_retriever = hybrid_retriever
         self.rag_enabled = rag_enabled
+        self.rag_index_mode = rag_index_mode if rag_index_mode in {"sync_on_run", "async_on_upload"} else "sync_on_run"
         self.company_parallelism = max(1, company_parallelism)
+        self.profile_llm_max_attempts = max(0, min(3, int(profile_llm_max_attempts)))
         self.input_guardrail_enabled = input_guardrail_enabled
         self.input_guardrail_mode = input_guardrail_mode if input_guardrail_mode in {"sanitize", "block"} else "sanitize"
+        self.rag_sanitize_hits = bool(rag_sanitize_hits)
         self.tool_backend = tool_backend if tool_backend in {"local", "mcp"} else "local"
         self.allow_sample_data = allow_sample_data
         self.data_mode = data_mode if data_mode in {"demo", "live"} else "demo"
@@ -163,6 +186,7 @@ class AgentRuntime:
                 effective_query,
                 document_contexts=state.get("document_contexts", []),
                 llm_client=self.llm_client,
+                user_clarification=state.get("user_clarification"),
             )
             required_skills = query_plan.required_skills
             update: FinanceState = {
@@ -180,7 +204,7 @@ class AgentRuntime:
             )
             if query_plan.missing_fields:
                 detail += f" Missing fields: {', '.join(query_plan.missing_fields)}."
-            status = "needs_clarification" if query_plan.missing_fields and not state.get("user_clarification") else "ok"
+            status = "needs_clarification" if query_plan.missing_fields else "ok"
             update.update(
                 self._record("query_planner", status, detail, state, timer.metrics())
             )
@@ -208,15 +232,33 @@ class AgentRuntime:
         with self._track_step("supervisor") as timer:
             query_plan = state.get("query_plan", {})
             planned_companies = list(query_plan.get("companies", []))
+            company_scope = str(query_plan.get("company_scope") or "")
+            intent = str(query_plan.get("intent") or "").lower()
+            # Rules-only fallback: planner already ran LLM company extract when needed.
             companies = planned_companies or extract_companies_from_query(
                 state["query"],
                 document_contexts=state.get("document_contexts", []),
-                llm_client=self.llm_client,
+                llm_client=None,
             )
-            for doc in state.get("document_contexts", []):
-                for company in doc.get("detected_companies", []):
-                    if company not in companies:
-                        companies.append(company)
+            # Upload expansion: issuer companies only (primary entity), never all body mentions.
+            # Skip expansion when planner already scoped to query-only (non-compare).
+            expand_uploads = not (
+                planned_companies
+                and company_scope == "query"
+                and intent
+                not in {
+                    "compare",
+                    "peer",
+                    "comparison",
+                    "comparative_financial_diligence",
+                }
+            )
+            if expand_uploads or not companies:
+                for doc in state.get("document_contexts", []):
+                    issuers = doc.get("issuer_companies") or doc.get("detected_companies") or []
+                    for company in issuers:
+                        if company not in companies:
+                            companies.append(company)
             companies = canonicalize_companies(companies)
 
             plan = [
@@ -226,37 +268,26 @@ class AgentRuntime:
                 "Phase 4 — Risk Architecture: Multi-dimensional risk assessment with correlation mapping and stress testing",
                 "Phase 5 — Synthesis: SWOT decomposition, scenario modeling (Base/Bull/Bear), investment thesis generation, peer benchmarking",
             ]
-            requested_dimensions = list(query_plan.get("analysis_dimensions", []))
+            analysis_dimensions = list(query_plan.get("analysis_dimensions") or []) or [
+                "Profitability",
+                "Liquidity",
+                "Solvency",
+                "Efficiency",
+                "Valuation",
+            ]
+            key_questions = [str(q) for q in (query_plan.get("key_questions") or []) if str(q).strip()]
             target_symbols = derive_target_symbols(companies, state["query"])
 
-            llm_brief = self.llm_client.chat(
-                system_prompt=(
-                    "You are the Supervisory Agent in an enterprise multi-agent financial analysis system. "
-                    "Given the user query and identified companies, produce a structured analysis directive. "
-                    "Return JSON: {\"task_brief\": \"...\", \"analysis_dimensions\": [\"dim1\",\"dim2\"], "
-                    "\"key_questions\": [\"Q1\",\"Q2\"], \"risk_appetite\": \"conservative|moderate|aggressive\", "
-                    "\"industry_context\": \"brief industry dynamics note\"}"
-                ),
-                user_prompt=(
-                    f"Query: {state['query']}\nCompanies: {companies}\n"
-                    f"Structured query plan: {json.dumps(query_plan, ensure_ascii=False)}"
-                ),
-                temperature=0.1,
-                max_tokens=300,
+            # Template brief from query_plan — no unused supervisor LLM JSON call.
+            company_label = ", ".join(companies) if companies else "target companies"
+            dim_label = ", ".join(analysis_dimensions)
+            task_brief = (
+                f"Conduct diligence on {company_label} across {dim_label}, "
+                f"including management sentiment, risk architecture, and an audit-ready report. "
+                f"User query: {str(state.get('query') or '')[:240]}"
             )
-
-            task_brief = f"Conduct a five-dimensional deep financial analysis of {', '.join(companies)}, with management sentiment assessment, risk architecture mapping, and investment-grade report synthesis."
-            analysis_dimensions: list[str] = requested_dimensions
-            key_questions: list[str] = []
-            industry_context = ""
-            try:
-                parsed = parse_with_fallback(llm_brief)
-                task_brief = parsed.get("task_brief", task_brief)
-                analysis_dimensions = parsed.get("analysis_dimensions", analysis_dimensions)
-                key_questions = parsed.get("key_questions", [])
-                industry_context = parsed.get("industry_context", "")
-            except (json.JSONDecodeError, KeyError):
-                pass
+            if key_questions:
+                task_brief += f" Focus: {'; '.join(key_questions[:3])}."
 
             update: FinanceState = {
                 "companies": companies,
@@ -272,9 +303,11 @@ class AgentRuntime:
                 "replan_reason": state.get("replan_reason"),
                 "llm_backend": self.llm_client.backend_name,
             }
-            detail = (f"Strategic orchestration initiated for {len(companies)} companies. "
-                      f"Analysis dimensions: {', '.join(analysis_dimensions) if analysis_dimensions else 'Profitability/Liquidity/Solvency/Efficiency/Valuation'}. "
-                      f"Industry context: {industry_context[:80] if industry_context else 'Cross-sector comparison'}.")
+            detail = (
+                f"Strategic orchestration initiated for {len(companies)} companies "
+                f"(template brief from query_plan; no supervisor LLM). "
+                f"Analysis dimensions: {dim_label}."
+            )
             update.update(self._record("supervisor", "ok", detail, state, timer.metrics()))
             self.session_memory.save({**state, **update})
             return update
@@ -293,13 +326,30 @@ class AgentRuntime:
         include_appendix: bool,
     ) -> RetrievalArtifact:
         rag_hits: list[dict[str, Any]] = []
+        rag_meta: dict[str, Any] = {
+            "degraded": False,
+            "degrade_reason": "",
+            "mode": "",
+            "vector_hits": 0,
+            "keyword_hits": 0,
+        }
         if self.rag_enabled and self.hybrid_retriever and document_contexts:
-            rag_hits = self.hybrid_retriever.retrieve_for_company(
+            source_document_ids = list(state.get("rag_document_ids") or [])
+            use_stored = self.rag_index_mode == "async_on_upload" and bool(source_document_ids)
+            rag_hits, rag_meta = self.hybrid_retriever.retrieve_for_company_with_meta(
                 query=retrieval_query,
                 company=company,
                 session_id=session_id,
                 document_contexts=document_contexts,
+                tenant_id=state.get("rag_tenant_id") if use_stored else None,
+                source_document_ids=source_document_ids if use_stored else None,
+                use_stored_chunks=use_stored,
             )
+            if self.rag_sanitize_hits and rag_hits:
+                rag_hits, sanitize_findings = sanitize_retrieval_hits(rag_hits)
+                rag_meta["sanitized_finding_count"] = len(sanitize_findings)
+            else:
+                rag_meta["sanitized_finding_count"] = 0
 
         if rag_hits:
             document_summary = {
@@ -313,10 +363,14 @@ class AgentRuntime:
             company,
             include_appendix=include_appendix,
             document_contexts=document_contexts,
-            allow_sample_data=self.allow_sample_data,
+            allow_sample_data=self.allow_sample_data
+            and not bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
             ticker=state.get("target_symbols", {}).get(company),
-            fetch_live_fundamentals=self.fetch_live_fundamentals,
-            fetch_sec_fundamentals=self.fetch_sec_fundamentals,
+            fetch_live_fundamentals=self.fetch_live_fundamentals
+            and not bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
+            fetch_sec_fundamentals=self.fetch_sec_fundamentals
+            and not bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
+            prefer_uploaded_only=bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
         )
         try:
             live_market = self.market_data_client.fetch_company_snapshot(
@@ -347,24 +401,28 @@ class AgentRuntime:
         payload["live_market"] = live_market
         payload["source_documents"] = document_summary["source_documents"]
         if document_summary["metric_hints"]:
-            payload["market_data"].update({
-                "revenue_2025": document_summary["metric_hints"].get("revenue", payload["market_data"].get("revenue_2025")),
-                "ebitda_2025": document_summary["metric_hints"].get("ebitda", payload["market_data"].get("ebitda_2025")),
-                "r_and_d_2025": document_summary["metric_hints"].get("r_and_d", payload["market_data"].get("r_and_d_2025")),
-            })
-            # Prefer labeling documents as the structured source when filings contributed metrics.
+            if document_summary["metric_hints"].get("revenue") is not None:
+                set_fundamental(payload["market_data"], "revenue", document_summary["metric_hints"]["revenue"])
+            if document_summary["metric_hints"].get("ebitda") is not None:
+                set_fundamental(payload["market_data"], "ebitda", document_summary["metric_hints"]["ebitda"])
+            if document_summary["metric_hints"].get("r_and_d") is not None:
+                set_fundamental(payload["market_data"], "r_and_d", document_summary["metric_hints"]["r_and_d"])
+            # Prefer document label only when upload alone provided the AST spine.
+            # Issuer SEC/Yahoo gap-fill must keep sec_companyfacts / yahoo_fundamentals.
             if any(
                 document_summary["metric_hints"].get(key) is not None
                 for key in ("revenue", "ebitda", "r_and_d")
             ):
-                payload["structured_source"] = "document_extracted"
+                meta = payload.get("fundamentals_meta") or {}
+                if not meta.get("live_fallback_used"):
+                    payload["structured_source"] = "document_extracted"
         if payload["source_documents"]:
             payload["earnings_call_quotes"] = payload["earnings_call_quotes"] or [
                 doc["excerpt"][:300] for doc in payload["source_documents"] if doc.get("excerpt")
             ]
         if payload["source_documents"] and payload["supply_chain"]["risk_level"] == "unknown":
-            excerpt = " ".join(doc.get("excerpt", "") for doc in payload["source_documents"]).lower()
-            payload["supply_chain"]["risk_level"] = "medium" if "risk" in excerpt else "low"
+            excerpt = " ".join(doc.get("excerpt", "") for doc in payload["source_documents"])
+            payload["supply_chain"]["risk_level"] = "medium" if has_supply_chain_signal(excerpt) else "low"
 
         profile_prompt = (
             f"Provide a concise ~150-word enterprise profile for {company} covering: "
@@ -394,35 +452,45 @@ class AgentRuntime:
             )
             return any(tail.endswith(marker) for marker in incomplete_markers)
 
-        try:
-            profile = self.llm_client.chat(
-                system_prompt="You are an equity research analyst. Write factual, professional company profiles.",
-                user_prompt=profile_prompt,
-                temperature=0.2,
-                max_tokens=280,
-            )
-            if _looks_non_english(profile) or _looks_incomplete(profile):
+        max_attempts = self.profile_llm_max_attempts
+        if max_attempts <= 0:
+            profile = f"Profile generation skipped for {company}."
+        else:
+            try:
                 profile = self.llm_client.chat(
-                    system_prompt=(
-                        "You are an equity research analyst. Rewrite the profile in clean, complete English only. "
-                        "Do not include Chinese characters. End with a complete sentence."
-                    ),
-                    user_prompt=profile,
-                    temperature=0.1,
+                    system_prompt="You are an equity research analyst. Write factual, professional company profiles.",
+                    user_prompt=profile_prompt,
+                    temperature=0.2,
                     max_tokens=280,
                 )
-            if _looks_non_english(profile) or _looks_incomplete(profile):
-                profile = self.llm_client.chat(
-                    system_prompt=(
-                        "Write exactly 4 complete English sentences summarizing company profile, moat, strategy, "
-                        "and latest material event. No lists. No truncation."
-                    ),
-                    user_prompt=f"Company: {company}. Keep it concise and complete.",
-                    temperature=0.0,
-                    max_tokens=220,
-                )
-        except Exception:
-            profile = f"Profile generation pending for {company}."
+                attempts_used = 1
+                if attempts_used < max_attempts and (
+                    _looks_non_english(profile) or _looks_incomplete(profile)
+                ):
+                    profile = self.llm_client.chat(
+                        system_prompt=(
+                            "You are an equity research analyst. Rewrite the profile in clean, complete English only. "
+                            "Do not include Chinese characters. End with a complete sentence."
+                        ),
+                        user_prompt=profile,
+                        temperature=0.1,
+                        max_tokens=280,
+                    )
+                    attempts_used += 1
+                if attempts_used < max_attempts and (
+                    _looks_non_english(profile) or _looks_incomplete(profile)
+                ):
+                    profile = self.llm_client.chat(
+                        system_prompt=(
+                            "Write exactly 4 complete English sentences summarizing company profile, moat, strategy, "
+                            "and latest material event. No lists. No truncation."
+                        ),
+                        user_prompt=f"Company: {company}. Keep it concise and complete.",
+                        temperature=0.0,
+                        max_tokens=220,
+                    )
+            except Exception:
+                profile = f"Profile generation pending for {company}."
 
         self.knowledge_memory.ingest_company_document(company, payload)
         structured_source = str(payload.get("structured_source") or "none")
@@ -430,10 +498,13 @@ class AgentRuntime:
             structured_source=structured_source,  # type: ignore[arg-type]
             market_provider=str(live_market.get("provider") or "unknown"),
             market_status=str(live_market.get("status") or "unknown"),
-            rag_enabled=bool(rag_hits),
+            rag_enabled=bool(self.rag_enabled and self.hybrid_retriever),
             rag_hit_count=len(rag_hits),
             document_count=len(document_contexts),
             data_mode=self.data_mode,
+            rag_degraded=bool(rag_meta.get("degraded")),
+            rag_degrade_reason=str(rag_meta.get("degrade_reason") or ""),
+            rag_mode=str(rag_meta.get("mode") or ""),
         )
         confidence = score_retrieval_confidence(
             market_data=payload.get("market_data") or {},
@@ -455,6 +526,8 @@ class AgentRuntime:
             structured_source=structured_source,  # type: ignore[arg-type]
             appendix=appendix,
             fundamentals_meta=dict(payload.get("fundamentals_meta") or {}),
+            provider_errors=list(payload.get("provider_errors") or []),
+            rag_meta=dict(rag_meta),
         )
 
     def retrieval(self, state: FinanceState) -> FinanceState:
@@ -465,16 +538,45 @@ class AgentRuntime:
             session_id = state.get("thread_id", "default-session")
             retrieval_query = state["query"]
             query_plan = state.get("query_plan", {})
-            if query_plan.get("analysis_dimensions"):
+            if query_plan.get("retrieval_query"):
+                retrieval_query = str(query_plan["retrieval_query"])
+            elif query_plan.get("analysis_dimensions"):
                 retrieval_query = (
                     f"{state['query']} | focus: {', '.join(query_plan['analysis_dimensions'])}"
                 )
 
-            if self.rag_enabled and self.hybrid_retriever and document_contexts and not rag_index_stats:
+            if (
+                self.rag_enabled
+                and self.hybrid_retriever
+                and getattr(self.hybrid_retriever, "rag_store", None)
+                and document_contexts
+                and not rag_index_stats
+                and self.rag_index_mode == "sync_on_run"
+            ):
                 rag_index_stats = self.hybrid_retriever.rag_store.index_documents(
                     document_contexts,
                     session_id=session_id,
                 )
+            elif self.rag_index_mode == "async_on_upload" and rag_index_stats:
+                # Already indexed at upload time; preserve stats and do not re-embed.
+                rag_index_stats = {
+                    **rag_index_stats,
+                    "mode": rag_index_stats.get("mode") or "async_on_upload",
+                    "search_only": True,
+                }
+
+            # Warm query embedding once before parallel per-company search.
+            if (
+                self.rag_enabled
+                and self.hybrid_retriever
+                and getattr(self.hybrid_retriever, "rag_store", None)
+                and document_contexts
+            ):
+                try:
+                    self.hybrid_retriever.rag_store.prime_query_embedding(retrieval_query)
+                except Exception:
+                    # Per-company retrieve will degrade to keyword-only if configured.
+                    pass
 
             bundles = map_in_parallel(
                 lambda company: self._retrieve_company_bundle(
@@ -494,15 +596,47 @@ class AgentRuntime:
             company_profiles: dict[str, str] = {}
             rag_evidence: dict[str, list[dict[str, Any]]] = {}
             retrieval_provenance: dict[str, dict[str, Any]] = {}
+            rag_degraded_companies: list[str] = []
+            company_rag_metas: list[dict[str, Any]] = []
+            sanitized_finding_count = 0
             for artifact in bundles:
                 company = artifact.company
                 retrieved_docs[company] = artifact.to_legacy_payload()
                 market_snapshots[company] = artifact.market_snapshot
                 company_profiles[company] = artifact.profile
                 retrieval_provenance[company] = artifact.provenance.to_dict()
+                company_rag_metas.append(dict(artifact.rag_meta or {}))
+                sanitized_finding_count += int((artifact.rag_meta or {}).get("sanitized_finding_count") or 0)
+                if artifact.provenance.rag_degraded:
+                    rag_degraded_companies.append(company)
                 if artifact.rag_hits:
                     rag_evidence[company] = artifact.rag_hits
 
+            rag_evidence = dedupe_cross_company_rag_hits(rag_evidence)
+
+            if rag_degraded_companies:
+                rag_index_stats = {
+                    **rag_index_stats,
+                    "rag_degraded": True,
+                    "degraded_companies": rag_degraded_companies,
+                    "degrade_mode": "keyword_only",
+                }
+            # Capture query-embed timing from the shared store after prime/search.
+            store = self.hybrid_retriever.rag_store if self.hybrid_retriever else None
+            if store is not None:
+                rag_index_stats = {
+                    **rag_index_stats,
+                    "embed_ms": float(rag_index_stats.get("embed_ms") or getattr(store, "last_embed_ms", 0.0) or 0.0),
+                    "embed_chars": int(
+                        rag_index_stats.get("embed_chars") or getattr(store, "last_embed_chars", 0) or 0
+                    ),
+                }
+            rag_telemetry = summarize_rag_telemetry(
+                rag_index_stats=rag_index_stats,
+                company_metas=company_rag_metas,
+                sanitized_finding_count=sanitized_finding_count,
+            )
+            rag_index_stats = {**rag_index_stats, **rag_telemetry}
             needs_appendix = any(
                 "appendix" not in p
                 and not p.get("source_documents")
@@ -516,11 +650,57 @@ class AgentRuntime:
                 for company, payload in retrieved_docs.items()
                 if has_computable_fundamentals(payload)
             ]
+            provider_errors: list[dict[str, Any]] = []
+            for company, payload in retrieved_docs.items():
+                for item in payload.get("provider_errors") or []:
+                    entry = dict(item)
+                    entry.setdefault("company", company)
+                    provider_errors.append(entry)
+            from .provider_retry import summarize_provider_errors
+
+            provider_error_summary = summarize_provider_errors(provider_errors)
+
             fatal_data_gap = bool(retrieved_docs) and not computable_companies
+            company_names = list(retrieved_docs.keys())
+            coverage_matrix = build_coverage_matrix(company_names, retrieved_docs)
+            partial_data_gap = is_partial_compare_gap(company_names, coverage_matrix)
+            prefer_uploaded_only = bool(query_plan.get("prefer_uploaded_only"))
+            source_resolution = {
+                "prefer_uploaded_only": prefer_uploaded_only,
+                "mode": "uploaded_only" if prefer_uploaded_only else ("hybrid" if document_contexts else "live_or_sample"),
+                "companies": {},
+            }
+            for company, payload in retrieved_docs.items():
+                meta = dict(payload.get("fundamentals_meta") or {})
+                source = str(payload.get("structured_source") or "none")
+                live_fallback = bool(meta.get("live_fallback_used")) or source in {
+                    "sec_companyfacts",
+                    "yahoo_fundamentals",
+                    "sample_db",
+                } and bool(document_contexts) and source != "document_extracted"
+                source_resolution["companies"][company] = {
+                    "structured_source": source,
+                    "upload_present": bool(meta.get("upload_present")) or bool(document_contexts),
+                    "upload_had_computable_metrics": bool(
+                        meta.get("upload_had_computable_metrics")
+                    ),
+                    "live_fallback_used": bool(meta.get("live_fallback_used"))
+                    or (live_fallback and source != "document_extracted"),
+                    "fallback_reason": meta.get("fallback_reason") or "",
+                    "grounding_layer": meta.get("grounding_layer") or "",
+                    "sec_filled_keys": list(meta.get("sec_filled_keys") or []),
+                }
             if fatal_data_gap:
-                # Fail-loud: do not silent-replanner loop when no AST-computable fundamentals exist.
+                # Fail-loud: do not enter appendix_replan loop when no AST-computable fundamentals exist.
                 replan_reason = None
-                if self.data_mode == "demo":
+                if prefer_uploaded_only:
+                    action_hint = (
+                        "You asked to use uploaded materials only. The upload lacked extractable "
+                        "revenue/EBITDA/R&D, and live SEC/Yahoo/sample backfill was disabled. "
+                        "Upload a filing/CSV with those metrics, or remove the upload-only wording "
+                        "so the system may fill gaps from SEC/Yahoo."
+                    )
+                elif self.data_mode == "demo":
                     action_hint = (
                         "Upload a filing PDF with extractable metrics, or analyze a company covered by "
                         "the demo sample database. Refusing to invent numbers."
@@ -535,9 +715,22 @@ class AgentRuntime:
                     f"{', '.join(retrieved_docs)} (structured_source has no revenue/EBITDA/R&D inputs). "
                     f"{action_hint}"
                 )
+                if provider_error_summary.get("count"):
+                    data_gap_detail += (
+                        f" Provider errors: transient={provider_error_summary['transient_count']}, "
+                        f"truly_missing/unavailable={provider_error_summary['missing_count']}, "
+                        f"other={provider_error_summary['other_count']} "
+                        f"(by_class={provider_error_summary['by_class']})."
+                    )
+                    if provider_error_summary.get("has_transient"):
+                        data_gap_detail += (
+                            " Transient provider failures were observed after bounded retries; "
+                            "this may recover on a later run."
+                        )
             else:
                 replan_reason = (
-                    "Appendix data gap detected; switching to targeted supplementary retrieval."
+                    "Appendix / evidence gap detected; switching to supplementary_retrieval "
+                    "(appendix_replan) for one targeted retrieval pass."
                     if needs_appendix
                     else None
                 )
@@ -553,9 +746,15 @@ class AgentRuntime:
                 "rag_evidence": rag_evidence,
                 "rag_index_stats": rag_index_stats,
                 "retrieval_provenance": retrieval_provenance,
+                "source_resolution": source_resolution,
                 "fatal_data_gap": fatal_data_gap,
+                "partial_data_gap": partial_data_gap,
                 "data_gap_detail": data_gap_detail,
-                "degraded_mode": True if fatal_data_gap else state.get("degraded_mode", False),
+                "coverage_matrix": coverage_matrix,
+                "non_comparable_companies": non_comparable_companies(company_names, coverage_matrix),
+                "provider_errors": provider_errors,
+                "provider_error_summary": provider_error_summary,
+                "degraded_mode": True if fatal_data_gap else (partial_data_gap or state.get("degraded_mode", False)),
             }
             rag_chunks = sum(len(hits) for hits in rag_evidence.values())
             if fatal_data_gap:
@@ -572,6 +771,12 @@ class AgentRuntime:
                         f" Hybrid Milvus RAG retrieved {rag_chunks} evidence chunks "
                         f"(vector + keyword RRF, indexed {rag_index_stats.get('chunks_indexed', 0)} chunks)."
                     )
+                if rag_index_stats.get("rag_degraded"):
+                    degraded = ", ".join(rag_index_stats.get("degraded_companies") or []) or "unknown"
+                    detail += (
+                        f" RAG degraded to keyword-only for {degraded} "
+                        "(vector/embedding failure after retries)."
+                    )
                 if market_status.get("total_count"):
                     detail += (
                         f" Market API: {market_status['ok_count']}/{market_status['total_count']} "
@@ -580,6 +785,9 @@ class AgentRuntime:
                     )
                 status = "needs_replan" if replan_reason else "ok"
             update.update(self._record("retrieval", status, detail, state, timer.metrics()))
+            telemetry = dict(update.get("run_telemetry") or {})
+            telemetry["rag"] = rag_telemetry
+            update["run_telemetry"] = telemetry
             self.session_memory.save({**state, **update})
             return update
 
@@ -605,14 +813,18 @@ class AgentRuntime:
             }
 
         base_data: dict[str, float] = {}
-        if market.get("revenue_2025"):
-            base_data["revenue"] = market["revenue_2025"]
-        if market.get("ebitda_2025"):
-            base_data["ebitda"] = market["ebitda_2025"]
-        if market.get("r_and_d_2025"):
-            base_data["r_and_d"] = market["r_and_d_2025"]
-        if market.get("operating_income_2025"):
-            base_data["operating_income"] = market["operating_income_2025"]
+        revenue = get_fundamental(market, "revenue")
+        ebitda = get_fundamental(market, "ebitda")
+        r_and_d = get_fundamental(market, "r_and_d")
+        operating_income = get_fundamental(market, "operating_income")
+        if revenue is not None:
+            base_data["revenue"] = revenue
+        if ebitda is not None:
+            base_data["ebitda"] = ebitda
+        if r_and_d is not None:
+            base_data["r_and_d"] = r_and_d
+        if operating_income is not None:
+            base_data["operating_income"] = operating_income
 
         if len(base_data) >= 3:
             for formula, key in [
@@ -672,22 +884,22 @@ class AgentRuntime:
         if not metrics:
             return {
                 "company": company,
-                "replan_reason": f"{company}: insufficient data for quantitative computation.",
+                "metrics": {},
+                "quant_status": "uncomputable",
+                "metric_confidence": {},
             }
+
+        quant_status = classify_quant_status(metrics)
         return {
             "company": company,
             "metrics": metrics,
-            "scenario": generate_scenario_analysis(metrics, company),
+            "quant_status": quant_status,
+            "scenario": generate_scenario_analysis(metrics, company) if quant_status == "ast_ok" else {},
             "metric_confidence": metric_confidence,
         }
 
     def quantitative_analyst(self, state: FinanceState) -> FinanceState:
         with self._track_step("quant") as timer:
-            if state.get("replan_reason"):
-                update: FinanceState = {"financial_metrics": {}, "replan_reason": state["replan_reason"]}
-                update.update(self._record("quant", "blocked", state["replan_reason"], state, timer.metrics()))
-                return update
-
             company_items = list(state["retrieved_docs"].items())
             quant_results = map_in_parallel(
                 lambda item: self._compute_company_quant(item[0], item[1], state),
@@ -698,51 +910,97 @@ class AgentRuntime:
             financial_metrics: dict[str, dict[str, float]] = {}
             scenario_analyses: dict[str, dict[str, Any]] = {}
             metric_confidence: dict[str, dict[str, dict[str, Any]]] = {}
+            uncomputable: list[str] = []
+            market_only: list[str] = []
             for result in quant_results:
-                if result.get("replan_reason"):
-                    update = {"replan_reason": result["replan_reason"]}
-                    update.update(self._record("quant", "needs_replan", f"{result['company']} missing computable metrics.", state, timer.metrics()))
-                    return update
                 company = result["company"]
-                financial_metrics[company] = result["metrics"]
-                scenario_analyses[company] = result["scenario"]
-                metric_confidence[company] = result.get("metric_confidence", {})
+                status = str(result.get("quant_status") or classify_quant_status(result.get("metrics")))
+                if status == "uncomputable":
+                    uncomputable.append(company)
+                    continue
+                financial_metrics[company] = result.get("metrics") or {}
+                scenario_analyses[company] = result.get("scenario") or {}
+                metric_confidence[company] = result.get("metric_confidence") or {}
+                if status == "market_only":
+                    market_only.append(company)
 
+            companies = list(state.get("companies") or [])
+            coverage_matrix = build_coverage_matrix(companies, state.get("retrieved_docs") or {}, financial_metrics)
+            partial_data_gap = is_partial_compare_gap(companies, coverage_matrix)
+            skipped = non_comparable_companies(companies, coverage_matrix)
+
+            comparable_metrics = {
+                company: metrics
+                for company, metrics in financial_metrics.items()
+                if (coverage_matrix.get(company) or {}).get("comparable")
+            }
             peer_comparison_text = ""
-            try:
-                metrics_summary = json.dumps(financial_metrics, ensure_ascii=False)
-                peer_comparison_text = self.llm_client.chat(
-                    system_prompt=(
-                        "You are a senior quantitative analyst. Based on the provided metrics, "
-                        "write a 2-3 sentence peer comparison in English. Structure: "
-                        "(1) Which company leads on profitability and why, "
-                        "(2) Which leads on innovation efficiency, "
-                        "(3) Key competitive dynamics revealed by the data."
-                    ),
-                    user_prompt=f"Company metrics: {metrics_summary}",
-                    temperature=0.2,
-                    max_tokens=220,
+            if comparable_metrics:
+                try:
+                    metrics_summary = json.dumps(comparable_metrics, ensure_ascii=False)
+                    skip_note = ""
+                    if skipped:
+                        skip_note = (
+                            f" Non-comparable peers omitted from ratio comparison: {', '.join(skipped)} "
+                            "(no AST-verifiable structured fundamentals)."
+                        )
+                    peer_comparison_text = self.llm_client.chat(
+                        system_prompt=(
+                            "You are a senior quantitative analyst. Based on the provided metrics, "
+                            "write a 2-3 sentence peer comparison in English. Structure: "
+                            "(1) Which company leads on profitability and why, "
+                            "(2) Which leads on innovation efficiency, "
+                            "(3) Key competitive dynamics revealed by the data. "
+                            "If only one company has ratio metrics, state that peer ratio comparison is partial."
+                        ),
+                        user_prompt=f"Company metrics: {metrics_summary}{skip_note}",
+                        temperature=0.2,
+                        max_tokens=220,
+                    )
+                except Exception:
+                    peer_comparison_text = "Peer comparison based on available comparable metrics only."
+            elif financial_metrics:
+                peer_comparison_text = (
+                    "Structured ratio comparison skipped: only market-level indicators were available "
+                    f"for {', '.join(financial_metrics.keys())}."
                 )
-            except Exception:
-                peer_comparison_text = "Peer comparison based on available data."
+            else:
+                peer_comparison_text = "No quantitative metrics were available for peer comparison."
 
-            reasoning = (
+            detail_parts = [
                 f"Quantitative engine computed {sum(len(m) for m in financial_metrics.values())} metrics "
-                f"across {len(financial_metrics)} companies (parallel fan-out). "
-                f"Key insight: {peer_comparison_text[:120]}..."
-            )
-            update = {
+                f"across {len(financial_metrics)} companies (parallel fan-out)."
+            ]
+            if partial_data_gap:
+                detail_parts.append(
+                    f"Partial peer coverage: comparable={list(comparable_metrics.keys())}, "
+                    f"non_comparable={skipped}."
+                )
+            if uncomputable:
+                detail_parts.append(f"Uncomputable entities: {', '.join(uncomputable)}.")
+            if market_only:
+                detail_parts.append(f"Market-only entities: {', '.join(market_only)}.")
+            detail_parts.append(f"Key insight: {peer_comparison_text[:120]}...")
+
+            quant_status_label = "partial" if partial_data_gap else "ok"
+            update: FinanceState = {
                 "financial_metrics": financial_metrics,
                 "metric_confidence": metric_confidence,
                 "replan_reason": None,
+                "partial_data_gap": partial_data_gap,
+                "coverage_matrix": coverage_matrix,
+                "non_comparable_companies": skipped,
+                "degraded_mode": bool(state.get("degraded_mode")) or partial_data_gap,
                 "tool_backend": self.tool_backend,
                 "peer_comparison": {
                     "summary": peer_comparison_text,
                     "metrics": financial_metrics,
                     "scenarios": scenario_analyses,
+                    "comparable_companies": list(comparable_metrics.keys()),
+                    "non_comparable_companies": skipped,
                 },
             }
-            update.update(self._record("quant", "ok", reasoning, state, timer.metrics()))
+            update.update(self._record("quant", quant_status_label, " ".join(detail_parts), state, timer.metrics()))
             self.session_memory.save({**state, **update})
             return update
 
@@ -852,7 +1110,20 @@ class AgentRuntime:
     def repair(self, state: FinanceState) -> FinanceState:
         with self._track_step("repair") as timer:
             iterations = state.get("critic_iterations", 0) + 1
-            target = state.get("critic_repair_target", "retrieval")
+            target = state.get("critic_repair_target", "quant")
+            codes = {
+                str(item.get("code") or "")
+                for item in (state.get("compliance_violations") or [])
+                if isinstance(item, dict)
+            }
+            # Never fan out a full retrieval loop for soft/report/unknown gaps.
+            if target == "retrieval" and not codes.intersection(RETRIEVAL_WORTHY_CODES):
+                if "missing_quantitative_results" in codes:
+                    target = "quant"
+                elif "missing_sentiment_analysis" in codes:
+                    target = "psychologist"
+                else:
+                    target = "quant"
             detail = (
                 f"Router-retry iteration {iterations}/{state.get('critic_max_iterations', 2)}: "
                 f"re-running '{target}' to address {len(state.get('compliance_findings', []))} critic finding(s)."
@@ -866,20 +1137,59 @@ class AgentRuntime:
             return update
 
     # ═══════════════════════════════════════════════════════════════
-    # REPLANNER — Resilience & Fallback
+    # APPENDIX_REPLAN — Supplementary retrieval (not live-provider retry)
     # ═══════════════════════════════════════════════════════════════
-    def replanner(self, state: FinanceState) -> FinanceState:
-        with self._track_step("replanner") as timer:
+    def appendix_replan(self, state: FinanceState) -> FinanceState:
+        """Enable one supplementary retrieval pass for appendix / evidence gaps.
+
+        This node is intentionally NOT a SEC/Yahoo provider retry. It flips
+        `appendix_search_done` so the next retrieval can include sample appendix
+        fields and richer evidence; after two attempts it enters degraded mode.
+        """
+        with self._track_step("appendix_replan") as timer:
             retries = state.get("retries", 0) + 1
             degraded_mode = retries >= 2
             appendix_search_done = not degraded_mode
-            detail = ("Re-planning triggered: switching to targeted appendix retrieval strategy." if not degraded_mode
-                      else "Degraded mode activated after multiple attempts. Generating report with acknowledged data gaps.")
+            detail = (
+                "appendix_replan / supplementary_retrieval: enabling targeted appendix retrieval."
+                if not degraded_mode
+                else (
+                    "appendix_replan exhausted after multiple supplementary_retrieval attempts; "
+                    "entering degraded mode and generating report with acknowledged data gaps."
+                )
+            )
             update: FinanceState = {
-                "retries": retries, "appendix_search_done": appendix_search_done,
-                "degraded_mode": degraded_mode, "replan_reason": None if degraded_mode else None,
+                "retries": retries,
+                "appendix_search_done": appendix_search_done,
+                "degraded_mode": degraded_mode,
+                "replan_reason": None,
             }
-            update.update(self._record("replanner", "ok", detail, state, timer.metrics()))
+            update.update(self._record("appendix_replan", "ok", detail, state, timer.metrics()))
+            self.session_memory.save({**state, **update})
+            return update
+
+    # Backward-compatible alias used by older call sites / docs.
+    replanner = appendix_replan
+
+    # ═══════════════════════════════════════════════════════════════
+    # CLAIM BINDER — structural Claim → Evidence verification
+    # ═══════════════════════════════════════════════════════════════
+    def claim_binder(self, state: FinanceState) -> FinanceState:
+        with self._track_step("claim_binder") as timer:
+            claims = build_claims(state)
+            verified = filter_verified(claims)
+            summary = binding_summary(claims)
+            detail = (
+                f"Built {summary['total_claims']} claims; verified={summary['verified_claims']}; "
+                f"rejected={summary['rejected_claims']}; page_anchored={summary['page_anchored_verified']}; "
+                f"bind_rate={summary['bind_rate']}."
+            )
+            update: FinanceState = {
+                "claims": [claim_to_dict(c) for c in claims],
+                "verified_claims": [claim_to_dict(c) for c in verified],
+                "claim_binding": summary,
+            }
+            update.update(self._record("claim_binder", "ok", detail, state, timer.metrics()))
             self.session_memory.save({**state, **update})
             return update
 
@@ -914,12 +1224,48 @@ class AgentRuntime:
             S("")
             S(f"**Companies:** {companies}")
             S("")
+            S("## 1. Executive Summary")
+            S("")
             S(detail)
             S("")
             S(
-                "**Data limitation risk:** Market snapshots / LLM general knowledge alone are not "
-                "enough for AST ratio computation. This run refused to invent financials."
+                "**Evidence Boundary:** This run produced no AST-verifiable revenue/EBITDA/R&D inputs. "
+                "Market snapshots and LLM general knowledge alone are not treated as structured fundamentals. "
+                "No ratios, SWOT, or investment positioning were invented."
             )
+            S("")
+            S("## 4. Financial Performance Analysis")
+            S("")
+            S(
+                "Not available — fail-closed. Structured fundamentals were missing or non-computable "
+                f"for: {companies}."
+            )
+            S("")
+            S("## 7. Risk Architecture")
+            S("")
+            S(
+                "**Data limitation risk (high):** Without extractable FY metrics, quantitative risk scoring "
+                "and peer margin comparison are withheld rather than estimated."
+            )
+            S("")
+            S("## 10. Compliance Review & Data Integrity")
+            S("")
+            S(
+                "Fail-closed compliance path: the synthesizer refused to fabricate checkable metrics. "
+                f"Gate expectation: `structured_source=none` for {companies}."
+            )
+            provider_summary = state.get("provider_error_summary") or {}
+            if provider_summary.get("count"):
+                S("")
+                S(
+                    "**Provider error summary:** "
+                    f"transient={provider_summary.get('transient_count', 0)}, "
+                    f"truly_missing/unavailable={provider_summary.get('missing_count', 0)}, "
+                    f"other={provider_summary.get('other_count', 0)}, "
+                    f"by_class={provider_summary.get('by_class', {})}."
+                )
+            S("")
+            S("## 11. Methodology, Data Sources & Disclaimer")
             S("")
             if self.data_mode == "demo":
                 S(
@@ -932,10 +1278,19 @@ class AgentRuntime:
                     "configured live fundamentals provider. To use local demo coverage, switch DATA_MODE=demo explicitly."
                 )
             S("")
-            S(
-                "**Gate expectation:** FinAgentBench should fail-closed "
-                "(`structured_source=none`, missing checkable metrics / pipeline steps)."
-            )
+            for line in format_rag_citation_section(state.get("rag_evidence")):
+                S(line)
+            if self.data_mode == "demo":
+                S(
+                    "**Disclaimer:** DEMO MODE — incomplete output. This is research/demo only and does not "
+                    "constitute investment advice."
+                )
+            else:
+                S(
+                    "**Disclaimer:** This incomplete report is generated by an AI-powered multi-agent system for "
+                    "research purposes only. It does not constitute investment advice, a solicitation, or a "
+                    "recommendation to buy or sell any security."
+                )
             final_report = "\n".join(sections)
             update: FinanceState = {
                 "report_sections": sections,
@@ -1001,31 +1356,55 @@ class AgentRuntime:
         def fmt_x(value: Any) -> str:
             return f"{value:.2f}x" if isinstance(value, (int, float)) else "n/a"
 
+        # Claim → Evidence: synthesizer may only assert from verified claims.
+        from .claims import claims_from_state
+
+        if not state.get("verified_claims") and not state.get("claims"):
+            built = build_claims(state)
+            state = {
+                **state,
+                "claims": [claim_to_dict(c) for c in built],
+                "verified_claims": [claim_to_dict(c) for c in filter_verified(built)],
+                "claim_binding": binding_summary(built),
+            }
+        all_claims = claims_from_state(state)
+        verified_claims = filter_verified(all_claims)
+
+        def cite_for(company: str, *, claim_type: str | None = None, metric_name: str | None = None) -> str:
+            hits = verified_by_entity(
+                verified_claims,
+                company,
+                claim_type=claim_type,  # type: ignore[arg-type]
+                metric_name=metric_name,
+            )
+            if not hits:
+                return ""
+            return hits[0].primary_citation
+
         def build_grounded_summary() -> str:
             names = list(state["companies"])
             if not names:
                 return "This run produced a research report, but no target company was available for a grounded executive summary."
+            if not verified_claims:
+                return (
+                    "No structurally verified financial claims were available. "
+                    "This executive summary withholds numeric and investment assertions rather than inventing citations."
+                )
             lines = []
             for company in names:
-                metrics = state.get("financial_metrics", {}).get(company, {})
-                risks = state.get("risk_scores", {}).get(company, {})
-                supply = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
-                market = state.get("market_snapshots", {}).get(company, {})
-                lines.append(
-                    f"{company}: EBITDA margin {fmt_pct(metrics.get('ebitda_margin'))}, "
-                    f"operating margin {fmt_pct(metrics.get('operating_margin'))}, "
-                    f"R&D intensity {fmt_pct(metrics.get('r_and_d_intensity'))} [metric-derived]; "
-                    f"supply-chain signal {supply.get('risk_level', 'unknown')} and model risk scores "
-                    f"supply_chain={risks.get('supply_chain_risk', 'n/a')}, operational={risks.get('operational_risk', 'n/a')} "
-                    "[risk-model/retrieved-signal]; "
-                    f"P/E {fmt_x(market.get('trailing_pe'))} and 52W range position {fmt_pct(metrics.get('range_position'))} "
-                    "[market-data]."
-                )
-            comparison = " ".join(lines)
+                nums = verified_by_entity(verified_claims, company, claim_type="numeric")
+                risks = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
+                inv = verified_by_entity(verified_claims, company, claim_type="investment_conclusion")
+                parts = [c.render_with_citation() for c in nums[:3]]
+                parts.extend(c.render_with_citation() for c in risks[:1])
+                parts.extend(c.render_with_citation() for c in inv[:1])
+                if parts:
+                    lines.append(f"{company}: " + " ".join(parts))
+                else:
+                    lines.append(f"{company}: no verified claims available for executive summary.")
             return (
-                f"{comparison} These figures support a comparison of profitability, market-data context, and risk-screening signals, "
-                "but they do not by themselves prove valuation upside, downside elimination, or an investment recommendation. "
-                "The primary follow-up is to validate medium-confidence derived cash-flow metrics and model-derived risk scores against source filings, segment data, and supply-chain evidence."
+                " ".join(lines)
+                + " Assertions above are limited to verified claim objects with bound evidence citations."
             )
 
         llm_summary = build_grounded_summary()
@@ -1035,10 +1414,82 @@ class AgentRuntime:
         S("")
         S("**Report Type:** Investment-Grade Research | **Classification:** AI-Generated, For Reference Only")
         S("")
+        source_resolution = state.get("source_resolution") or {}
+        company_resolutions = source_resolution.get("companies") or {}
+        fallback_rows = [
+            (company, info)
+            for company, info in company_resolutions.items()
+            if info.get("live_fallback_used")
+        ]
+        if source_resolution.get("prefer_uploaded_only") or fallback_rows or state.get("document_contexts"):
+            mode = str(source_resolution.get("mode") or "hybrid")
+            S("## 0. Source Resolution")
+            S("")
+            if source_resolution.get("prefer_uploaded_only"):
+                S(
+                    "**Mode: uploaded materials only.** Structured fundamentals were not backfilled "
+                    "from SEC/Yahoo/sample even if the upload lacked computable metrics."
+                )
+            elif fallback_rows:
+                S(
+                    "**Mode: hybrid.** Uploads are preferred; when they lack AST-computable "
+                    "revenue/EBITDA/R&D, live providers may fill the gap — and that fill-in is listed below."
+                )
+            else:
+                S(
+                    f"**Mode: {mode}.** Per-company structured source is listed so document narrative "
+                    "is not confused with SEC/Yahoo numbers."
+                )
+            S("")
+            S("| Company | Structured fundamentals source | Upload had computable metrics? | Notes |")
+            S("|---------|--------------------------------|--------------------------------|-------|")
+            for company in state.get("companies") or []:
+                info = company_resolutions.get(company) or {}
+                source = str(info.get("structured_source") or (state.get("retrieved_docs") or {}).get(company, {}).get("structured_source") or "none")
+                had_metrics = "yes" if info.get("upload_had_computable_metrics") else ("n/a" if not state.get("document_contexts") else "no")
+                note = str(info.get("fallback_reason") or "")
+                if not note and source == "document_extracted":
+                    note = "Numbers taken from uploaded materials."
+                elif not note and info.get("live_fallback_used"):
+                    note = f"Upload lacked metrics; used {source}."
+                S(f"| {company} | `{source}` | {had_metrics} | {note or '—'} |")
+            S("")
         S(f"## 1. Executive Summary")
         S(f"{llm_summary}")
         S("")
-        S("**Evidence Boundary:** Metrics and formula-backed ratios are deterministic outputs from structured inputs. Risk scores, SWOT, scenarios, and positioning language are analytical heuristics unless explicitly tied to retrieved documents, market data, or listed metric inputs. They should be treated as research hypotheses, not facts or investment recommendations.")
+        if state.get("partial_data_gap"):
+            coverage = state.get("coverage_matrix") or {}
+            comparable = [
+                company for company in state.get("companies") or [] if (coverage.get(company) or {}).get("comparable")
+            ]
+            skipped = state.get("non_comparable_companies") or non_comparable_companies(
+                list(state.get("companies") or []),
+                coverage,
+            )
+            S("**Partial Peer Coverage Notice:**")
+            S(
+                f"- Comparable ratio set: {', '.join(comparable) if comparable else '(none)'}"
+            )
+            S(
+                f"- Non-comparable peers: {', '.join(skipped) if skipped else '(none)'} "
+                "(structured_source missing AST-verifiable revenue/EBITDA/R&D inputs)."
+            )
+            S(
+                "- Margin/intensity peer comparison uses only the comparable set. "
+                "Non-comparable peers may still appear with narrative, market-only, or risk-screening context."
+            )
+            S("")
+        S("**Evidence Boundary:** Material numeric, growth, risk, and investment assertions in this report are limited to **verified claims** produced by the Claim → Evidence binder. Unverified or rejected claims are omitted. Risk-model scores remain screening indicators even when bound to `lumenfin:risk_model:*` evidence.")
+        S("")
+        for line in format_verified_claims_ledger(verified_claims):
+            S(line)
+        binding = state.get("claim_binding") or binding_summary(all_claims)
+        S(
+            f"**Claim binding:** verified={binding.get('verified_claims', 0)}/"
+            f"{binding.get('total_claims', 0)} "
+            f"(bind_rate={binding.get('bind_rate', 0)}, "
+            f"page_anchored={binding.get('page_anchored_verified', 0)})."
+        )
         S("")
         S(f"## 2. Analytical Framework & Methodology")
         S("")
@@ -1072,9 +1523,14 @@ class AgentRuntime:
         for company in state["companies"]:
             metrics = state.get("financial_metrics", {}).get(company, {})
             sentiment = state.get("sentiment_analysis", {}).get(company, {})
-            risk_level = state["retrieved_docs"][company]["supply_chain"]["risk_level"]
+            risk_level = (
+                ((state.get("retrieved_docs") or {}).get(company) or {})
+                .get("supply_chain", {})
+                .get("risk_level", "unknown")
+            )
             risk_data = state.get("risk_scores", {}).get(company, {})
             live_market = state.get("market_snapshots", {}).get(company, {})
+            _ = (risk_level, live_market)  # retained for optional extensions
 
             S(f"### {company}")
             S("")
@@ -1082,8 +1538,8 @@ class AgentRuntime:
             if metrics:
                 S(f"**Key Financial Indicators**")
                 S("")
-                S("| Metric | Value | Benchmark | Assessment | Data Quality | Confidence | Basis | Rationale |")
-                S("|--------|-------|-----------|------------|--------------|------------|-------|-----------|")
+                S("| Metric | Value | Benchmark | Assessment | Data Quality | Confidence | Basis | Citation | Rationale |")
+                S("|--------|-------|-----------|------------|--------------|------------|-------|----------|-----------|")
 
                 metric_conf = state.get("metric_confidence", {}).get(company, {})
 
@@ -1124,59 +1580,78 @@ class AgentRuntime:
                     v = value if value is not None else metrics.get(metric_key)
                     if v is None:
                         return
+                    # Estimated / unbound metrics require a verified claim; else omit as fact.
+                    verified_hit = verified_by_entity(
+                        verified_claims, company, metric_name=metric_key
+                    )
+                    if metric_key in ("ebitda_margin", "operating_margin", "r_and_d_intensity", "pe_ratio"):
+                        if not verified_hit:
+                            return
                     conf = metric_conf.get(metric_key, {})
                     conf_level = conf.get("level", "N/A")
                     conf_score = conf.get("score")
                     conf_display = f"{conf_score:.2f}" if isinstance(conf_score, (float, int)) else "N/A"
                     basis = str(conf.get("basis", "N/A"))
+                    citation = verified_hit[0].primary_citation if verified_hit else "unverified"
                     if metric_key in ("ebitda_margin", "r_and_d_intensity", "operating_margin", "estimated_net_margin", "estimated_fcf_margin"):
+                        if metric_key.startswith("estimated_") and not verified_hit:
+                            return
                         grade, rationale = assess_metric(metric_key, float(v))
-                        S(f"| {label} | {v:.2%} | {benchmark} | {grade} | {conf_level} | {conf_display} | {basis} | {rationale} |")
+                        S(f"| {label} | {v:.2%} | {benchmark} | {grade} | {conf_level} | {conf_display} | {basis} | `{citation}` | {rationale} |")
                     elif metric_key == "pe_ratio":
-                        S(f"| {label} | {v:.2f}x | {benchmark} | — | {conf_level} | {conf_display} | {basis} | Market-implied valuation multiple |")
+                        S(f"| {label} | {v:.2f}x | {benchmark} | — | {conf_level} | {conf_display} | {basis} | `{citation}` | Market-implied valuation multiple |")
                     elif metric_key == "monthly_return":
+                        if not verified_hit:
+                            return
                         direction = "Upward momentum" if v > 0 else "Downward pressure"
-                        S(f"| {label} | {v:.2%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | {direction} |")
+                        S(f"| {label} | {v:.2%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | `{citation}` | {direction} |")
                     elif metric_key == "range_position":
+                        if not verified_hit:
+                            return
                         position = "Near highs" if v > 0.7 else ("Near lows" if v < 0.3 else "Mid-range")
-                        S(f"| {label} | {v:.1%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | 52-week {position} |")
+                        S(f"| {label} | {v:.1%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | `{citation}` | 52-week {position} |")
 
                 add_row("ebitda_margin", "EBITDA Margin", ">25%")
                 add_row("operating_margin", "Operating Margin", ">20%")
-                add_row("estimated_net_margin", "Est. Net Margin", ">15%")
-                add_row("estimated_fcf_margin", "Est. FCF Yield", ">10%")
                 add_row("r_and_d_intensity", "R&D Intensity", "5-15%")
                 add_row("pe_ratio", "P/E (TTM)", "Industry avg")
-                add_row("monthly_return", "Monthly Return", "—")
-                add_row("range_position", "52W Range Position", "—")
                 S("")
 
-                # Reasoning chain
+                # Reasoning chain from verified claims only
                 S(f"**Analytical Reasoning Chain**")
                 S("")
-                ebitda_m = metrics.get("ebitda_margin", 0)
-                rd_i = metrics.get("r_and_d_intensity", 0)
                 reasoning_lines = []
-                reasoning_lines.append(f"1. **Profitability Assessment**: {company} achieves an EBITDA margin of {ebitda_m:.1%}. "
-                    f"{'This significantly exceeds the 25% industry benchmark, indicating strong pricing power and operational leverage.' if ebitda_m > 0.25 else 'This is below the 25% threshold, suggesting room for operational efficiency improvement.'}")
-                reasoning_lines.append(f"2. **Innovation Capacity**: R&D intensity of {rd_i:.1%} "
-                    f"{'demonstrates commitment to sustaining competitive advantage through innovation.' if rd_i > 0.06 else 'may constrain long-term innovation trajectory relative to peers.'}")
-                reasoning_lines.append(f"3. **Risk Integration**: Supply chain risk is rated '{risk_level}'. "
-                    f"{'This represents a manageable operational risk factor.' if risk_level == 'low' else 'This requires active monitoring and mitigation strategies.' if risk_level == 'medium' else 'This is a material risk factor that warrants hedging or diversification.'} "
-                    "[retrieved-evidence if supply-chain text was retrieved; otherwise model-derived screening signal]")
-
-                if sentiment.get("confidence_score"):
-                    cs = sentiment["confidence_score"]
-                    reasoning_lines.append(f"4. **Management Credibility**: Leadership confidence score of {cs}/10 "
-                        f"{'indicates high conviction in strategic direction.' if cs >= 7 else 'suggests measured caution in outlook.' if cs >= 5 else 'warrants further scrutiny of narrative consistency.'}")
+                for idx, claim in enumerate(
+                    verified_by_entity(verified_claims, company, claim_type="numeric")[:3],
+                    start=1,
+                ):
+                    reasoning_lines.append(f"{idx}. {claim.render_with_citation()}")
+                for claim in verified_by_entity(verified_claims, company, claim_type="risk_conclusion")[:1]:
+                    reasoning_lines.append(f"{len(reasoning_lines)+1}. {claim.render_with_citation()}")
+                for claim in verified_by_entity(verified_claims, company, claim_type="growth"):
+                    reasoning_lines.append(f"{len(reasoning_lines)+1}. {claim.render_with_citation()}")
+                rejected_growth = [
+                    c
+                    for c in all_claims
+                    if c.entity == company and c.claim_type == "growth" and c.verification == "rejected"
+                ]
+                if rejected_growth:
+                    reasoning_lines.append(
+                        f"{len(reasoning_lines)+1}. Growth claim withheld: {rejected_growth[0].verify_reason}"
+                    )
+                if not reasoning_lines:
+                    reasoning_lines.append("No verified numeric/risk claims available for reasoning.")
                 S("\n".join(reasoning_lines))
                 S("")
             else:
-                S("*[Degraded Analysis] Insufficient structured data for quantitative assessment.*")
+                S("*[Partial Coverage] Insufficient structured data for AST ratio comparison. Narrative, market-only indicators, or risk-screening context may still be shown below.*")
+                if company in (state.get("non_comparable_companies") or []):
+                    source = state.get("retrieved_docs", {}).get(company, {}).get("structured_source", "none")
+                    S(f"*Structured source for {company}: `{source}`. Peer margin comparison intentionally skipped.*")
                 S("")
 
-            # Sentiment
-            S(f"**Management Sentiment Profile**")
+            # Sentiment (non-claim heuristic — labeled as unbound screening)
+            S(f"**Management Sentiment Profile** *(screening signal; not a verified financial claim)*")
             S(f"- Overall Tone: **{sentiment.get('label', 'N/A').capitalize()}**")
             if sentiment.get("confidence_score"):
                 S(f"- Conviction Level: {sentiment['confidence_score']}/10")
@@ -1188,149 +1663,96 @@ class AgentRuntime:
                 S(f"- Flagged Risks: {' | '.join(sentiment['risk_flags'])}")
             S("")
 
-            # Risk
-            if risk_data:
+            # Risk — verified risk claims only for conclusions
+            risk_claims = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
+            if risk_claims or risk_data:
                 S(f"**Risk Exposure Matrix**")
                 S("")
-                S("*Risk scores are model-derived screening indicators. They combine available financial metrics, supply-chain signals, sentiment flags, and data-quality checks; they are not standalone cited facts.*")
+                S("*Rows below are emitted only when a verified risk claim exists; otherwise the dimension is omitted.*")
                 S("")
-                S(
-                    "**Data limitation risk:** Structured fundamentals and cited filings may be incomplete "
-                    "or only partially extracted from uploaded filings. Treat missing coverage as a "
-                    "material data limitation rather than a verified financial fact. Market risk remains relevant "
-                    "because live snapshots can change between retrieval and report generation."
-                )
-                S("")
-                S("| Dimension | Score (1-10) | Level | Basis |")
-                S("|-----------|-------------|-------|-------|")
-                dim_labels = {"financial_risk": "Financial", "operational_risk": "Operational",
-                              "market_risk": "Market", "regulatory_risk": "Regulatory",
-                              "supply_chain_risk": "Supply Chain"}
-                dim_basis = {
-                    "financial_risk": "metric-derived from profitability, leverage proxies, and cash-flow quality",
-                    "operational_risk": "heuristic from operating profile and retrieved risk signals",
-                    "market_risk": "market-data/heuristic from live snapshot availability and price context",
-                    "regulatory_risk": "sector heuristic unless retrieved regulatory evidence is present",
-                    "supply_chain_risk": "retrieved supply-chain signal when available; otherwise heuristic",
+                S("| Dimension | Score (1-10) | Level | Citation | Basis |")
+                S("|-----------|-------------|-------|----------|-------|")
+                dim_labels = {
+                    "financial_risk": "Financial",
+                    "operational_risk": "Operational",
+                    "market_risk": "Market",
+                    "regulatory_risk": "Regulatory",
+                    "supply_chain_risk": "Supply Chain",
                 }
                 for dim, label in dim_labels.items():
-                    score = risk_data.get(dim, 5.0)
+                    hits = verified_by_entity(verified_claims, company, metric_name=dim)
+                    if dim == "supply_chain_risk" and not hits:
+                        hits = [
+                            c
+                            for c in risk_claims
+                            if c.metric_name == "supply_chain_risk"
+                        ]
+                    if not hits:
+                        continue
+                    claim = hits[0]
+                    score = risk_data.get(dim, claim.value if isinstance(claim.value, (int, float)) else 5.0)
+                    if not isinstance(score, (int, float)):
+                        score = 5.0
                     level = "Low Risk" if score < 3.5 else ("Moderate" if score < 6.5 else "Elevated")
-                    S(f"| {label} | {score:.1f} | {level} | {dim_basis[dim]} |")
+                    S(
+                        f"| {label} | {score:.1f} | {level} | `{claim.primary_citation}` | "
+                        f"{claim.verify_reason} |"
+                    )
                 S("")
-                supply_chain = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
-                supply_signals = supply_chain.get("signals") or []
-                S("**Risk Decision Triggers**")
+                S("**Verified Risk Conclusions**")
                 S("")
-                S("| Risk Area | Evidence Signal | Review Trigger | Potential Financial Channel |")
-                S("|-----------|-----------------|----------------|-----------------------------|")
-                if supply_chain:
-                    S(
-                        f"| Supply chain | risk_level={supply_chain.get('risk_level', 'unknown')}; "
-                        f"{'; '.join(str(signal) for signal in supply_signals[:2])} | "
-                        "Escalate if concentration remains medium/high or inventory days rise | "
-                        "gross margin pressure, delivery delays, or working-capital drag |"
-                    )
-                if live_market:
-                    pe = live_market.get("trailing_pe")
-                    range_pos = metrics.get("range_position")
-                    range_display = f"{range_pos:.1%}" if isinstance(range_pos, (int, float)) else "n/a"
-                    S(
-                        f"| Market valuation | P/E={pe if pe is not None else 'n/a'}; "
-                        f"52W range position={range_display} | "
-                        "Review market risk if valuation is high while market/range momentum is stretched | "
-                        "market multiple compression or downside asymmetry |"
-                    )
-                if metric_conf.get("estimated_fcf_margin", {}).get("level") == "Medium":
-                    S(
-                        "| Cash-flow estimate | estimated FCF margin uses derived inputs with medium confidence | "
-                        "Require source financial statements before using in valuation | "
-                        "valuation sensitivity and liquidity assessment error |"
-                    )
+                for claim in risk_claims:
+                    S(f"- {claim.render_with_citation()}")
                 S("")
 
         # ── Industry & Macro Context ──
         S("## 5. Industry Dynamics & Macroeconomic Context")
         S("")
-        S("*This section is limited to metric-derived and retrieved-signal observations. Broader sector claims are intentionally excluded unless supported by uploaded or retrieved evidence.*")
+        S("*Limited to verified numeric/risk claims. Broader sector narratives are excluded without evidence.*")
         S("")
         for company in state["companies"]:
-            metrics = state.get("financial_metrics", {}).get(company, {})
-            risk = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
             S(f"### {company} — Operating Environment")
             S("")
-            ebitda_m = metrics.get("ebitda_margin", 0)
-            rd_i = metrics.get("r_and_d_intensity", 0)
-            risk_level = risk.get("risk_level", "unknown")
-            S(f"- **Sector Position [metric-derived]**: {'Profitability is above the internal benchmark, which may indicate pricing power or scale economics' if ebitda_m > 0.25 else 'Profitability is below top-tier benchmark, leaving room for margin improvement'}")
-            S(f"- **Innovation Trajectory [metric-derived]**: {'R&D intensity of ' + str(round(rd_i*100,1)) + '% of revenue supports an innovation-capacity hypothesis' if rd_i > 0.06 else 'R&D intensity is moderate and should be validated against peer spend'}")
-            S(f"- **Supply Chain Resilience [retrieved-evidence/heuristic]**: {'Supply-chain signal is low risk in the retrieved payload' if risk_level == 'low' else 'Supply-chain signal indicates concentration or execution risk that requires validation' if risk_level == 'medium' else 'Supply-chain signal indicates elevated concentration exposure that requires evidence-backed mitigation review'}")
-            S(f"- **Evidence Gap [data-quality]**: No company-specific regulatory filing, customer-mix schedule, or segment macro sensitivity document was retrieved in this run.")
-            if not has_uploaded_docs and not market_ok:
-                S(f"- {unverified_note}")
+            nums = verified_by_entity(verified_claims, company, claim_type="numeric")
+            risks = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
+            if not nums and not risks:
+                S("- No verified claims available for operating-environment assertions.")
+            for claim in nums[:3]:
+                S(f"- {claim.render_with_citation()}")
+            for claim in risks[:2]:
+                S(f"- {claim.render_with_citation()}")
             S("")
 
-        # ── SWOT ──
+        # ── SWOT from verified claims only ---
         S("## 6. Strategic Analysis (SWOT)")
+        S("")
+        S("*SWOT entries are composed only from verified claims; empty quadrants mean no verified support.*")
         S("")
         swot: dict[str, dict[str, str]] = {}
         for company in state["companies"]:
-            metrics = state.get("financial_metrics", {}).get(company, {})
-            sentiment = state.get("sentiment_analysis", {}).get(company, {})
-            risk = state.get("retrieved_docs", {}).get(company, {}).get("supply_chain", {})
-            ebitda_m = metrics.get("ebitda_margin", 0)
-            rd_i = metrics.get("r_and_d_intensity", 0)
-            fcf_m = metrics.get("estimated_fcf_margin", 0)
-            tone = sentiment.get("label", "neutral")
-            risk_data = state.get("risk_scores", {}).get(company, {})
-            financial_risk = risk_data.get("financial_risk", 5.0)
-
+            nums = verified_by_entity(verified_claims, company, claim_type="numeric")
+            risks = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
             strengths = []
             weaknesses = []
-            if ebitda_m >= 0.35:
-                strengths.append("Exceptionally strong profitability and operating leverage")
-            elif ebitda_m >= 0.20:
-                strengths.append("Solid profitability with scalable operating model")
-            else:
-                weaknesses.append("Profitability remains below top-tier peer levels")
-            if 0.05 <= rd_i <= 0.15:
-                strengths.append("Balanced R&D intensity supports efficient innovation conversion")
-            elif rd_i > 0.15:
-                strengths.append("Aggressive R&D investment signals strong innovation intent")
-                if fcf_m < 0.10:
-                    weaknesses.append("High R&D intensity currently compresses free-cash-flow quality")
-            else:
-                weaknesses.append("R&D intensity may be insufficient for long-cycle technology leadership")
-            if tone == "bullish":
-                strengths.append("Management communication remains constructive with strategic continuity")
-
-            if risk.get("risk_level") != "low":
-                weaknesses.append(f"Supply chain risk exposure remains at '{risk.get('risk_level')}' level")
-            if financial_risk > 5.5:
-                weaknesses.append("Financial risk score indicates elevated balance-sheet/earnings volatility")
-
             opportunities = []
             threats = []
-            if ebitda_m >= 0.25:
-                opportunities.append("[metric-derived] strong profitability provides capacity for reinvestment")
-            if rd_i >= 0.05:
-                opportunities.append("[metric-derived] R&D intensity supports an innovation-capacity screen")
-            if risk.get("risk_level") != "low":
-                threats.append(f"[retrieved-signal] supply chain risk level is {risk.get('risk_level')}")
-            if financial_risk > 5.5:
-                threats.append("[risk-model] elevated financial risk score requires validation")
-            if not opportunities:
-                opportunities.append("No evidence-backed opportunities identified at current data resolution")
-            if not threats:
-                threats.append("No evidence-backed threats identified at current data resolution")
-
+            for claim in nums:
+                if claim.metric_name == "ebitda_margin" and isinstance(claim.value, (int, float)):
+                    if float(claim.value) >= 0.20:
+                        strengths.append(claim.render_with_citation())
+                    else:
+                        weaknesses.append(claim.render_with_citation())
+                if claim.metric_name == "r_and_d_intensity" and isinstance(claim.value, (int, float)):
+                    if 0.05 <= float(claim.value) <= 0.20:
+                        opportunities.append(claim.render_with_citation())
+            for claim in risks:
+                threats.append(claim.render_with_citation())
             swot[company] = {
-                "strengths": "; ".join(strengths) + ".",
-                "weaknesses": "; ".join(weaknesses) + "." if weaknesses else "No material weaknesses identified at current data resolution.",
-                "opportunities": "; ".join(opportunities) + ".",
-                "threats": "; ".join(threats) + ".",
+                "strengths": "; ".join(strengths) if strengths else "No verified strength claims.",
+                "weaknesses": "; ".join(weaknesses) if weaknesses else "No verified weakness claims.",
+                "opportunities": "; ".join(opportunities) if opportunities else "No verified opportunity claims.",
+                "threats": "; ".join(threats) if threats else "No verified threat claims.",
             }
-
             S(f"### {company}")
             S("")
             S("| Quadrant | Assessment |")
@@ -1344,60 +1766,61 @@ class AgentRuntime:
         # ── Scenario Analysis ──
         S("## 7. Scenario Analysis & Forward Projections")
         S("")
-        S("*No evidence-backed revenue forecast or management guidance was retrieved for this run. The table below is a sensitivity framework showing which variables should be stressed, not a probability forecast, price target, or recommendation.*")
+        S("*No heuristic revenue-growth forecasts are emitted. Only verified growth claims appear; otherwise growth is withheld.*")
         S("")
         for company in state["companies"]:
-            metrics = state.get("financial_metrics", {}).get(company, {})
             S(f"### {company}")
             S("")
-            S("| Sensitivity | Evidence-Backed Input | Stress Direction | Why It Matters |")
-            S("|-------------|-----------------------|------------------|----------------|")
-            S(f"| Profitability | EBITDA margin {metrics.get('ebitda_margin', 0):.1%} | test margin compression | affects earnings quality and valuation support |")
-            S(f"| R&D efficiency | R&D intensity {metrics.get('r_and_d_intensity', 0):.1%} | test lower innovation conversion | affects long-cycle competitiveness hypothesis |")
-            S(f"| Cash-flow quality | estimated FCF margin {metrics.get('estimated_fcf_margin', 0):.1%} | test lower conversion due to medium-confidence estimate | affects valuation and liquidity interpretation |")
+            growth = verified_by_entity(verified_claims, company, claim_type="growth")
+            if growth:
+                for claim in growth:
+                    S(f"- {claim.render_with_citation()}")
+            else:
+                rejected = [
+                    c
+                    for c in all_claims
+                    if c.entity == company and c.claim_type == "growth" and c.verification == "rejected"
+                ]
+                reason = rejected[0].verify_reason if rejected else "multi-period fundamentals unavailable"
+                S(f"- Revenue growth claim withheld ({reason}).")
+            for claim in verified_by_entity(verified_claims, company, claim_type="numeric")[:2]:
+                S(f"- Sensitivity input: {claim.render_with_citation()}")
             S("")
 
-        # ── Investment Thesis ──
+        # ── Investment Thesis from verified investment claims only ---
         S("## 8. Research Thesis & Positioning")
         S("")
-        S("*This section expresses research positioning considerations only. It does not recommend buying, selling, holding, overweighting, or allocating to any security.*")
+        S("*Investment conclusions are emitted only from verified `investment_conclusion` claims composed from verified numeric+risk evidence. This is not a buy/sell recommendation.*")
         S("")
         investment_thesis: dict[str, dict[str, str]] = {}
         for company in state["companies"]:
-            metrics = state.get("financial_metrics", {}).get(company, {})
-            sentiment = state.get("sentiment_analysis", {}).get(company, {})
-            ebitda_m = metrics.get("ebitda_margin", 0)
-            fcf_m = metrics.get("estimated_fcf_margin", 0)
-            tone = sentiment.get("label", "neutral")
-            risk_data = state.get("risk_scores", {}).get(company, {})
-            financial_risk = risk_data.get("financial_risk", 5.0)
-            cautious_gate = financial_risk > 5.5 or fcf_m < 0.10
-
-            if cautious_gate:
-                bull = (f"Growth optionality exists, but current risk profile is elevated (financial risk {financial_risk:.1f}/10, "
-                        f"FCF yield {fcf_m:.1%}). Treat any constructive thesis as conditional on improved cash-flow quality and risk evidence.")
-                bear = ("Maintain a defensive posture until cash-flow quality and risk metrics improve. "
-                        "Use explicit risk limits in any separate portfolio process.")
-            elif ebitda_m > 0.25 and tone == "bullish":
-                bull = (f"Strong profitability (EBITDA margin {ebitda_m:.1%}) combined with confident management guidance "
-                        f"supports a quality-screening thesis, subject to valuation and independent evidence review.")
-                bear = (f"Premium valuation may limit near-term upside. Key downside risks include competitive disruption "
-                        f"and macro-driven multiple compression.")
-            elif ebitda_m > 0.15:
-                bull = (f"Solid financial foundation with manageable risk profile. This can remain on a "
-                        f"quality-compounder research screen pending valuation and risk review.")
-                bear = (f"Limited near-term catalysts for re-rating. Margin improvement trajectory may be gradual. "
-                        f"Compare against higher-growth peers before drawing allocation conclusions.")
-            else:
-                bull = (f"Potential value unlock if operational turnaround materializes. Current metrics may understate "
-                        f"recovery optionality, but this remains a hypothesis requiring evidence.")
-                bear = (f"Weak profitability metrics suggest structural challenges. A positive research view would require "
-                        f"definitive evidence of business improvement.")
-
-            investment_thesis[company] = {"bull_case": bull, "bear_case": bear}
+            inv = verified_by_entity(verified_claims, company, claim_type="investment_conclusion")
             S(f"### {company}")
-            S(f"- **Research Rationale (Bull Case):** {bull}")
-            S(f"- **Risk Considerations (Bear Case):** {bear}")
+            if inv:
+                bull = inv[0].render_with_citation()
+                bear = (
+                    "Risk considerations remain those listed in verified risk claims; "
+                    "no separate unverified bear narrative is invented."
+                )
+                risk_lines = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
+                if risk_lines:
+                    bear = risk_lines[0].render_with_citation()
+                investment_thesis[company] = {"bull_case": bull, "bear_case": bear}
+                S(f"- **Research Rationale (Bull Case):** {bull}")
+                S(f"- **Risk Considerations (Bear Case):** {bear}")
+            else:
+                rejected = [
+                    c
+                    for c in all_claims
+                    if c.entity == company
+                    and c.claim_type == "investment_conclusion"
+                    and c.verification == "rejected"
+                ]
+                msg = rejected[0].statement if rejected else (
+                    f"{company}: investment conclusion withheld — missing verified claims."
+                )
+                investment_thesis[company] = {"bull_case": msg, "bear_case": msg}
+                S(f"- {msg}")
             S("")
 
         # ── Peer Comparison ──
@@ -1428,13 +1851,13 @@ class AgentRuntime:
                     "report generated with acknowledged compliance gaps.*"
                 )
         else:
-            S("Core rule-based compliance checks passed. Semantic review should still validate whether all qualitative claims are supported by cited evidence.")
+            S("Core rule-based compliance checks passed. Material assertions are limited to verified claims with bound evidence.")
         S("")
 
         # ── Methodology & Disclaimer ──
         S("## 11. Methodology, Data Sources & Disclaimer")
         S("")
-        S("**Analytical Methods:** AST-safe expression evaluator for numerical computation; LLM-based deep semantic analysis for sentiment extraction; multi-factor risk scoring model with evidence-based calibration; LangGraph-directed multi-agent orchestration with checkpoint-based state persistence.")
+        S("**Analytical Methods:** AST-safe expression evaluator for numerical computation; Claim→Evidence binder for citation-backed assertions; LLM-based sentiment screening; multi-factor risk scoring; LangGraph multi-agent orchestration.")
         S("")
         document_contexts = state.get("document_contexts", [])
         market_snapshots = state.get("market_snapshots", {})
@@ -1510,8 +1933,29 @@ class AgentRuntime:
                 f"(data_mode={self.data_mode})."
             )
 
+        resolution = state.get("source_resolution") or {}
+        if resolution.get("prefer_uploaded_only"):
+            source_parts.append(
+                "Source policy: prefer_uploaded_only=true (SEC/Yahoo/sample backfill disabled for this run)."
+            )
+        else:
+            fallback_companies = [
+                name
+                for name, info in (resolution.get("companies") or {}).items()
+                if info.get("live_fallback_used")
+            ]
+            if fallback_companies:
+                source_parts.append(
+                    "Live/sample backfill after sparse upload for: "
+                    + ", ".join(fallback_companies)
+                    + " (see §0 Source Resolution)."
+                )
+
         source_parts.append("Narrative analysis: generated by the configured LLM using retrieved evidence and computed metrics.")
         S(f"**Data Sources:** {' '.join(source_parts)}")
+        S("")
+        for line in format_rag_citation_section(rag_evidence):
+            S(line)
         if market_total:
             S("")
             S("**Market Data by Company:**")
@@ -1565,7 +2009,9 @@ class AgentRuntime:
             "workflow_status": "completed",
         }
         synth_detail = (
-            "Investment-grade report assembled: SWOT, Scenario Analysis (Base/Bull/Bear), Investment Thesis, Peer Benchmarking, Compliance Review, and structured Chart Data."
+            f"Report assembled from verified claims only "
+            f"(verified={len(verified_claims)}/{len(all_claims)}; "
+            f"bind_rate={(state.get('claim_binding') or {}).get('bind_rate', 0)})."
         )
         update.update(self._record("synthesizer", "ok", synth_detail, state, timer.metrics()))
         self.session_memory.save({**state, **update})

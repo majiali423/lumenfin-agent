@@ -16,8 +16,11 @@ from .documents import (
     _extract_metric_hints,
     detect_companies_from_text,
     extract_metric_hints_for_company,
+    merge_per_company_metric_hints,
     parse_pdf_document,
 )
+from .document_entity import resolve_document_entities
+
 
 COMPANY_COLUMNS = frozenset(
     {"company", "company_name", "ticker", "symbol", "name", "公司", "企业"}
@@ -26,7 +29,7 @@ METRIC_NAME_COLUMNS = frozenset({"metric", "metrics", "indicator", "field", "指
 METRIC_VALUE_COLUMNS = frozenset({"value", "amount", "数值", "值"})
 
 SUPPORTED_SUFFIXES = frozenset(
-    {".pdf", ".csv", ".xlsx", ".md", ".markdown", ".json", ".txt"}
+    {".pdf", ".csv", ".xlsx", ".md", ".markdown", ".json", ".txt", ".htm", ".html"}
 )
 
 
@@ -47,11 +50,31 @@ def _build_document_context(
     tables: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     page_list = pages if pages is not None else [text]
-    companies = detected_companies or detect_companies_from_text(text, filename)
+    if detected_companies is not None:
+        companies = list(detected_companies)
+        entity = {
+            "primary_company": (
+                {"name": companies[0], "ticker": None, "cik": None, "confidence": 1.0, "method": "explicit"}
+                if companies
+                else None
+            ),
+            "issuer_companies": companies,
+            "mentioned_companies": companies,
+            "detected_companies": companies,
+        }
+    else:
+        entity = resolve_document_entities(text=text, pages=page_list, filename=filename)
+        companies = list(entity.get("detected_companies") or [])
     hints = metric_hints if metric_hints is not None else {}
-    per_company = {
-        company: extract_metric_hints_for_company(text, company) for company in companies
-    }
+    # Metric hints scoped to issuer companies only (not body peer mentions).
+    hint_companies = companies or list(entity.get("mentioned_companies") or [])
+    per_company = merge_per_company_metric_hints(
+        text,
+        hint_companies,
+        base={
+            company: extract_metric_hints_for_company(text, company) for company in hint_companies
+        },
+    )
     ctx: dict[str, Any] = {
         "document_id": document_id,
         "filename": filename,
@@ -60,6 +83,9 @@ def _build_document_context(
         "page_count": len(page_list),
         "excerpt": text[:4000],
         "detected_companies": companies,
+        "issuer_companies": list(entity.get("issuer_companies") or companies),
+        "mentioned_companies": list(entity.get("mentioned_companies") or companies),
+        "primary_company": entity.get("primary_company"),
         "metric_hints": hints,
         "per_company_metric_hints": per_company,
         "source_type": source_type,
@@ -316,6 +342,11 @@ def parse_upload_documents(file_path: Path) -> list[dict[str, Any]]:
     if suffix == ".pdf":
         ctx = parse_pdf_document(path)
         ctx["source_type"] = "pdf"
+        return [ctx]
+    if suffix in {".htm", ".html"}:
+        from .sec_html import parse_sec_html_document
+
+        ctx = parse_sec_html_document(path)
         return [ctx]
     if suffix == ".csv":
         return parse_csv_documents(path)

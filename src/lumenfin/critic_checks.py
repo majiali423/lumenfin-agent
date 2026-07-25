@@ -101,7 +101,12 @@ def check_retrieval_provenance(state: dict[str, Any]) -> list[Violation]:
 
 
 def check_report_compliance(report_stub: str) -> list[Violation]:
-    """Rule-based report checks. Only meaningful when report_sections exist (repair loops)."""
+    """Optional post-synthesis report template checks.
+
+    Not invoked by pre-synthesizer ``run_critic_checks`` (report_sections are empty
+    then). Kept for unit tests and optional future post-synth audit.
+    ``repair_target`` is intentionally not ``retrieval``.
+    """
     if not (report_stub or "").strip():
         return []
 
@@ -113,7 +118,7 @@ def check_report_compliance(report_stub: str) -> list[Violation]:
                 code="missing_risk_disclaimer",
                 severity="high",
                 message="Report missing risk disclaimer markers.",
-                repair_target="retrieval",
+                repair_target="quant",
             )
         )
 
@@ -123,18 +128,17 @@ def check_report_compliance(report_stub: str) -> list[Violation]:
                 code="missing_data_provenance",
                 severity="medium",
                 message="Report missing data provenance markers.",
-                repair_target="retrieval",
+                repair_target="quant",
             )
         )
     return violations
 
 
 def run_critic_checks(state: dict[str, Any]) -> list[Violation]:
+    """Pre-synthesizer critic gates: structured data + completeness only."""
     violations: list[Violation] = []
     violations.extend(check_data_completeness(state))
     violations.extend(check_retrieval_provenance(state))
-    report_stub = "\n".join(state.get("report_sections") or [])
-    violations.extend(check_report_compliance(report_stub))
     return violations
 
 

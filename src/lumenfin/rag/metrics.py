@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .chunking import chunk_document
+from .lexical import expand_synonyms, tokenize_text
 
 CITATION_PATTERN = re.compile(r"^.+#p\d+$", re.IGNORECASE)
-TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9\u4e00-\u9fff]+")
 
 
 def _normalize_terms(terms: list[str]) -> list[str]:
@@ -15,7 +15,7 @@ def _normalize_terms(terms: list[str]) -> list[str]:
 
 
 def _tokenize(text: str) -> set[str]:
-    return {token.lower() for token in TOKEN_PATTERN.findall(text)}
+    return expand_synonyms(tokenize_text(text))
 
 
 def find_relevant_chunks(

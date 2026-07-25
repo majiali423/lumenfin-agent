@@ -1,10 +1,10 @@
 SAMPLE_FINANCIAL_DATA = {
     "Apple": {
         "market_data": {
-            "revenue_2025": 412.0,
-            "ebitda_2025": 141.2,
-            "r_and_d_2025": 33.4,
-            "operating_income_2025": 123.6,
+            "revenue": 412.0,
+            "ebitda": 141.2,
+            "r_and_d": 33.4,
+            "operating_income": 123.6,
         },
         "supply_chain": {
             "risk_level": "medium",
@@ -20,17 +20,17 @@ SAMPLE_FINANCIAL_DATA = {
             "Management sounded confident on margin discipline and long-term investment cadence.",
         ],
         "appendix": {
-            "subsidiary_revenue_2025": 28.5,
+            "subsidiary_revenue": 28.5,
             "inventory_days": 37,
             "risk_note": "Single-region logistics exposure is still material.",
         },
     },
     "Microsoft": {
         "market_data": {
-            "revenue_2025": 288.7,
-            "ebitda_2025": 122.5,
-            "r_and_d_2025": 36.8,
-            "operating_income_2025": 118.3,
+            "revenue": 288.7,
+            "ebitda": 122.5,
+            "r_and_d": 36.8,
+            "operating_income": 118.3,
         },
         "supply_chain": {
             "risk_level": "low",
@@ -46,17 +46,17 @@ SAMPLE_FINANCIAL_DATA = {
             "The tone remained constructive with limited defensive language.",
         ],
         "appendix": {
-            "subsidiary_revenue_2025": 11.2,
+            "subsidiary_revenue": 11.2,
             "inventory_days": 21,
             "risk_note": "Procurement pressure exists, but diversification is adequate.",
         },
     },
     "NVIDIA": {
         "market_data": {
-            "revenue_2025": 130.5,
-            "ebitda_2025": 75.2,
-            "r_and_d_2025": 12.8,
-            "operating_income_2025": 72.4,
+            "revenue": 130.5,
+            "ebitda": 75.2,
+            "r_and_d": 12.8,
+            "operating_income": 72.4,
         },
         "supply_chain": {
             "risk_level": "medium",
@@ -72,17 +72,17 @@ SAMPLE_FINANCIAL_DATA = {
             "Leadership acknowledged supply complexity while emphasizing long-term demand durability.",
         ],
         "appendix": {
-            "subsidiary_revenue_2025": 8.4,
+            "subsidiary_revenue": 8.4,
             "inventory_days": 45,
             "risk_note": "Packaging and foundry partner concentration remains material.",
         },
     },
     "Tesla": {
         "market_data": {
-            "revenue_2025": 97.7,
-            "ebitda_2025": 13.2,
-            "r_and_d_2025": 4.5,
-            "operating_income_2025": 7.1,
+            "revenue": 97.7,
+            "ebitda": 13.2,
+            "r_and_d": 4.5,
+            "operating_income": 7.1,
         },
         "supply_chain": {
             "risk_level": "medium",
@@ -98,17 +98,17 @@ SAMPLE_FINANCIAL_DATA = {
             "Leadership acknowledged competitive pressure and macro sensitivity in vehicle demand.",
         ],
         "appendix": {
-            "subsidiary_revenue_2025": 6.8,
+            "subsidiary_revenue": 6.8,
             "inventory_days": 54,
             "risk_note": "Battery supply, regional demand, and pricing pressure remain key diligence items.",
         },
     },
     "AMD": {
         "market_data": {
-            "revenue_2025": 26.0,
-            "ebitda_2025": 5.8,
-            "r_and_d_2025": 6.5,
-            "operating_income_2025": 3.2,
+            "revenue": 26.0,
+            "ebitda": 5.8,
+            "r_and_d": 6.5,
+            "operating_income": 3.2,
         },
         "supply_chain": {
             "risk_level": "medium",
@@ -124,7 +124,7 @@ SAMPLE_FINANCIAL_DATA = {
             "Leadership noted competitive intensity in AI accelerators while targeting share gains.",
         ],
         "appendix": {
-            "subsidiary_revenue_2025": 2.1,
+            "subsidiary_revenue": 2.1,
             "inventory_days": 52,
             "risk_note": "Foundry partner concentration and accelerator ramp timing remain key variables.",
         },

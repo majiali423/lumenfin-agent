@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import metadata
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -18,11 +19,20 @@ from .schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
     ClarifyRequest,
+    DocumentIndexResponse,
+    DocumentStatusResponse,
     HealthResponse,
     JobResponse,
     SubmitJobRequest,
     SubmitJobResponse,
 )
+
+
+def _package_version() -> str:
+    try:
+        return metadata.version("lumenfin-agent")
+    except metadata.PackageNotFoundError:
+        return "0.1.0rc1"
 
 
 def create_app(
@@ -50,7 +60,7 @@ def create_app(
 
     app = FastAPI(
         title="LumenFin API",
-        version="0.3.0",
+        version=_package_version(),
         description="Deployable multi-agent finance research and compliance API powered by LangGraph and DeepSeek.",
     )
     app.middleware("http")(request_logging_middleware)
@@ -104,6 +114,9 @@ def create_app(
             "redis_enabled": bool(app_config.redis_url),
             "neo4j_enabled": bool(app_config.neo4j_uri),
             "rag_enabled": app_config.rag_enabled,
+            "rag_index_mode": app_config.rag_index_mode,
+            "rag_tenant_id": app_config.rag_tenant_id,
+            "rag_require_ready": app_config.rag_require_ready,
             "milvus_uri": app_config.milvus_uri,
             "embedding_provider": app_config.embedding_provider,
             "market_data_provider": app_config.market_data_provider,
@@ -163,11 +176,14 @@ def create_app(
 
     @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
     def analyze(payload: AnalyzeRequest, _: None = Depends(auth_dependency)) -> AnalyzeResponse:
-        response = service.analyze(
-            query=payload.query,
-            thread_id=payload.thread_id,
-            export_artifacts=payload.export_artifacts,
-        )
+        try:
+            response = service.analyze(
+                query=payload.query,
+                thread_id=payload.thread_id,
+                export_artifacts=payload.export_artifacts,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _to_response(response, include_state=payload.include_state)
 
     @app.post("/api/v1/clarify", response_model=AnalyzeResponse)
@@ -184,12 +200,15 @@ def create_app(
 
     @app.post("/api/v1/analyze-data", response_model=AnalyzeResponse)
     def analyze_data(payload: AnalyzeDataRequest, _: None = Depends(auth_dependency)) -> AnalyzeResponse:
-        response = service.analyze(
-            query=payload.query,
-            thread_id=payload.thread_id,
-            export_artifacts=payload.export_artifacts,
-            structured_metrics=payload.company_metrics,
-        )
+        try:
+            response = service.analyze(
+                query=payload.query,
+                thread_id=payload.thread_id,
+                export_artifacts=payload.export_artifacts,
+                structured_metrics=payload.company_metrics,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _to_response(response, include_state=payload.include_state)
 
     @app.post("/api/v1/analyze-upload", response_model=AnalyzeResponse)
@@ -207,13 +226,102 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
-        response = service.analyze(
-            query=query,
-            thread_id=thread_id,
-            export_artifacts=export_artifacts,
-            document_paths=saved_paths,
-        )
+        try:
+            response = service.analyze(
+                query=query,
+                thread_id=thread_id,
+                export_artifacts=export_artifacts,
+                document_paths=saved_paths,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _to_response(response, include_state=include_state)
+
+    @app.post("/api/v1/documents/index", response_model=DocumentIndexResponse)
+    async def index_documents(
+        background_tasks: BackgroundTasks,
+        files: list[UploadFile] = File(...),
+        tenant_id: str | None = Form(default=None),
+        async_mode: bool = Form(default=False),
+        _: None = Depends(auth_dependency),
+    ) -> DocumentIndexResponse:
+        try:
+            saved_paths = service.save_uploaded_files(
+                [(upload.filename or "document.pdf", await upload.read()) for upload in files]
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        effective_tenant = tenant_id or app_config.rag_tenant_id
+        if async_mode:
+            receipts = service.enqueue_document_paths(saved_paths, tenant_id=effective_tenant)
+            for item in receipts:
+                if item["status"] != "pending":
+                    continue
+                queued = service.enqueue_index_job(item["document_id"], tenant_id=effective_tenant)
+                if not queued:
+                    background_tasks.add_task(
+                        service.process_document_index,
+                        item["document_id"],
+                        tenant_id=effective_tenant,
+                    )
+        else:
+            receipts = service.index_document_paths(saved_paths, tenant_id=effective_tenant)
+        return DocumentIndexResponse(
+            tenant_id=effective_tenant,
+            documents=[
+                {
+                    "document_id": item["document_id"],
+                    "filename": item["filename"],
+                    "content_hash": item["content_hash"],
+                    "status": item["status"],
+                    "chunk_count": item["chunk_count"],
+                    "error": item["error"],
+                    "embed_calls": item["embed_calls"],
+                }
+                for item in receipts
+            ],
+        )
+
+    @app.post("/api/v1/documents/{document_id}/process", response_model=DocumentStatusResponse)
+    def process_document(
+        document_id: str,
+        tenant_id: str | None = Query(default=None),
+        _: None = Depends(auth_dependency),
+    ) -> DocumentStatusResponse:
+        receipt = service.process_document_index(document_id, tenant_id=tenant_id)
+        if receipt["status"] == "failed" and receipt.get("error") == "document not found":
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+        record = service.get_document_status(document_id, tenant_id=tenant_id) or {}
+        return DocumentStatusResponse(
+            document_id=receipt["document_id"],
+            tenant_id=receipt["tenant_id"],
+            filename=receipt["filename"] or str(record.get("filename") or ""),
+            content_hash=receipt["content_hash"] or str(record.get("content_hash") or ""),
+            index_status=receipt["status"] if receipt["status"] != "skipped_duplicate" else "ready",
+            chunk_count=int(receipt.get("chunk_count") or 0),
+            error=receipt.get("error"),
+            indexed_at=record.get("indexed_at"),
+        )
+
+    @app.get("/api/v1/documents/{document_id}", response_model=DocumentStatusResponse)
+    def get_document_status(
+        document_id: str,
+        tenant_id: str | None = Query(default=None),
+        _: None = Depends(auth_dependency),
+    ) -> DocumentStatusResponse:
+        record = service.get_document_status(document_id, tenant_id=tenant_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+        return DocumentStatusResponse(
+            document_id=record["document_id"],
+            tenant_id=record["tenant_id"],
+            filename=record["filename"],
+            content_hash=record["content_hash"],
+            index_status=record["index_status"],
+            chunk_count=int(record.get("chunk_count") or 0),
+            error=record.get("error"),
+            indexed_at=record.get("indexed_at"),
+        )
 
     @app.post("/api/v1/jobs", response_model=SubmitJobResponse, status_code=202)
     def submit_job(

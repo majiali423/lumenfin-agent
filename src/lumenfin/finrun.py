@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from .metrics_schema import get_fundamental, period_label_from_meta
+
+FINRUN_SCHEMA_VERSION = "1.0"
 
 FORMULA_BY_METRIC = {
-    "ebitda_margin": ("ebitda / revenue", {"ebitda": "ebitda_2025", "revenue": "revenue_2025"}),
-    "r_and_d_intensity": ("r_and_d / revenue", {"r_and_d": "r_and_d_2025", "revenue": "revenue_2025"}),
-    "operating_margin": ("operating_income / revenue", {"operating_income": "operating_income_2025", "revenue": "revenue_2025"}),
+    "ebitda_margin": ("ebitda / revenue", {"ebitda": "ebitda", "revenue": "revenue"}),
+    "r_and_d_intensity": ("r_and_d / revenue", {"r_and_d": "r_and_d", "revenue": "revenue"}),
+    "operating_margin": (
+        "operating_income / revenue",
+        {"operating_income": "operating_income", "revenue": "revenue"},
+    ),
 }
 
 
@@ -14,6 +20,7 @@ def export_finrun_state(state: dict[str, Any]) -> dict[str, Any]:
     """Map a LumenFin exported state into the FinRun evaluation schema."""
 
     return {
+        "schema_version": FINRUN_SCHEMA_VERSION,
         "run_id": str(state.get("run_id") or state.get("thread_id") or "lumenfin-run"),
         "query": str(state.get("query") or ""),
         "metadata": {
@@ -27,6 +34,9 @@ def export_finrun_state(state: dict[str, Any]) -> dict[str, Any]:
             "input_guardrail_findings": state.get("input_guardrail_findings") or [],
             "compliance_violations": state.get("compliance_violations") or [],
             "retrieval_provenance": _retrieval_provenance(state),
+            "claim_binding": state.get("claim_binding") or {},
+            "verified_claim_count": len(state.get("verified_claims") or []),
+            "claim_count": len(state.get("claims") or []),
         },
         "entities": [{"name": company} for company in _companies(state)],
         "steps": _steps(state),
@@ -34,6 +44,7 @@ def export_finrun_state(state: dict[str, Any]) -> dict[str, Any]:
         "evidence": _evidence(state),
         "market_data": _market_data(state),
         "final_output": str(state.get("final_report") or ""),
+        "claims": list(state.get("verified_claims") or []),
     }
 
 
@@ -73,36 +84,44 @@ def _metrics(state: dict[str, Any]) -> list[dict[str, Any]]:
     retrieved_docs = state.get("retrieved_docs") or {}
     metric_confidence = state.get("metric_confidence") or {}
     for company, metrics in financial_metrics.items():
-        source_values = (retrieved_docs.get(company) or {}).get("market_data") or {}
+        bundle = retrieved_docs.get(company) or {}
+        source_values = bundle.get("market_data") or {}
+        period = period_label_from_meta(bundle.get("fundamentals_meta"))
         for name, value in metrics.items():
             formula, input_map = FORMULA_BY_METRIC.get(name, ("", {}))
             item = {
                 "entity": str(company),
                 "name": str(name),
-                "period": "FY2025",
+                "period": period,
                 "value": value,
                 "formula": formula,
-                "inputs": _metric_inputs(input_map, source_values),
+                "inputs": _metric_inputs(input_map, source_values, period=period),
                 "confidence": _metric_confidence(
                     metric_confidence.get(company) or {},
                     name,
-                    retrieved_docs.get(company) or {},
+                    bundle,
                 ),
             }
             output.append(item)
     return output
 
 
-def _metric_inputs(input_map: dict[str, str], source_values: dict[str, Any]) -> dict[str, Any]:
+def _metric_inputs(
+    input_map: dict[str, str],
+    source_values: dict[str, Any],
+    *,
+    period: str,
+) -> dict[str, Any]:
     inputs = {}
     for input_name, source_key in input_map.items():
-        if source_key not in source_values:
+        value = get_fundamental(source_values, source_key)
+        if value is None:
             continue
         inputs[input_name] = {
-            "value": source_values[source_key],
+            "value": value,
             "unit": "billion",
             "currency": "USD",
-            "period": "FY2025",
+            "period": period,
         }
     return inputs
 
@@ -164,7 +183,7 @@ def _evidence(state: dict[str, Any]) -> list[dict[str, str]]:
                 evidence,
                 seen,
                 company=str(company),
-                citation=f"lumenfin:supply_chain:{company}:FY2025",
+                citation=f"lumenfin:supply_chain:{company}:{period_label_from_meta(payload.get('fundamentals_meta'))}",
                 source_type="sample_db",
                 text=text,
             )
@@ -174,24 +193,48 @@ def _evidence(state: dict[str, Any]) -> list[dict[str, str]]:
                 evidence,
                 seen,
                 company=str(company),
-                citation=f"lumenfin:earnings_call_quotes:{company}:FY2025",
+                citation=f"lumenfin:earnings_call_quotes:{company}:{period_label_from_meta(payload.get('fundamentals_meta'))}",
                 source_type="sample_db",
                 text=f"{company} management commentary: {'; '.join(quotes)}",
             )
         market_data = payload.get("market_data") or {}
         if market_data:
+            structured = str(payload.get("structured_source") or "sample_financial_data")
             text = (
-                f"{company} FY2025 revenue was {market_data.get('revenue_2025')} billion USD, "
-                f"EBITDA was {market_data.get('ebitda_2025')} billion USD, "
-                f"R&D was {market_data.get('r_and_d_2025')} billion USD, and "
-                f"operating income was {market_data.get('operating_income_2025')} billion USD."
+                f"{company} {period_label_from_meta(payload.get('fundamentals_meta'))} revenue was {get_fundamental(market_data, 'revenue')} billion USD, "
+                f"EBITDA was {get_fundamental(market_data, 'ebitda')} billion USD, "
+                f"R&D was {get_fundamental(market_data, 'r_and_d')} billion USD, and "
+                f"operating income was {get_fundamental(market_data, 'operating_income')} billion USD."
             )
             _append_evidence(
                 evidence,
                 seen,
                 company=str(company),
-                citation=f"lumenfin:sample_financial_data:{company}:FY2025",
-                source_type="sample_db",
+                citation=f"lumenfin:{structured}:{company}:{period_label_from_meta(payload.get('fundamentals_meta'))}",
+                source_type=structured if structured != "none" else "fundamentals",
+                text=text,
+            )
+    # Verified claims contribute their bound evidence (ensures claim text ↔ citation in FinRun).
+    for claim in state.get("verified_claims") or []:
+        if not isinstance(claim, dict):
+            continue
+        entity = str(claim.get("entity") or "")
+        statement = str(claim.get("statement") or "")
+        for ref in claim.get("evidence_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            citation = str(ref.get("citation") or "")
+            if not entity or not citation:
+                continue
+            text = str(ref.get("text") or "")
+            if statement and statement not in text:
+                text = f"{statement} Evidence: {text}".strip()
+            _append_evidence(
+                evidence,
+                seen,
+                company=entity,
+                citation=citation,
+                source_type=str(ref.get("source_type") or "claim"),
                 text=text,
             )
     for company, scores in (state.get("risk_scores") or {}).items():
@@ -207,7 +250,7 @@ def _evidence(state: dict[str, Any]) -> list[dict[str, str]]:
                 evidence,
                 seen,
                 company=str(company),
-                citation=f"lumenfin:risk_model:{company}:FY2025",
+                citation=f"lumenfin:risk_model:{company}:model",
                 source_type="risk_model",
                 text=(
                     f"{company} model-derived risk scores are screening indicators, not standalone cited facts: "
@@ -247,6 +290,7 @@ def _append_evidence(
     citation: str,
     source_type: str,
     text: str,
+    period: str | None = None,
 ) -> None:
     key = (company, citation)
     if key in seen:
@@ -256,7 +300,7 @@ def _append_evidence(
         {
             "entity": company,
             "citation": citation,
-            "period": "FY2025",
+            "period": period or "latest",
             "source_type": source_type,
             "provider": "lumenfin",
             "text": text,

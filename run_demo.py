@@ -13,12 +13,14 @@ if str(SRC) not in sys.path:
 
 from lumenfin import LumenFinAgentSystem
 from lumenfin.config import AppConfig
+from lumenfin.rag.profiles import apply_showcase_rag_env
 from lumenfin.reporting import export_run_artifacts
 from lumenfin.stdio import configure_stdio_utf8
 
 
 def main() -> None:
     configure_stdio_utf8()
+    apply_showcase_rag_env(overwrite=False)
     for noisy in ("grpc", "grpc._server", "pymilvus"):
         logging.getLogger(noisy).setLevel(logging.ERROR)
 

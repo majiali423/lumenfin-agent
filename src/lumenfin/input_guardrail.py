@@ -236,3 +236,35 @@ def guard_documents(
         findings=all_findings,
         sanitized_documents=sanitized_documents,
     )
+
+
+def sanitize_retrieval_hits(
+    hits: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[GuardrailFinding]]:
+    """Redact prompt-injection patterns from retrieved evidence (indirect injection)."""
+    sanitized_hits: list[dict[str, Any]] = []
+    findings: list[GuardrailFinding] = []
+    for hit in hits:
+        cleaned = dict(hit)
+        text = str(hit.get("text") or "")
+        redacted, local_hits = _redact_matches(text)
+        if local_hits:
+            cleaned["text"] = redacted
+            cleaned["guardrail_sanitized"] = True
+            document_id = str(hit.get("document_id") or "retrieved")
+            filename = str(hit.get("filename") or "retrieved")
+            page = hit.get("page")
+            page_number = int(page) if isinstance(page, int) or str(page).isdigit() else None
+            for pattern_id, severity, matched_text in local_hits:
+                findings.append(
+                    GuardrailFinding(
+                        document_id=document_id,
+                        filename=filename,
+                        page=page_number,
+                        pattern_id=pattern_id,
+                        severity=severity,
+                        matched_text=matched_text,
+                    )
+                )
+        sanitized_hits.append(cleaned)
+    return sanitized_hits, findings

@@ -30,6 +30,8 @@ class FinanceState(TypedDict, total=False):
     plan: list[str]
     task_brief: str
     document_contexts: list[dict[str, Any]]
+    rag_document_ids: list[str]
+    rag_tenant_id: str
     retrieved_docs: dict[str, dict[str, Any]]
     market_snapshots: dict[str, dict[str, Any]]
     market_data_status: dict[str, Any]
@@ -51,7 +53,10 @@ class FinanceState(TypedDict, total=False):
     retries: int
     degraded_mode: bool
     fatal_data_gap: bool
+    partial_data_gap: bool
     data_gap_detail: str
+    coverage_matrix: dict[str, dict[str, Any]]
+    non_comparable_companies: list[str]
     company_profiles: dict[str, str]
     swot_analysis: dict[str, dict[str, str]]
     risk_scores: dict[str, dict[str, float]]
@@ -72,4 +77,10 @@ class FinanceState(TypedDict, total=False):
     input_guardrail_findings: list[dict[str, Any]]
     input_guardrail_summary: dict[str, Any]
     retrieval_provenance: dict[str, dict[str, Any]]
+    source_resolution: dict[str, Any]
     data_mode: str
+    provider_errors: list[dict[str, Any]]
+    provider_error_summary: dict[str, Any]
+    claims: list[dict[str, Any]]
+    verified_claims: list[dict[str, Any]]
+    claim_binding: dict[str, Any]

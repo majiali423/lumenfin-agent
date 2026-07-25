@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
+from .metrics_schema import get_fundamental
+
 
 StructuredSource = Literal[
     "sample_db",
@@ -23,6 +25,9 @@ class RetrievalProvenance:
     rag_hit_count: int
     document_count: int
     data_mode: str
+    rag_degraded: bool = False
+    rag_degrade_reason: str = ""
+    rag_mode: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -54,6 +59,8 @@ class RetrievalArtifact:
     structured_source: StructuredSource = "none"
     appendix: dict[str, Any] = field(default_factory=dict)
     fundamentals_meta: dict[str, Any] = field(default_factory=dict)
+    provider_errors: list[dict[str, Any]] = field(default_factory=list)
+    rag_meta: dict[str, Any] = field(default_factory=dict)
 
     def to_legacy_payload(self) -> dict[str, Any]:
         """Backward-compatible dict stored under state['retrieved_docs'][company]."""
@@ -71,6 +78,8 @@ class RetrievalArtifact:
             payload["appendix"] = dict(self.appendix)
         if self.fundamentals_meta:
             payload["fundamentals_meta"] = dict(self.fundamentals_meta)
+        if self.provider_errors:
+            payload["provider_errors"] = list(self.provider_errors)
         return payload
 
     def to_dict(self) -> dict[str, Any]:
@@ -88,6 +97,7 @@ class RetrievalArtifact:
             "structured_source": self.structured_source,
             "appendix": self.appendix,
             "fundamentals_meta": self.fundamentals_meta,
+            "provider_errors": self.provider_errors,
         }
 
 
@@ -124,8 +134,8 @@ def score_retrieval_confidence(
     live_market: dict[str, Any],
     rag_hits: list[dict[str, Any]],
 ) -> RetrievalConfidence:
-    core_keys = ("revenue_2025", "ebitda_2025", "operating_income_2025")
-    present = sum(1 for key in core_keys if market_data.get(key) not in (None, "", 0))
+    core_keys = ("revenue", "ebitda", "operating_income")
+    present = sum(1 for key in core_keys if get_fundamental(market_data, key) not in (None, 0))
     market_data_score = round(present / len(core_keys), 3)
 
     status = str(live_market.get("status") or "")

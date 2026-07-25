@@ -67,6 +67,31 @@ def _check_pipeline_completeness(state: dict[str, Any]) -> dict[str, Any]:
 
 def _check_report_contract(state: dict[str, Any]) -> dict[str, Any]:
     report = state.get("final_report", "")
+    workflow_status = str(state.get("workflow_status") or "")
+    if workflow_status == "incomplete_data":
+        # Fail-loud path: require honesty markers, not a full investment memo.
+        minimal_markers = (
+            "Executive Summary",
+            "Evidence Boundary",
+            "Financial Performance Analysis",
+            "Risk",
+            "Compliance",
+            "Methodology",
+            "Disclaimer",
+        )
+        missing_markers = [marker for marker in minimal_markers if marker not in report]
+        length_ok = len(report) >= 400
+        score = 100
+        score -= len(missing_markers) * 10
+        if not length_ok:
+            score -= 15
+        return {
+            "score": max(0, score),
+            "passed": not missing_markers and length_ok,
+            "missing_markers": missing_markers,
+            "character_count": len(report),
+            "contract": "incomplete_data_minimal",
+        }
     missing_markers = [marker for marker in REQUIRED_REPORT_MARKERS if marker not in report]
     length_ok = len(report) >= 2500
     score = 100

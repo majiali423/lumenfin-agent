@@ -18,7 +18,7 @@ from .knowledge_store import InMemoryKnowledgeStore, Neo4jKnowledgeStore
 from .llm import BaseLLMClient, build_llm_client
 from .market_data import MarketDataClient
 from .memory import ReasoningMemory, SessionMemory
-from .rag.factory import build_hybrid_retriever
+from .rag.factory import build_document_indexer, build_hybrid_retriever, build_rag_store
 from .state import FinanceState
 from .checkpoint_store import WorkflowCheckpointRepository
 from .observability import utc_now_iso
@@ -31,8 +31,7 @@ def route_after_input_guardrail(state: FinanceState) -> str:
 
 
 def route_after_query_planner(state: FinanceState) -> str:
-    if state.get("user_clarification"):
-        return "supervisor"
+    # Re-pause whenever planner still reports missing fields, even after a partial clarification.
     if state.get("missing_fields"):
         return "await_clarification"
     return "supervisor"
@@ -40,38 +39,54 @@ def route_after_query_planner(state: FinanceState) -> str:
 
 def route_after_retrieval(state: FinanceState) -> str:
     if state.get("fatal_data_gap"):
-        return "synthesizer"
-    return "replanner" if state.get("replan_reason") else "quant"
+        return "claim_binder"
+    return "appendix_replan" if state.get("replan_reason") else "quant"
 
 
 def route_after_quant(state: FinanceState) -> str:
-    return "replanner" if state.get("replan_reason") else "psychologist"
+    return "appendix_replan" if state.get("replan_reason") else "psychologist"
 
 
 def route_after_critic(state: FinanceState) -> str:
     findings = state.get("compliance_findings", [])
     if not findings:
-        return "synthesizer"
+        return "claim_binder"
     iterations = state.get("critic_iterations", 0)
     max_iterations = state.get("critic_max_iterations", 2)
     if iterations >= max_iterations:
-        return "synthesizer"
+        return "claim_binder"
     return "repair"
 
 
 def route_after_repair(state: FinanceState) -> str:
-    return state.get("critic_repair_target", "retrieval")
+    return state.get("critic_repair_target", "quant")
 
 
-def route_after_replanner(state: FinanceState) -> str:
-    return "synthesizer" if state.get("degraded_mode") else "retrieval"
+def route_after_appendix_replan(state: FinanceState) -> str:
+    """After supplementary_retrieval planning: retry retrieval once, else synthesize."""
+    return "claim_binder" if state.get("degraded_mode") else "retrieval"
 
 
-def _base_initial_state(query: str, thread_id: str, document_contexts: list[dict[str, Any]] | None, app_config: AppConfig) -> FinanceState:
+# Backward-compatible alias for older imports/tests.
+route_after_replanner = route_after_appendix_replan
+
+
+def _base_initial_state(
+    query: str,
+    thread_id: str,
+    document_contexts: list[dict[str, Any]] | None,
+    app_config: AppConfig,
+    *,
+    rag_index_stats: dict[str, Any] | None = None,
+    rag_document_ids: list[str] | None = None,
+    rag_tenant_id: str | None = None,
+) -> FinanceState:
     return {
         "query": query,
         "thread_id": thread_id,
         "document_contexts": document_contexts or [],
+        "rag_document_ids": list(rag_document_ids or []),
+        "rag_tenant_id": rag_tenant_id or app_config.rag_tenant_id,
         "audit_log": [],
         "reasoning_memory": [],
         "compliance_findings": [],
@@ -82,12 +97,15 @@ def _base_initial_state(query: str, thread_id: str, document_contexts: list[dict
         "retries": 0,
         "degraded_mode": False,
         "fatal_data_gap": False,
+        "partial_data_gap": False,
         "data_gap_detail": "",
+        "coverage_matrix": {},
+        "non_comparable_companies": [],
         "rag_evidence": {},
-        "rag_index_stats": {},
+        "rag_index_stats": dict(rag_index_stats or {}),
         "critic_iterations": 0,
         "critic_max_iterations": app_config.critic_max_iterations,
-        "critic_repair_target": "retrieval",
+        "critic_repair_target": "quant",
         "workflow_status": "running",
         "user_clarification": {},
         "run_telemetry": {},
@@ -104,6 +122,9 @@ class LumenFinAgentSystem:
         llm_client: BaseLLMClient | None = None,
         app_config: AppConfig | None = None,
         market_data_client: MarketDataClient | None = None,
+        *,
+        rag_store: Any | None = None,
+        document_indexer: Any | None = None,
     ) -> None:
         self.app_config = app_config or AppConfig.from_env()
         self.session_memory = SessionMemory()
@@ -119,17 +140,31 @@ class LumenFinAgentSystem:
             fallback_provider=self.app_config.market_data_fallback,
             cache_ttl_seconds=self.app_config.market_cache_ttl_seconds,
         )
+        self.rag_store = rag_store if rag_store is not None else build_rag_store(self.app_config)
+        self.document_indexer = (
+            document_indexer
+            if document_indexer is not None
+            else build_document_indexer(self.app_config, rag_store=self.rag_store)
+        )
+        hybrid_retriever = build_hybrid_retriever(
+            self.app_config,
+            rag_store=self.rag_store,
+            indexer=self.document_indexer,
+        )
         self.runtime = AgentRuntime(
             session_memory=self.session_memory,
             knowledge_memory=self.knowledge_memory,
             reasoning_memory=self.reasoning_memory,
             llm_client=self.llm_client,
             market_data_client=self.market_data_client,
-            hybrid_retriever=build_hybrid_retriever(self.app_config),
+            hybrid_retriever=hybrid_retriever,
             rag_enabled=self.app_config.rag_enabled,
+            rag_index_mode=self.app_config.rag_index_mode,
             company_parallelism=self.app_config.company_parallelism,
+            profile_llm_max_attempts=self.app_config.profile_llm_max_attempts,
             input_guardrail_enabled=self.app_config.input_guardrail_enabled,
             input_guardrail_mode=self.app_config.input_guardrail_mode,  # type: ignore[arg-type]
+            rag_sanitize_hits=self.app_config.rag_sanitize_hits,
             tool_backend=self.app_config.tool_backend,
             allow_sample_data=self.app_config.allows_sample_data(),
             data_mode=self.app_config.data_mode,
@@ -162,7 +197,8 @@ class LumenFinAgentSystem:
         workflow.add_node("psychologist", self.runtime.psychologist)
         workflow.add_node("critic", self.runtime.critic)
         workflow.add_node("repair", self.runtime.repair)
-        workflow.add_node("replanner", self.runtime.replanner)
+        workflow.add_node("appendix_replan", self.runtime.appendix_replan)
+        workflow.add_node("claim_binder", self.runtime.claim_binder)
         workflow.add_node("synthesizer", self.runtime.synthesizer)
 
         workflow.add_edge(START, "input_guardrail")
@@ -181,18 +217,18 @@ class LumenFinAgentSystem:
         workflow.add_conditional_edges(
             "retrieval",
             route_after_retrieval,
-            {"quant": "quant", "replanner": "replanner", "synthesizer": "synthesizer"},
+            {"quant": "quant", "appendix_replan": "appendix_replan", "claim_binder": "claim_binder"},
         )
         workflow.add_conditional_edges(
             "quant",
             route_after_quant,
-            {"psychologist": "psychologist", "replanner": "replanner"},
+            {"psychologist": "psychologist", "appendix_replan": "appendix_replan"},
         )
         workflow.add_edge("psychologist", "critic")
         workflow.add_conditional_edges(
             "critic",
             route_after_critic,
-            {"synthesizer": "synthesizer", "repair": "repair"},
+            {"claim_binder": "claim_binder", "repair": "repair"},
         )
         workflow.add_conditional_edges(
             "repair",
@@ -200,10 +236,11 @@ class LumenFinAgentSystem:
             {"retrieval": "retrieval", "quant": "quant", "psychologist": "psychologist"},
         )
         workflow.add_conditional_edges(
-            "replanner",
-            route_after_replanner,
-            {"retrieval": "retrieval", "synthesizer": "synthesizer"},
+            "appendix_replan",
+            route_after_appendix_replan,
+            {"retrieval": "retrieval", "claim_binder": "claim_binder"},
         )
+        workflow.add_edge("claim_binder", "synthesizer")
         workflow.add_edge("synthesizer", END)
 
         return workflow.compile(checkpointer=self.checkpointer)
@@ -213,9 +250,21 @@ class LumenFinAgentSystem:
         query: str,
         thread_id: str = "demo-thread",
         document_contexts: list[dict[str, Any]] | None = None,
+        *,
+        rag_index_stats: dict[str, Any] | None = None,
+        rag_document_ids: list[str] | None = None,
+        rag_tenant_id: str | None = None,
     ) -> dict[str, Any]:
         self.reasoning_memory.events.clear()
-        initial_state = _base_initial_state(query, thread_id, document_contexts, self.app_config)
+        initial_state = _base_initial_state(
+            query,
+            thread_id,
+            document_contexts,
+            self.app_config,
+            rag_index_stats=rag_index_stats,
+            rag_document_ids=rag_document_ids,
+            rag_tenant_id=rag_tenant_id,
+        )
         config = {"configurable": {"thread_id": thread_id}}
         result = self.graph.invoke(initial_state, config=config)
         return self._finalize_result(result, thread_id)
@@ -236,6 +285,7 @@ class LumenFinAgentSystem:
             effective_query,
             document_contexts=current.get("document_contexts", []),
             llm_client=self.llm_client,
+            user_clarification=clarification,
         )
         required_skills = query_plan.required_skills
         self.graph.update_state(

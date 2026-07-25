@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from uuid import uuid4
 
 from .checkpoint_store import WorkflowCheckpointRepository
 from .config import AppConfig
-from .database import JobRepository
+from .database import JobRepository, RagDocumentRepository
 from .data_ingest import structured_metrics_to_document_contexts
 from .document_ingest import parse_upload_documents
 from .graph import LumenFinAgentSystem
@@ -13,6 +14,8 @@ from .llm import BaseLLMClient
 from .market_data import MarketDataClient
 from .providers.registry import ProviderRegistry, build_provider_registry
 from .queueing import RedisQueueManager
+from .rag.factory import build_document_indexer, build_rag_store
+from .rag.indexer import IndexReceipt, summarize_index_receipts
 from .reporting import export_run_artifacts
 
 
@@ -27,38 +30,64 @@ class LumenFinAnalysisService:
     ) -> None:
         self.config = config
         self.repository = JobRepository(config.database_url, db_path=config.db_path)
+        self.rag_repository = RagDocumentRepository(config.database_url, db_path=config.db_path)
         self.checkpoint_repo = checkpoint_repo or WorkflowCheckpointRepository.from_database_url(
             config.database_url,
             db_path=config.db_path,
         )
         self._llm_client = llm_client
         self._market_data_client = market_data_client
-        self._system: LumenFinAgentSystem | None = None
         self._providers: ProviderRegistry | None = None
+        self._resource_lock = RLock()
+        self._rag_store = None
+        self._indexer = None
 
     @property
     def providers(self) -> ProviderRegistry:
         if self._providers is None:
-            self._providers = build_provider_registry(
-                self.config,
-                llm_client=self._llm_client,
-                market_data_client=self._market_data_client,
-            )
+            with self._resource_lock:
+                if self._providers is None:
+                    self._providers = build_provider_registry(
+                        self.config,
+                        llm_client=self._llm_client,
+                        market_data_client=self._market_data_client,
+                    )
         return self._providers
 
     def _build_system(self) -> LumenFinAgentSystem:
         llm_client = self._llm_client or self.providers.llm.client
         market_data_client = self._market_data_client or self.providers.market_data.client
+        rag_store, document_indexer = self._rag_resources()
         return LumenFinAgentSystem(
             llm_client=llm_client,
             app_config=self.config,
             market_data_client=market_data_client,
+            rag_store=rag_store,
+            document_indexer=document_indexer,
         )
 
     def _system_for(self, thread_id: str) -> LumenFinAgentSystem:
-        if self._system is None:
-            self._system = self._build_system()
-        return self._system
+        # Execution state (memory, checkpointer, audit log, graph runtime) is
+        # request scoped. Only provider clients and the RAG infrastructure are
+        # shared; they do not contain per-run FinanceState.
+        return self._build_system()
+
+    def _rag_resources(self):
+        if self._indexer is not None:
+            return self._rag_store, self._indexer
+        with self._resource_lock:
+            if self._indexer is None:
+                self._rag_store = build_rag_store(self.config)
+                self._indexer = build_document_indexer(
+                    self.config,
+                    rag_store=self._rag_store,
+                    repository=self.rag_repository,
+                )
+        return self._rag_store, self._indexer
+
+    def _document_indexer(self, system: LumenFinAgentSystem | None = None):
+        _, indexer = self._rag_resources()
+        return indexer
 
     def _load_thread_state(self, system: LumenFinAgentSystem, thread_id: str) -> dict | None:
         state = system.get_thread_state(thread_id)
@@ -69,6 +98,55 @@ class LumenFinAnalysisService:
             return None
         return system.bootstrap_thread_from_store(thread_id, self.checkpoint_repo)
 
+    def index_document_paths(
+        self,
+        document_paths: list[str],
+        *,
+        tenant_id: str | None = None,
+        system: LumenFinAgentSystem | None = None,
+    ) -> list[IndexReceipt]:
+        indexer = self._document_indexer(system)
+        return indexer.index_paths(document_paths, tenant_id=tenant_id or self.config.rag_tenant_id)
+
+    def enqueue_document_paths(
+        self,
+        document_paths: list[str],
+        *,
+        tenant_id: str | None = None,
+        system: LumenFinAgentSystem | None = None,
+    ) -> list[IndexReceipt]:
+        indexer = self._document_indexer(system)
+        return indexer.enqueue_paths(document_paths, tenant_id=tenant_id or self.config.rag_tenant_id)
+
+    def process_document_index(
+        self,
+        document_id: str,
+        *,
+        tenant_id: str | None = None,
+        system: LumenFinAgentSystem | None = None,
+    ) -> IndexReceipt:
+        indexer = self._document_indexer(system)
+        return indexer.process_pending(document_id, tenant_id=tenant_id or self.config.rag_tenant_id)
+
+    def enqueue_index_job(self, document_id: str, *, tenant_id: str | None = None) -> bool:
+        if not self.config.redis_url:
+            return False
+        queue = RedisQueueManager(self.config.redis_url, self.config.redis_index_queue_name)
+        queue.enqueue(
+            {
+                "type": "rag_index",
+                "document_id": document_id,
+                "tenant_id": tenant_id or self.config.rag_tenant_id,
+            }
+        )
+        return True
+
+    def get_document_status(self, document_id: str, *, tenant_id: str | None = None) -> dict | None:
+        return self.rag_repository.get_document(
+            document_id,
+            tenant_id=tenant_id or self.config.rag_tenant_id,
+        )
+
     def analyze(
         self,
         query: str,
@@ -76,22 +154,77 @@ class LumenFinAnalysisService:
         export_artifacts: bool = True,
         document_paths: list[str] | None = None,
         structured_metrics: dict[str, dict] | None = None,
+        document_ids: list[str] | None = None,
+        tenant_id: str | None = None,
     ) -> dict:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
         system = self._system_for(actual_thread_id)
+        tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
         document_contexts: list[dict] = []
-        for path in document_paths or []:
-            document_contexts.extend(parse_upload_documents(Path(path)))
+        rag_index_stats: dict = {}
+        rag_document_ids: list[str] = list(document_ids or [])
+
+        if document_ids:
+            contexts, statuses = system.document_indexer.load_contexts_for_documents(
+                document_ids,
+                tenant_id=tenant,
+                require_ready=self.config.rag_require_ready,
+            )
+            document_contexts.extend(contexts)
+            rag_index_stats = {
+                "mode": "async_on_upload",
+                "chunks_indexed": sum(int(item.get("chunk_count") or 0) for item in statuses if item.get("index_status") == "ready"),
+                "documents_indexed": sum(1 for item in statuses if item.get("index_status") == "ready"),
+                "document_ids": list(document_ids),
+                "statuses": statuses,
+                "search_only": True,
+            }
+
+        if document_paths:
+            if self.config.rag_index_mode == "async_on_upload" and self.config.rag_enabled:
+                receipts = self.index_document_paths(document_paths, tenant_id=tenant, system=system)
+                failed = [item for item in receipts if item["status"] == "failed"]
+                if failed and self.config.rag_require_ready:
+                    details = "; ".join(f"{item['filename']}: {item['error']}" for item in failed)
+                    raise ValueError(f"Document indexing failed: {details}")
+                for receipt in receipts:
+                    if receipt["status"] in {"ready", "skipped_duplicate"}:
+                        document_contexts.extend(receipt["contexts"])
+                        rag_document_ids.append(receipt["document_id"])
+                rag_index_stats = summarize_index_receipts(receipts)
+                rag_index_stats["search_only"] = True
+            else:
+                for path in document_paths:
+                    try:
+                        document_contexts.extend(parse_upload_documents(Path(path)))
+                    except ValueError as exc:
+                        raise ValueError(f"Upload parse failed for {Path(path).name}: {exc}") from exc
+
         if structured_metrics:
             document_contexts.extend(structured_metrics_to_document_contexts(structured_metrics))
-        result = system.run(query, thread_id=actual_thread_id, document_contexts=document_contexts)
+
+        result = system.run(
+            query,
+            thread_id=actual_thread_id,
+            document_contexts=document_contexts,
+            rag_index_stats=rag_index_stats or None,
+            rag_document_ids=rag_document_ids or None,
+            rag_tenant_id=tenant,
+        )
         self.checkpoint_repo.upsert(
             thread_id=actual_thread_id,
             query=query,
             state=system.get_thread_state(actual_thread_id) or result,
             llm_backend=result.get("llm_backend", system.llm_client.backend_name),
         )
-        return self._package_response(actual_thread_id, query, system, result, export_artifacts)
+        packaged = self._package_response(actual_thread_id, query, system, result, export_artifacts)
+        if rag_index_stats:
+            packaged["rag_index"] = {
+                "document_ids": rag_document_ids,
+                "stats": rag_index_stats,
+                "tenant_id": tenant,
+            }
+        return packaged
 
     def clarify(
         self,
@@ -223,7 +356,8 @@ class LumenFinAnalysisService:
         return self.repository.list_jobs(limit=limit)
 
     def save_uploaded_files(self, files: list[tuple[str, bytes]]) -> list[str]:
-        allowed_suffixes = {".pdf", ".md", ".txt", ".csv", ".xlsx", ".xls", ".json"}
+        # Keep in sync with document_ingest parsers (.xls is accepted by older clients but not parsed).
+        allowed_suffixes = {".pdf", ".md", ".txt", ".csv", ".xlsx", ".json", ".htm", ".html"}
         if len(files) > self.config.max_upload_files:
             raise ValueError(
                 f"Too many uploads: {len(files)} files exceeds limit of {self.config.max_upload_files}."

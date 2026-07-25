@@ -1,25 +1,29 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
-from .tools import KNOWN_ALIASES
+from .provider_retry import is_transient_exception
+from .tools import KNOWN_ALIASES, alias_mentioned
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_companies_from_text(text: str) -> list[str]:
     lowered = text.lower()
     found: list[str] = []
     for company in SAMPLE_FINANCIAL_DATA:
-        if company.lower() in lowered and company not in found:
+        if alias_mentioned(company.lower(), lowered, text) and company not in found:
             found.append(company)
     for alias, name in KNOWN_ALIASES.items():
-        if alias in lowered and name not in found:
+        if alias_mentioned(alias, lowered, text) and name not in found:
             found.append(name)
     return found
 
@@ -35,9 +39,10 @@ class LLMSettings:
 
     @classmethod
     def from_env(cls) -> "LLMSettings":
-        api_key = os.getenv("DEEPSEEK_API_KEY") or None
-        base_url = os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
-        model = os.getenv("DEEPSEEK_MODEL") or "deepseek-chat"
+        raw_key = os.getenv("DEEPSEEK_API_KEY")
+        api_key = raw_key.strip() if raw_key and raw_key.strip() else None
+        base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
+        model = (os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash").strip()
         timeout_str = os.getenv("DEEPSEEK_TIMEOUT_SECONDS") or "45"
         retries_str = os.getenv("DEEPSEEK_MAX_RETRIES") or "3"
         backoff_str = os.getenv("DEEPSEEK_RETRY_BACKOFF_SECONDS") or "0.5"
@@ -100,6 +105,7 @@ class DeepSeekChatClient(BaseLLMClient):
             "max_tokens": max_tokens,
         }
         last_error: Exception | None = None
+        data: dict | None = None
         for attempt in range(self.settings.max_retries):
             try:
                 with httpx.Client(timeout=self.settings.timeout_seconds) as client:
@@ -109,9 +115,11 @@ class DeepSeekChatClient(BaseLLMClient):
                 break
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
-                if attempt < self.settings.max_retries - 1:
-                    time.sleep(self.settings.retry_backoff_seconds * (2**attempt))
-        else:
+                # 401/400/etc. are permanent — do not burn retries.
+                if not is_transient_exception(exc) or attempt >= self.settings.max_retries - 1:
+                    raise
+                time.sleep(self.settings.retry_backoff_seconds * (2**attempt))
+        if data is None:
             assert last_error is not None
             raise last_error
         usage = data.get("usage", {})
@@ -119,7 +127,20 @@ class DeepSeekChatClient(BaseLLMClient):
             int(usage.get("prompt_tokens", 0)),
             int(usage.get("completion_tokens", 0)),
         )
-        return data["choices"][0]["message"]["content"].strip()
+        message = data["choices"][0]["message"]
+        content = (message.get("content") or "").strip()
+        # DeepSeek v4 may emit reasoning_content; prefer visible content.
+        if not content:
+            content = (message.get("reasoning_content") or "").strip()
+        return content
+
+
+def _is_company_extract_prompt(prompt_lower: str) -> bool:
+    """True only for dedicated company-extraction prompts (not planner structure JSON)."""
+    if "公司名称提取" in prompt_lower or "company name extractor" in prompt_lower:
+        return True
+    # Legacy unit-test / narrow JSON extractors.
+    return "返回 json" in prompt_lower and '"companies"' in prompt_lower and "time_range" not in prompt_lower
 
 
 class LocalFallbackLLMClient(BaseLLMClient):
@@ -131,20 +152,8 @@ class LocalFallbackLLMClient(BaseLLMClient):
         prompt_lower = prompt.lower()
         companies = _extract_companies_from_text(prompt)
 
-        if "公司名称提取" in prompt_lower or '"companies"' in prompt_lower:
+        if _is_company_extract_prompt(prompt_lower):
             content = json.dumps({"companies": companies}, ensure_ascii=False)
-        elif "task_brief" in prompt_lower or "任务概括" in prompt_lower or "监督代理" in prompt_lower or "任务拆解" in prompt_lower or "supervisory agent" in prompt_lower:
-            target = "、".join(companies) if companies else "目标公司"
-            content = json.dumps(
-                {
-                    "task_brief": f"对 {target} 开展 2025 财年财务、供应链与管理层语气尽调，并输出带审计信息的合规报告。",
-                    "analysis_dimensions": ["profitability", "supply_chain", "r_and_d", "sentiment"],
-                    "key_questions": [],
-                    "risk_appetite": "moderate",
-                    "industry_context": "科技与半导体行业处于 AI 基础设施投资周期。",
-                },
-                ensure_ascii=False,
-            )
         elif "executive summary" in prompt_lower or "执行摘要" in prompt_lower:
             if len(companies) >= 2:
                 content = (
@@ -191,6 +200,8 @@ class ResilientLLMClient(BaseLLMClient):
         self.allow_fallback = allow_fallback
         self.backend_name = primary.backend_name if primary else self.fallback.backend_name
         self.model_name = getattr(primary, "model_name", self.fallback.model_name)
+        self.last_error: str | None = None
+        self.used_fallback: bool = primary is None and allow_fallback
 
     def mark_usage_start(self) -> None:
         self._usage_mark = dict(self._usage_totals)
@@ -220,6 +231,7 @@ class ResilientLLMClient(BaseLLMClient):
                 raise RuntimeError("No primary LLM configured and local fallback is disabled.")
             self.backend_name = self.fallback.backend_name
             self.model_name = self.fallback.model_name
+            self.used_fallback = True
             before = dict(self.fallback._usage_totals)
             content = self.fallback.chat(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
             self._sync_usage_from(self.fallback, before)
@@ -230,12 +242,22 @@ class ResilientLLMClient(BaseLLMClient):
             before = dict(self.primary._usage_totals)
             content = self.primary.chat(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
             self._sync_usage_from(self.primary, before)
+            self.used_fallback = False
+            self.last_error = None
             return content
-        except Exception:
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
             if not self.allow_fallback:
                 raise
+            logger.warning(
+                "Primary LLM (%s) failed (%s); falling back to %s",
+                self.primary.backend_name,
+                self.last_error,
+                self.fallback.backend_name,
+            )
             self.backend_name = self.fallback.backend_name
             self.model_name = self.fallback.model_name
+            self.used_fallback = True
             before = dict(self.fallback._usage_totals)
             content = self.fallback.chat(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
             self._sync_usage_from(self.fallback, before)

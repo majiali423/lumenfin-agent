@@ -8,6 +8,7 @@ from typing import Any
 
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
 from .market_data import DEFAULT_TICKER_MAP
+from .metrics_schema import get_fundamental, normalize_market_data, set_fundamental
 
 
 class SafeExpressionEvaluator(ast.NodeVisitor):
@@ -85,24 +86,32 @@ def resolve_safe_formula(formula: str, variables: dict[str, float], backend: str
 
 KNOWN_ALIASES = {
     "tesla": "Tesla",
+    "特斯拉": "Tesla",
     "amazon": "Amazon",
+    "亚马逊": "Amazon",
     "alphabet": "Alphabet",
     "google": "Alphabet",
+    "谷歌": "Alphabet",
     "meta": "Meta",
     "meta platforms": "Meta",
     "facebook": "Meta",
     "nvidia": "NVIDIA",
+    "英伟达": "NVIDIA",
     "amd": "AMD",
     "tencent": "Tencent",
     "腾讯": "Tencent",
     "腾讯控股": "Tencent",
     "apple": "Apple",
+    "苹果": "Apple",
     "microsoft": "Microsoft",
+    "微软": "Microsoft",
     "tsla": "Tesla",
     "nvda": "NVIDIA",
     "tsmc": "TSMC",
+    "台积电": "TSMC",
     "taiwan semiconductor": "TSMC",
     "samsung": "Samsung",
+    "三星": "Samsung",
     "byd": "BYD",
     "比亚迪": "BYD",
     "broadcom": "Broadcom",
@@ -110,9 +119,41 @@ KNOWN_ALIASES = {
     "alibaba": "Alibaba",
     "阿里巴巴": "Alibaba",
     "oracle": "Oracle",
+    "甲骨文": "Oracle",
     "shopify": "Shopify",
     "block": "Block",
+    "softbank": "SoftBank",
+    "softbank group": "SoftBank",
+    "软银": "SoftBank",
 }
+
+
+_AST_INPUT_KEYS = ("revenue", "ebitda", "operating_income", "r_and_d")
+
+
+def _merge_document_market_data_with_live(
+    document_md: dict[str, Any] | None,
+    live_md: dict[str, Any] | None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Financial Grounding merge: keep document values; fill missing AST keys from live.
+
+    Issuer-scoped only — callers must not pass peer companyfacts. Document wins on
+    overlap so upload-extracted figures are not overwritten by SEC/Yahoo.
+    """
+    from .metrics_schema import get_fundamental, normalize_market_data, set_fundamental
+
+    merged = normalize_market_data(dict(document_md or {}))
+    live_n = normalize_market_data(dict(live_md or {}))
+    filled: list[str] = []
+    for key in _AST_INPUT_KEYS:
+        if get_fundamental(merged, key) is not None:
+            continue
+        live_val = get_fundamental(live_n, key)
+        if live_val is None:
+            continue
+        set_fundamental(merged, key, live_val)
+        filled.append(key)
+    return merged, filled
 
 
 def retrieve_company_payload(
@@ -124,48 +165,144 @@ def retrieve_company_payload(
     ticker: str | None = None,
     fetch_live_fundamentals: bool = False,
     fetch_sec_fundamentals: bool = False,
+    prefer_uploaded_only: bool = False,
 ) -> dict[str, Any]:
     """Build a company payload from documents / SEC / Yahoo / sample.
 
-    Preference order:
-    1) document-extracted metrics from uploads
-    2) SEC EDGAR companyfacts (US filers; when fetch_sec_fundamentals=True)
-    3) Yahoo annual income statement (when fetch_live_fundamentals=True)
+    Preference order (Financial Grounding Layer):
+    1) document-extracted metrics when AST-computable (revenue + ebitda/OI/R&D)
+    2) SEC EDGAR companyfacts gap-fill for the **issuer** only (when enabled)
+    3) Yahoo annual income statement gap-fill (when enabled)
     4) sample_db (when allow_sample_data=True)
+
+    Partial upload hints no longer short-circuit SEC/Yahoo: ``bool(market_data)``
+    alone is insufficient — only ``has_computable_fundamentals`` wins early.
+
+    When ``prefer_uploaded_only`` is True, steps 2–4 are skipped so sparse uploads
+    fail loud instead of silently backfilling from live providers.
     """
     doc_contexts = document_contexts or []
     document_payload = _payload_from_documents(company, doc_contexts, include_appendix=include_appendix)
-    has_document_metrics = bool(document_payload.get("market_data"))
-    if has_document_metrics:
-        return document_payload
+    # Upload "present for this company" only when the issuer is explicitly detected
+    # (empty detected_companies must not attribute the PDF to every peer).
+    upload_present = any(
+        company in (doc.get("detected_companies") or []) for doc in doc_contexts
+    ) or bool(document_payload.get("market_data")) or bool(
+        document_payload.get("earnings_call_quotes")
+    )
+    # Financial Grounding: complete document AST set wins; partial hints do not block SEC.
+    if has_computable_fundamentals(document_payload):
+        result = dict(document_payload)
+        meta = dict(result.get("fundamentals_meta") or {})
+        meta.update(
+            {
+                "upload_present": upload_present,
+                "upload_had_computable_metrics": True,
+                "live_fallback_used": False,
+                "prefer_uploaded_only": prefer_uploaded_only,
+                "grounding_layer": "document_ast_complete",
+            }
+        )
+        result["fundamentals_meta"] = meta
+        return _finalize_company_payload(result)
+
+    # Upload-only mode: never invent numbers from SEC/Yahoo/sample.
+    if prefer_uploaded_only:
+        result = dict(document_payload)
+        # Narrative excerpts may still exist; without computable metrics this is not a structured source.
+        result["structured_source"] = "none"
+        meta = dict(result.get("fundamentals_meta") or {})
+        meta.update(
+            {
+                "upload_present": upload_present,
+                "upload_had_computable_metrics": False,
+                "live_fallback_used": False,
+                "prefer_uploaded_only": True,
+                "grounding_layer": "prefer_uploaded_only_refused",
+                "fallback_reason": (
+                    "prefer_uploaded_only=true; refused SEC/Yahoo/sample backfill because "
+                    "uploaded materials lacked AST-computable revenue/EBITDA/R&D."
+                ),
+            }
+        )
+        result["fundamentals_meta"] = meta
+        return _finalize_company_payload(result)
 
     from .market_data import DEFAULT_TICKER_MAP
 
     symbol = (ticker or DEFAULT_TICKER_MAP.get(company) or company).strip()
+    provider_errors: list[dict[str, Any]] = []
 
-    def _merge_live(live: dict[str, Any]) -> dict[str, Any]:
+    def _annotate_fallback(
+        merged: dict[str, Any],
+        *,
+        provider: str,
+        filled_keys: list[str] | None = None,
+    ) -> dict[str, Any]:
+        meta = dict(merged.get("fundamentals_meta") or {})
+        if upload_present:
+            meta.update(
+                {
+                    "upload_present": True,
+                    "upload_had_computable_metrics": False,
+                    "live_fallback_used": True,
+                    "prefer_uploaded_only": False,
+                    "grounding_layer": "issuer_sec_gap_fill",
+                    "sec_filled_keys": list(filled_keys or []),
+                    "fallback_reason": (
+                        "Uploaded materials lacked AST-computable revenue/EBITDA/R&D; "
+                        f"issuer structured fundamentals filled from {provider}"
+                        + (
+                            f" (filled: {', '.join(filled_keys)})."
+                            if filled_keys
+                            else "."
+                        )
+                    ),
+                }
+            )
+            merged["fundamentals_meta"] = meta
+        return merged
+
+    def _merge_live(live: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+        """Attach upload narrative/supply-chain and gap-fill AST market_data."""
         result = dict(live)
+        filled: list[str] = []
+        doc_md = document_payload.get("market_data") or {}
+        live_md = live.get("market_data") or {}
+        if doc_md:
+            merged_md, filled = _merge_document_market_data_with_live(doc_md, live_md)
+            result["market_data"] = merged_md
         if document_payload.get("earnings_call_quotes"):
             result["earnings_call_quotes"] = list(document_payload["earnings_call_quotes"])
         if document_payload.get("supply_chain", {}).get("signals"):
             result["supply_chain"] = dict(document_payload["supply_chain"])
         if document_payload.get("source_documents"):
             result["source_documents"] = list(document_payload.get("source_documents") or [])
-        return result
+        return result, filled
 
     if fetch_sec_fundamentals:
         from .sec_fundamentals import fetch_sec_companyfacts_fundamentals
 
-        sec_live = fetch_sec_companyfacts_fundamentals(symbol)
+        sec_live = fetch_sec_companyfacts_fundamentals(symbol, errors=provider_errors)
         if sec_live and sec_live.get("market_data"):
-            return _merge_live(sec_live)
+            merged, filled = _merge_live(sec_live)
+            merged = _annotate_fallback(merged, provider="sec_companyfacts", filled_keys=filled)
+            if provider_errors:
+                merged["provider_errors"] = list(provider_errors)
+            return _finalize_company_payload(merged)
 
     if fetch_live_fundamentals:
         from .fundamentals import fetch_yahoo_fundamentals
 
-        yahoo_live = fetch_yahoo_fundamentals(symbol)
+        yahoo_live = fetch_yahoo_fundamentals(symbol, errors=provider_errors)
         if yahoo_live and yahoo_live.get("market_data"):
-            return _merge_live(yahoo_live)
+            merged, filled = _merge_live(yahoo_live)
+            merged = _annotate_fallback(
+                merged, provider="yahoo_fundamentals", filled_keys=filled
+            )
+            if provider_errors:
+                merged["provider_errors"] = list(provider_errors)
+            return _finalize_company_payload(merged)
 
     has_sample_data = allow_sample_data and company in SAMPLE_FINANCIAL_DATA
     if has_sample_data:
@@ -175,16 +312,40 @@ def retrieve_company_payload(
             "supply_chain": dict(payload["supply_chain"]),
             "earnings_call_quotes": list(payload["earnings_call_quotes"]),
             "structured_source": "sample_db",
+            "fundamentals_meta": {"provider": "sample_db", "period": "demo_latest"},
         }
+        filled: list[str] = []
+        doc_md = document_payload.get("market_data") or {}
+        if doc_md:
+            merged_md, filled = _merge_document_market_data_with_live(
+                doc_md, result["market_data"]
+            )
+            result["market_data"] = merged_md
         if document_payload.get("earnings_call_quotes"):
             result["earnings_call_quotes"] = list(document_payload["earnings_call_quotes"])
         if document_payload.get("supply_chain", {}).get("signals"):
             result["supply_chain"] = dict(document_payload["supply_chain"])
         if include_appendix:
             result["appendix"] = dict(payload["appendix"])
-        return result
+        if provider_errors:
+            result["provider_errors"] = list(provider_errors)
+        result = _annotate_fallback(result, provider="sample_db", filled_keys=filled)
+        return _finalize_company_payload(result)
 
-    return document_payload
+    if provider_errors:
+        document_payload = dict(document_payload)
+        document_payload["provider_errors"] = list(provider_errors)
+    return _finalize_company_payload(document_payload)
+
+
+def _finalize_company_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize fundamental keys on every retrieve path."""
+    result = dict(payload)
+    result["market_data"] = normalize_market_data(result.get("market_data"))
+    appendix = result.get("appendix")
+    if isinstance(appendix, dict) and appendix:
+        result["appendix"] = normalize_market_data(appendix)
+    return result
 
 
 def _payload_from_documents(
@@ -198,9 +359,9 @@ def _payload_from_documents(
     earnings_quotes: list[str] = []
 
     for doc in doc_contexts:
-        detected = doc.get("detected_companies", [])
-        if company not in detected:
+        if not _document_applies_to_company(doc, company):
             continue
+        detected = doc.get("detected_companies", [])
         text = doc.get("text", "")
         excerpt = doc.get("excerpt", "")[:3000]
 
@@ -215,23 +376,25 @@ def _payload_from_documents(
             doc.get("metric_hints", {}) if len(detected) <= 1 else {}
         )
         for key, value in hint_source.items():
-            if key == "revenue":
-                market_data["revenue_2025"] = value
-            elif key == "ebitda":
-                market_data["ebitda_2025"] = value
-            elif key == "r_and_d":
-                market_data["r_and_d_2025"] = value
+            if key in {"revenue", "ebitda", "r_and_d", "operating_income"}:
+                set_fundamental(market_data, key, value)
+            elif key.endswith("_2025") and key.replace("_2025", "") in {
+                "revenue",
+                "ebitda",
+                "r_and_d",
+                "operating_income",
+            }:
+                set_fundamental(market_data, key, value)
 
         if excerpt:
             earnings_quotes.append(excerpt[:500])
 
         lowered_text = text.lower()
-        if any(w in lowered_text for w in ["supply chain risk", "供应链风险", "supply constraint", "logistics"]):
+        if has_supply_chain_signal(lowered_text):
             supply_chain_signals.append("PDF 文档中包含供应链相关讨论。")
 
-    if market_data:
-        operating_income = market_data.get("ebitda_2025", 0) * 0.65
-        market_data["operating_income_2025"] = round(operating_income, 1)
+    # Do not invent operating_income from EBITDA — that would pollute AST margins.
+    # estimated_* ratios may still be derived later and stay explicitly prefixed.
 
     return {
         "market_data": market_data,
@@ -239,12 +402,40 @@ def _payload_from_documents(
             "risk_level": "medium" if supply_chain_signals else "unknown",
             "signals": supply_chain_signals or (["PDF 文档中未检测到明确供应链信号。"] if doc_contexts else []),
         },
-        "earnings_call_quotes": earnings_quotes or (
-            ["文档已上传，请基于 PDF 内容进行分析。"] if doc_contexts else []
-        ),
-        "structured_source": "document_extracted" if market_data or earnings_quotes else "none",
+        # No placeholder "earnings call" text — empty means unknown tone upstream.
+        "earnings_call_quotes": earnings_quotes,
+        # Narrative excerpts alone are not structured fundamentals.
+        "structured_source": "document_extracted" if market_data else "none",
         **({"appendix": {}} if include_appendix else {}),
     }
+
+
+_SUPPLY_CHAIN_PHRASES = (
+    "supply chain risk",
+    "供应链风险",
+    "supply constraint",
+    "supply constraints",
+    "logistics risk",
+    "supplier concentration",
+    "供应商集中",
+    "packaging capacity",
+    "foundry",
+)
+
+
+def has_supply_chain_signal(text: str) -> bool:
+    lowered = text.lower()
+    return any(phrase in lowered for phrase in _SUPPLY_CHAIN_PHRASES)
+
+
+# Backward-compatible private alias.
+_has_supply_chain_signal = has_supply_chain_signal
+
+
+def _document_applies_to_company(doc: dict[str, Any], company: str) -> bool:
+    """Same issuer scoping as retrieval payload assembly: require explicit detection."""
+    detected = doc.get("detected_companies") or []
+    return company in detected
 
 
 def _append_unique_company(companies: list[str], name: str) -> None:
@@ -297,14 +488,70 @@ def canonicalize_companies(companies: list[str]) -> list[str]:
 def has_computable_fundamentals(payload: dict[str, Any] | None) -> bool:
     """True when AST quant can compute at least one core ratio from structured inputs."""
     market = (payload or {}).get("market_data") or {}
-    revenue = market.get("revenue_2025")
-    if revenue in (None, "", 0):
+    revenue = get_fundamental(market, "revenue")
+    if revenue in (None, 0):
         return False
     return any(
-        market.get(key) not in (None, "")
-        for key in ("ebitda_2025", "operating_income_2025", "r_and_d_2025")
+        get_fundamental(market, key) is not None
+        for key in ("ebitda", "operating_income", "r_and_d")
     )
 
+
+AST_RATIO_KEYS = ("ebitda_margin", "r_and_d_intensity", "operating_margin")
+
+
+def classify_quant_status(metrics: dict[str, float] | None) -> str:
+    """Classify per-company quant output for peer-comparison coverage."""
+    values = metrics or {}
+    if any(key in values for key in AST_RATIO_KEYS):
+        return "ast_ok"
+    if values:
+        return "market_only"
+    return "uncomputable"
+
+
+def build_coverage_matrix(
+    companies: list[str],
+    retrieved_docs: dict[str, dict[str, Any]],
+    financial_metrics: dict[str, dict[str, float]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    matrix: dict[str, dict[str, Any]] = {}
+    for company in companies:
+        payload = retrieved_docs.get(company) or {}
+        metrics = (financial_metrics or {}).get(company) or {}
+        has_structured = has_computable_fundamentals(payload)
+        if metrics:
+            quant_status = classify_quant_status(metrics)
+            comparable = quant_status == "ast_ok"
+        elif has_structured:
+            quant_status = "pending"
+            comparable = True
+        elif payload.get("market_data") or (payload.get("live_market") or {}).get("current_price"):
+            quant_status = "pending_market"
+            comparable = False
+        else:
+            quant_status = "uncomputable"
+            comparable = False
+        matrix[company] = {
+            "structured_source": str(payload.get("structured_source") or "none"),
+            "has_computable_fundamentals": has_structured,
+            "quant_status": quant_status,
+            "ast_ratios": quant_status == "ast_ok",
+            "comparable": comparable,
+        }
+    return matrix
+
+
+def is_partial_compare_gap(companies: list[str], coverage_matrix: dict[str, dict[str, Any]]) -> bool:
+    """True when a multi-company run has both comparable and non-comparable peers."""
+    if len(companies) <= 1:
+        return False
+    comparable = [company for company in companies if (coverage_matrix.get(company) or {}).get("comparable")]
+    return bool(comparable) and len(comparable) < len(companies)
+
+
+def non_comparable_companies(companies: list[str], coverage_matrix: dict[str, dict[str, Any]]) -> list[str]:
+    return [company for company in companies if not (coverage_matrix.get(company) or {}).get("comparable")]
 
 def _extract_companies_via_llm(query: str, llm_client: Any) -> list[str]:
     try:
@@ -324,6 +571,30 @@ def _extract_companies_via_llm(query: str, llm_client: Any) -> list[str]:
         return []
 
 
+def _alias_mentioned(alias: str, lowered: str, original: str = "") -> bool:
+    """Match aliases without short English substring false positives (block ⊂ blockchain)."""
+    token = (alias or "").strip()
+    if not token:
+        return False
+    if re.search(r"[\u4e00-\u9fff]", token):
+        return token in original or token in lowered
+    if " " in token or len(token) >= 6:
+        return token in lowered or token in original.lower()
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", lowered))
+
+
+alias_mentioned = _alias_mentioned
+
+
+def english_token_in_text(token: str, text: str) -> bool:
+    """Boundary-aware English token match; CJK / multi-word phrases use containment."""
+    return _alias_mentioned(token, text.lower(), text)
+
+
+def any_token_in_text(tokens: tuple[str, ...] | list[str], text: str) -> bool:
+    return any(english_token_in_text(token, text) for token in tokens)
+
+
 def extract_companies_from_query(
     query: str,
     document_contexts: list[dict[str, Any]] | None = None,
@@ -335,14 +606,14 @@ def extract_companies_from_query(
 
     # 1. Check sample data for direct mentions (name detection only; sample values gated elsewhere)
     for company in SAMPLE_FINANCIAL_DATA:
-        if company.lower() in lowered:
+        if _alias_mentioned(company.lower(), lowered, query):
             _append_unique_company(companies, company)
 
     # 2. Check known aliases + shared COMPANY_HINTS (CJK aliases match original text too)
     from .documents import COMPANY_HINTS
 
     for alias, name in {**KNOWN_ALIASES, **COMPANY_HINTS}.items():
-        if alias in lowered or alias in query:
+        if _alias_mentioned(alias, lowered, query):
             _append_unique_company(companies, name)
 
     # 3. Collect companies detected in uploaded PDFs
@@ -364,15 +635,45 @@ def extract_companies_from_query(
         or []
     )
 
+def _ticker_to_companies() -> dict[str, list[str]]:
+    reverse: dict[str, list[str]] = {}
+    for company, ticker in DEFAULT_TICKER_MAP.items():
+        reverse.setdefault(str(ticker).upper(), []).append(company)
+    return reverse
+
+
 def derive_target_symbols(companies: list[str], query: str) -> dict[str, str]:
-    symbols = {company: DEFAULT_TICKER_MAP.get(company, company) for company in companies}
+    """Map companies → tickers (curated map, then SEC directory, then explicit tokens)."""
+    from .ticker_resolve import resolve_ticker_for_company
+
+    symbols: dict[str, str] = {}
+    for company in companies:
+        resolved = resolve_ticker_for_company(company, query=query, allow_network=True)
+        if resolved:
+            # Always key by the pipeline company label so retrieval lookups match.
+            symbols[company] = resolved.ticker
+        else:
+            symbols[company] = DEFAULT_TICKER_MAP.get(company, company)
+
     explicit_tokens = re.findall(r"\b(?:ticker|symbol)\s*[:=]\s*([A-Z]{1,5})\b", query, flags=re.IGNORECASE)
     explicit_tokens.extend(re.findall(r"\(([A-Z]{1,5})\)", query))
+    if not explicit_tokens:
+        return symbols
+
+    ticker_owners = _ticker_to_companies()
+    company_set = set(companies)
     for token in explicit_tokens:
-        for company in companies:
-            if company not in symbols or symbols[company] == company:
-                symbols[company] = token
-                break
+        upper = token.upper()
+        owners = [name for name in ticker_owners.get(upper, []) if name in company_set]
+        if len(owners) == 1:
+            symbols[owners[0]] = upper
+            continue
+        matched = [name for name, sym in symbols.items() if str(sym).upper() == upper and name in company_set]
+        if len(matched) == 1:
+            continue
+        if len(companies) == 1:
+            symbols[companies[0]] = upper
+            continue
     return symbols
 
 
@@ -380,16 +681,20 @@ def summarize_document_context(document_contexts: list[dict[str, Any]], company:
     related_docs = []
     metric_hints: dict[str, float] = {}
     for doc in document_contexts:
-        if not doc.get("detected_companies") or company in doc.get("detected_companies", []):
-            related_docs.append(
-                {
-                    "document_id": doc.get("document_id"),
-                    "filename": doc.get("filename"),
-                    "excerpt": doc.get("excerpt", "")[:1200],
-                }
-            )
-            for metric_name, value in doc.get("metric_hints", {}).items():
-                metric_hints.setdefault(metric_name, value)
+        if not _document_applies_to_company(doc, company):
+            continue
+        detected = doc.get("detected_companies") or []
+        related_docs.append(
+            {
+                "document_id": doc.get("document_id"),
+                "filename": doc.get("filename"),
+                "excerpt": doc.get("excerpt", "")[:1200],
+            }
+        )
+        scoped = (doc.get("per_company_metric_hints") or {}).get(company) or {}
+        hint_source = scoped or (doc.get("metric_hints", {}) if len(detected) <= 1 else {})
+        for metric_name, value in hint_source.items():
+            metric_hints.setdefault(metric_name, value)
     return {"source_documents": related_docs, "metric_hints": metric_hints}
 
 
@@ -407,7 +712,12 @@ def analyze_sentiment(quotes: list[str]) -> dict[str, Any]:
     joined = " ".join(quotes).lower()
     positive_hits = sum(1 for marker in positive_markers if marker in joined)
     caution_hits = sum(1 for marker in caution_markers if marker in joined)
-    label = "bullish" if positive_hits >= caution_hits else "cautious"
+    if positive_hits == 0 and caution_hits == 0:
+        label = "neutral"
+    elif positive_hits >= caution_hits:
+        label = "bullish"
+    else:
+        label = "cautious"
     return {
         "label": label,
         "positive_hits": positive_hits,
@@ -415,18 +725,73 @@ def analyze_sentiment(quotes: list[str]) -> dict[str, Any]:
     }
 
 
+_WEAK_QUOTE_MARKERS = (
+    "profile generation pending",
+    "profile generation skipped",
+    "not available",
+    "n/a",
+    "no quote",
+    "placeholder",
+    "文档已上传",
+    "请基于 pdf",
+    "请基于pdf",
+)
+
+
+def quotes_are_weak_for_llm(quotes: list[str] | None, *, min_chars: int = 80) -> bool:
+    """True when quotes are empty, tiny, or placeholder — skip deep LLM tone analysis."""
+    cleaned = [str(q).strip() for q in (quotes or []) if str(q).strip()]
+    if not cleaned:
+        return True
+    joined = " ".join(cleaned)
+    if len(joined) < min_chars:
+        return True
+    lower = joined.lower()
+    if any(marker in lower for marker in _WEAK_QUOTE_MARKERS):
+        return True
+    if len(cleaned) == 1 and len(cleaned[0]) < 40:
+        return True
+    return False
+
+
 def validate_report(report: str) -> list[str]:
+    """Lightweight bilingual template check (EN or ZH markers)."""
+    text = report or ""
     findings: list[str] = []
-    if "风险免责声明" not in report:
+    has_disclaimer = (
+        "风险免责声明" in text
+        or re.search(r"(?i)disclaimer", text) is not None
+        or re.search(r"(?i)not investment advice", text) is not None
+    )
+    has_provenance = (
+        "数据来源" in text
+        or re.search(r"(?i)data sources?", text) is not None
+        or re.search(r"(?i)methodology", text) is not None
+        or "structured_source" in text
+    )
+    if not has_disclaimer:
         findings.append("缺少风险免责声明。")
-    if "数据来源" not in report:
+    if not has_provenance:
         findings.append("缺少数据来源标注。")
     return findings
 
 
 def analyze_sentiment_deep(quotes: list[str], llm_client: Any | None = None) -> dict[str, Any]:
-    """Deep sentiment analysis using LLM when available."""
+    """Deep sentiment analysis using LLM when quotes are substantive."""
     basic = analyze_sentiment(quotes)
+
+    if quotes_are_weak_for_llm(quotes):
+        return {
+            "label": basic["label"],
+            "positive_hits": basic["positive_hits"],
+            "caution_hits": basic["caution_hits"],
+            "confidence_score": 2,
+            "key_themes": [],
+            "risk_flags": [],
+            "strategic_priority": "",
+            "llm_skipped": True,
+            "skip_reason": "weak_quotes",
+        }
 
     if llm_client and quotes:
         try:
@@ -454,19 +819,24 @@ def analyze_sentiment_deep(quotes: list[str], llm_client: Any | None = None) -> 
                 "key_themes": deep.get("key_themes", []),
                 "risk_flags": deep.get("risk_flags", []),
                 "strategic_priority": deep.get("strategic_priority", ""),
+                "llm_skipped": False,
             }
         except Exception:
             pass
-    return basic
+    return {
+        **basic,
+        "llm_skipped": True,
+        "skip_reason": "llm_unavailable_or_failed",
+    }
 
 
 def calculate_derived_ratios(market_data: dict[str, float]) -> dict[str, float]:
     """Calculate additional financial ratios from available market data."""
     ratios: dict[str, float] = {}
-    revenue = market_data.get("revenue_2025")
-    ebitda = market_data.get("ebitda_2025")
-    r_and_d = market_data.get("r_and_d_2025")
-    op_income = market_data.get("operating_income_2025")
+    revenue = get_fundamental(market_data, "revenue")
+    ebitda = get_fundamental(market_data, "ebitda")
+    r_and_d = get_fundamental(market_data, "r_and_d")
+    op_income = get_fundamental(market_data, "operating_income")
 
     if revenue and revenue > 0:
         if ebitda:

@@ -12,11 +12,13 @@ if str(SRC) not in sys.path:
 
 from lumenfin.api.app import create_app
 from lumenfin.config import AppConfig
+from lumenfin.rag.profiles import apply_showcase_rag_env
 from lumenfin.stdio import configure_stdio_utf8
 
 
 def main() -> None:
     configure_stdio_utf8()
+    apply_showcase_rag_env(overwrite=False)
     config = AppConfig.from_env()
     app = create_app(config)
     uvicorn.run(app, host=config.host, port=config.port)

@@ -1,12 +1,74 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
 from .evaluation import evaluate_run_state
+
+_PAGE_CITATION_RE = re.compile(r"#p\d+", re.IGNORECASE)
+
+
+def format_rag_citation_section(
+    rag_evidence: dict[str, Any] | None,
+    *,
+    max_excerpt: int = 180,
+    heading: str = "### Retrieved Document Citations (page-level)",
+) -> list[str]:
+    """Build a deterministic markdown block of RAG page citations for final_report.
+
+    Citations keep ``filename#pN`` anchors from retrieval so the report is auditable
+    against uploaded PDFs without relying on the LLM to copy them.
+    """
+    evidence = rag_evidence or {}
+    rows: list[tuple[str, str, str, str]] = []
+    for company_key in sorted(evidence.keys(), key=lambda c: str(c)):
+        company = str(company_key)
+        hits = evidence.get(company_key) or []
+        if not isinstance(hits, list):
+            continue
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            citation = str(hit.get("citation") or "").strip()
+            if not citation:
+                filename = (
+                    str(hit.get("filename") or hit.get("source") or "document").strip()
+                    or "document"
+                )
+                page = hit.get("page")
+                citation = f"{filename}#p{page}" if page is not None else filename
+            method = (
+                str(hit.get("retrieval_method") or hit.get("method") or "hybrid").strip()
+                or "hybrid"
+            )
+            text = str(hit.get("text") or hit.get("excerpt") or "").replace("\n", " ").strip()
+            if len(text) > max_excerpt:
+                text = text[: max_excerpt - 1].rstrip() + "…"
+            rows.append((company, citation, method, text or "—"))
+    if not rows:
+        return []
+    lines = [
+        heading,
+        "",
+        "These anchors come from hybrid RAG hits and are written deterministically "
+        "(not paraphrased by the LLM). Use `filename#pN` to locate the source page.",
+        "",
+        "| Company | Citation | Method | Excerpt |",
+        "|---------|----------|--------|---------|",
+    ]
+    for company, citation, method, text in rows:
+        safe_text = text.replace("|", "\\|")
+        lines.append(f"| {company} | `{citation}` | {method} | {safe_text} |")
+    lines.append("")
+    return lines
+
+def report_contains_page_citations(report: str | None) -> bool:
+    """True when the report text includes at least one ``#pN`` page anchor."""
+    return bool(_PAGE_CITATION_RE.search(report or ""))
 
 
 def build_data_sources(
@@ -70,11 +132,12 @@ def build_data_sources(
 
     rag_used = any(bool(hits) for hits in rag_evidence.values())
     chunks_indexed = int(rag_index_stats.get("chunks_indexed") or 0)
+    search_only = bool(rag_index_stats.get("search_only"))
     if not rag_enabled:
         rag_status = "disabled"
     elif rag_used:
         rag_status = "milvus_hybrid"
-    elif chunks_indexed > 0:
+    elif chunks_indexed > 0 or search_only:
         rag_status = "indexed_no_hits"
     elif has_pdf:
         rag_status = "pdf_no_index"

@@ -1,27 +1,66 @@
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
 outputs/
 !outputs/.gitkeep
 output/
 uploads/
 !uploads/.gitkeep
 test_artifacts/
-*.db
-!data/.gitkeep
-.env
-.venv/
-
-# Build artifacts
+logs/
+*.log
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
 *.egg-info/
 
-# Local notes (interview prep, not published)
+# Local databases and vector state
+*.db
+*.sqlite
+*.sqlite3
+# Milvus Lite local files / dirs (do not ignore source modules like milvus_client.py)
+/milvus/
+milvus_lite.db
+**/milvus*.db
+data/**
+!data/.gitkeep
+
+.env
+.env.*
+!.env.example
+.venv/
+
+# Full SEC downloads and local fixture caches
+.local-fixtures/
+downloads/
+fixtures/e2e_real/
+
+# IDE / agent local state
 .cursor/
+.vscode/settings.local.json
+
+# Local probes and publish helpers
+scripts/_probe_*.py
+scripts/publish_github.ps1
+scripts/push_without_gh.ps1
+
+# Root historical reports kept locally; curated copies live under reports/
+/LumenFin_*.md
+/FinAgentBench_Correctness_Report.md
+
+# Local interview notes (not published)
 docs/DEBUG_LOG.md
 docs/INTERVIEW_PITCH.md
+docs/interview_command_guide.md
 docs/RESUME.md
 docs/DEMO.md
 docs/MY_TEST_QUERIES.md
 docs/WHY_NOT_A_TOY.md
 docs/ADR.md
-scripts/publish_github.ps1
-scripts/push_without_gh.ps1

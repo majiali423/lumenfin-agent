@@ -8,7 +8,19 @@ from dotenv import load_dotenv
 
 from .llm import LLMSettings
 
+# Prefer project-root .env (stable regardless of cwd), then cwd as secondary.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_PROJECT_ROOT / ".env")
 load_dotenv()
+
+_RAG_INDEX_MODES = frozenset({"sync_on_run", "async_on_upload"})
+
+
+def _normalize_rag_index_mode(raw: str | None) -> str:
+    mode = (raw or "sync_on_run").strip().lower() or "sync_on_run"
+    if mode not in _RAG_INDEX_MODES:
+        return "sync_on_run"
+    return mode
 
 
 @dataclass(frozen=True)
@@ -19,6 +31,7 @@ class AppConfig:
     database_url: str
     redis_url: str | None
     redis_queue_name: str
+    redis_index_queue_name: str
     neo4j_uri: str | None
     neo4j_username: str | None
     neo4j_password: str | None
@@ -38,11 +51,24 @@ class AppConfig:
     rag_enabled: bool
     milvus_uri: str
     milvus_collection: str
+    milvus_isolate: bool
     embedding_provider: str
     embedding_dimension: int
     rag_top_k: int
+    rag_index_mode: str
+    rag_tenant_id: str
+    rag_require_ready: bool
+    embedding_max_retries: int
+    embedding_backoff_seconds: float
+    embedding_timeout_seconds: float
+    rag_min_score: float
+    rag_degrade_on_vector_error: bool
+    rag_sanitize_hits: bool
+    rag_rerank_enabled: bool
+    rag_rerank_candidates: int
     critic_max_iterations: int
     company_parallelism: int
+    profile_llm_max_attempts: int
     input_guardrail_enabled: bool
     input_guardrail_mode: str
     tool_backend: str
@@ -82,6 +108,7 @@ class AppConfig:
             database_url=os.getenv("MAS_DATABASE_URL", f"sqlite:///{raw_db_path.replace(os.sep, '/')}"),
             redis_url=os.getenv("MAS_REDIS_URL"),
             redis_queue_name=os.getenv("MAS_REDIS_QUEUE_NAME", "finance-analysis"),
+            redis_index_queue_name=os.getenv("MAS_REDIS_INDEX_QUEUE_NAME", "rag-document-index"),
             neo4j_uri=os.getenv("MAS_NEO4J_URI"),
             neo4j_username=os.getenv("MAS_NEO4J_USERNAME"),
             neo4j_password=os.getenv("MAS_NEO4J_PASSWORD"),
@@ -101,11 +128,31 @@ class AppConfig:
             rag_enabled=os.getenv("MAS_RAG_ENABLED", "true").lower() in {"1", "true", "yes"},
             milvus_uri=os.getenv("MAS_MILVUS_URI", "data/milvus_lite.db"),
             milvus_collection=os.getenv("MAS_MILVUS_COLLECTION", "lumenfin_chunks"),
+            milvus_isolate=os.getenv("MAS_MILVUS_ISOLATE", "true").lower() in {"1", "true", "yes"},
             embedding_provider=os.getenv("MAS_EMBEDDING_PROVIDER", "deterministic"),
             embedding_dimension=int(os.getenv("MAS_EMBEDDING_DIMENSION", "384")),
             rag_top_k=int(os.getenv("MAS_RAG_TOP_K", "5")),
+            rag_index_mode=_normalize_rag_index_mode(os.getenv("MAS_RAG_INDEX_MODE", "sync_on_run")),
+            rag_tenant_id=(os.getenv("MAS_RAG_TENANT_ID", "default").strip() or "default"),
+            rag_require_ready=os.getenv("MAS_RAG_REQUIRE_READY", "false").lower() in {"1", "true", "yes"},
+            embedding_max_retries=max(1, int(os.getenv("MAS_EMBEDDING_MAX_RETRIES", "3"))),
+            embedding_backoff_seconds=float(os.getenv("MAS_EMBEDDING_BACKOFF_SECONDS", "0.5")),
+            embedding_timeout_seconds=float(
+                os.getenv("DASHSCOPE_EMBEDDING_TIMEOUT")
+                or os.getenv("MAS_EMBEDDING_TIMEOUT_SECONDS", "60")
+            ),
+            rag_min_score=float(os.getenv("MAS_RAG_MIN_SCORE", "0")),
+            rag_degrade_on_vector_error=os.getenv("MAS_RAG_DEGRADE_ON_VECTOR_ERROR", "true").lower()
+            in {"1", "true", "yes"},
+            rag_sanitize_hits=os.getenv("MAS_RAG_SANITIZE_HITS", "true").lower() in {"1", "true", "yes"},
+            rag_rerank_enabled=os.getenv("MAS_RAG_RERANK_ENABLED", "true").lower() in {"1", "true", "yes"},
+            rag_rerank_candidates=max(1, int(os.getenv("MAS_RAG_RERANK_CANDIDATES", "20"))),
             critic_max_iterations=int(os.getenv("MAS_CRITIC_MAX_ITERATIONS", "2")),
             company_parallelism=int(os.getenv("MAS_COMPANY_PARALLELISM", "4")),
+            profile_llm_max_attempts=max(
+                0,
+                min(3, int(os.getenv("MAS_PROFILE_LLM_MAX_ATTEMPTS", "1"))),
+            ),
             input_guardrail_enabled=os.getenv("MAS_INPUT_GUARDRAIL_ENABLED", "true").lower() in {"1", "true", "yes"},
             input_guardrail_mode=os.getenv("MAS_INPUT_GUARDRAIL_MODE", "sanitize").lower(),
             tool_backend=os.getenv("MAS_TOOL_BACKEND", "local").lower(),

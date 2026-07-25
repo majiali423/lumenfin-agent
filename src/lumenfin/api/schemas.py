@@ -7,7 +7,7 @@ class AnalyzeDataRequest(BaseModel):
     query: str = Field(..., description="User query for financial multi-agent analysis.")
     company_metrics: dict[str, dict[str, Any]] = Field(
         ...,
-        description='Structured metrics per company, e.g. {"NVIDIA": {"revenue_2025": 130.5, "ebitda_2025": 75.2}}.',
+        description='Structured metrics per company, e.g. {"NVIDIA": {"revenue": 130.5, "ebitda": 75.2}}.',
     )
     thread_id: Optional[str] = Field(default=None, description="Optional workflow thread id.")
     export_artifacts: bool = Field(default=True, description="Whether to persist report and state files.")
@@ -49,7 +49,11 @@ class ClarifyRequest(BaseModel):
     thread_id: str = Field(..., description="Existing workflow thread awaiting clarification.")
     clarification: dict[str, Any] = Field(
         ...,
-        description="Structured answers, e.g. {\"company\": \"Apple\", \"time_range\": \"FY2025\"}.",
+        description=(
+            "Structured answers, e.g. "
+            '{"company": "Apple", "time_range": "FY2025"} or '
+            '{"company_scope": "uploaded|query|both"} when query issuers disagree with uploads.'
+        ),
     )
     export_artifacts: bool = Field(default=True, description="Whether to persist report and state files.")
     include_state: bool = Field(
@@ -92,3 +96,29 @@ class JobResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class DocumentReceipt(BaseModel):
+    document_id: str
+    filename: str
+    content_hash: str
+    status: str
+    chunk_count: int = 0
+    error: Optional[str] = None
+    embed_calls: int = 0
+
+
+class DocumentIndexResponse(BaseModel):
+    tenant_id: str
+    documents: list[DocumentReceipt]
+
+
+class DocumentStatusResponse(BaseModel):
+    document_id: str
+    tenant_id: str
+    filename: str
+    content_hash: str
+    index_status: str
+    chunk_count: int = 0
+    error: Optional[str] = None
+    indexed_at: Optional[str] = None

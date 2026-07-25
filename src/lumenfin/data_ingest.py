@@ -58,7 +58,7 @@ def structured_metrics_to_document_contexts(
 
 
 def load_metrics_json_file(path: Path) -> dict[str, dict[str, Any]]:
-    """Load { \"Company\": { \"revenue_2025\": 1.0, ... } } from a JSON file."""
+    """Load { \"Company\": { \"revenue\": 1.0, ... } } from a JSON file (legacy *_2025 keys accepted)."""
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Metrics JSON must be an object keyed by company name.")
