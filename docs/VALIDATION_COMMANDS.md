@@ -34,6 +34,14 @@ python -m unittest tests.test_rc_runner_import -v
 
 ## 3. Cross-repository gate
 
+CI uses the LumenFin orchestrator with absolute paths (sibling layout):
+
+```bash
+python scripts/run_cross_repo_ci.py --profile ci --require-clean-lumenfin
+```
+
+Local equivalent still available from FinAgentBench:
+
 ```bash
 cd ../finagentbench-demo
 python scripts/validate_cross_repo.py --profile ci
