@@ -1,44 +1,72 @@
-# MCP Tool Layer
+# MCP Tool Layer (optional side channel)
 
-LumenFin separates **workflow orchestration** (LangGraph) from **reusable tools** (MCP).
+> **Production default:** keep `MAS_TOOL_BACKEND=local`. Diligence does **not** require MCP.
+> **Hard boundary:** main evidence RAG runs only inside LangGraph **Retrieval** (`DocumentIndexer` + hybrid RRF).
+> MCP `document-search` is an independent tool demo and **does not** write `rag_evidence` / diligence state.
 
-## Problem
+LumenFin separates **workflow orchestration** (LangGraph) from **reusable tools** (MCP) so the same AST calculator (and demo data helpers) can be called from Cursor or scripts without importing the full graph.
 
-Embedding every capability as a Python import ties tools to one runtime. MCP exposes the same financial primitives to:
+## Production vs optional
 
-- LumenFin LangGraph nodes (optional `MAS_TOOL_BACKEND=mcp`)
-- `scripts/run_mcp_tools_demo.py` (no workflow)
-- Cursor / other MCP clients
+| Path | Role | Deploy? |
+|------|------|---------|
+| LangGraph Retrieval + `DocumentIndexer` | **Production evidence RAG** (upload PDF → Milvus → `rag_evidence`) | Yes |
+| SEC / Yahoo / upload metrics | **Production structured fundamentals** | Yes |
+| MCP `safe-calc` | Optional: same AST via stdio (demo / Cursor) | Optional |
+| MCP `finance-db` | Demo only: `SAMPLE_FINANCIAL_DATA` | Optional (never as live source) |
+| MCP `document-search` | Demo sidecar: `mcp_layer/data/docs` notes (± ephemeral hybrid) | Optional |
+
+`docker-compose.yml` and `scripts/run_live_showcase.py` **do not** start MCP servers. That is intentional: MCP is not the deploy baseline.
+
+## What `MAS_TOOL_BACKEND=mcp` actually covers
+
+Only **quant formula evaluation** (`safe_execute_formula` → MCP `compute_ratio_tool`).
+
+It does **not** move Retrieval, RAG indexing, SEC, Yahoo, Critic, or HITL onto MCP. Saying “the whole graph runs on MCP” would be overclaiming.
 
 ## Architecture
 
 ```text
-MCP clients                LumenFin LangGraph (optional)
-     |                              |
-     | stdio MCP                    | MAS_TOOL_BACKEND=mcp
-     v                              v
-mcp_layer/servers/  ──adapters──>  src/lumenfin/
-  safe-calc                         tools.safe_execute_formula
-  finance-db                        sample_financial_data
-  document-search                   (shared logic)
+                    ┌─────────────────────────────────────┐
+ Production         │ LangGraph: guardrail → … → Retrieval│
+ diligence          │   DocumentIndexer / hybrid RAG      │
+                    │   SEC/Yahoo → quant → critic → synth│
+                    └─────────────────────────────────────┘
+
+ Optional MCP       MCP clients (Cursor / scripts)
+ (side channel)          |
+                         | stdio
+                         v
+                    mcp_layer/servers/
+                      safe-calc      → lumenfin.tools.safe_execute_formula
+                      finance-db     → SAMPLE_FINANCIAL_DATA only
+                      document-search→ mcp_layer/data/docs (± hybrid notes)
 ```
 
-## Single source of truth
+Adapters stamp every response with `production_scope` (see `mcp_layer/adapters/scope.py`):
 
-| MCP adapter | Core module |
-|-------------|-------------|
-| `mcp_layer/adapters/safe_calc.py` | `lumenfin.tools.safe_execute_formula` |
-| `mcp_layer/adapters/finance_db.py` | `lumenfin.data.sample_financial_data` |
+- `affects_diligence_state: false`
+- `data_contract`: `ast_formula_only` | `sample_financial_data_only` | `mcp_research_notes_sidecar`
 
-MCP servers are thin protocol wrappers. Changing quant logic in `lumenfin.tools` updates both the pipeline and MCP clients.
+## Single source of truth (logic, not product path)
 
-## What we do not claim
+| MCP adapter | Core module | Product meaning |
+|-------------|-------------|-----------------|
+| `adapters/safe_calc.py` | `lumenfin.tools.safe_execute_formula` | Same math as quant |
+| `adapters/finance_db.py` | `lumenfin.data.sample_financial_data` | **Sample only** ≠ live fundamentals |
+| `adapters/doc_search.py` | notes under `mcp_layer/data/docs` (+ optional Milvus over those notes) | **Not** upload-PDF production RAG |
 
-- Full LangGraph pipeline is not required to use the tools
-- Not every node is MCP-backed by default (`MAS_TOOL_BACKEND=local` in tests)
-- `document-search` uses bundled markdown notes; PDF Milvus RAG remains in the main workflow
+## document-search modes (sidecar only)
 
-## Commands
+| `MAS_MCP_DOC_SEARCH` | Behavior |
+|----------------------|----------|
+| `keyword` | Keyword over bundled markdown/txt notes |
+| `milvus` / `hybrid` | Ephemeral hybrid over **those same notes** (not user upload index) |
+| `auto` (default) | Try hybrid, fall back to keyword |
+
+Even in `milvus` mode, hits are **not** attached to diligence `rag_evidence` unless a custom client copies them. For production PDF RAG see [`RAG_MILVUS.md`](RAG_MILVUS.md).
+
+## Commands (demo)
 
 ```powershell
 python scripts/run_mcp_tools_demo.py
@@ -46,11 +74,11 @@ python scripts/run_mcp_tools_demo.py --json
 python scripts/run_mcp_agent_demo.py
 ```
 
-Environment:
+## Environment
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `MAS_TOOL_BACKEND` | `local` | Quant node uses in-process or MCP stdio |
-| `MAS_MCP_DOC_SEARCH` | `auto` | `milvus` / `keyword` / `auto` for document-search server |
+| Variable | Production recommendation | Meaning |
+|----------|---------------------------|---------|
+| `MAS_TOOL_BACKEND` | **`local`** | `mcp` only if you explicitly want stdio for ratio demos |
+| `MAS_MCP_DOC_SEARCH` | `keyword` or leave unset for demos | Sidecar search mode; irrelevant to production RAG |
 
 See also `mcp_layer/README.md` and `mcp_layer/cursor-mcp.example.json`.

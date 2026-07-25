@@ -1,297 +1,164 @@
-# LumenFin Agent
+# LumenFin
 
-> Evidence-grounded multi-agent financial diligence workbench (not a chat wrapper).
+**A Trustworthy Financial Research Agent**
 
-Traceable LangGraph workflow | Hybrid Milvus RAG | AST-safe metrics | Offline test harness
+LumenFin turns a research query and optional SEC filings into an evidence-backed
+diligence report. It combines issuer-only entity resolution, SEC / market
+financial grounding, claim → evidence binding and an independent FinAgentBench
+reliability gate.
 
-[Chinese overview](docs/README_zh.md) | [Quick Start](#quick-start) | [Architecture decisions](docs/architecture_decisions.md)
+Release candidate: `0.1.0rc1` | FinRun schema: `1.0` | FinAgentBench pin:
+`v0.1.0-rc.1`
+Project status: **Release Candidate / Internal Portfolio Release**
 
----
-
-## What it is
-
-LumenFin turns **user queries and uploaded financial PDFs** into a **structured diligence report** through an explicit LangGraph pipeline:
-
-- Each step is logged to `audit_log` and exported as JSON artifacts.
-- Numeric ratios are computed by an **AST-safe expression engine**, not by the LLM.
-- PDF evidence is retrieved via **Milvus Lite hybrid RAG** (vector + keyword + RRF) with page citations.
-- Missing data triggers **replanner / degraded mode** instead of silent hallucination.
-
-LumenFin can also export its run state into the neutral `FinRun` schema used by
-FinAgentBench:
-
-```powershell
-python run_demo.py --query "Compare Apple and Microsoft FY2025 financial performance, supply chain risk, and market data quality." --thread-id lumenfin-e2e --output-dir outputs
-$state = Get-ChildItem outputs\lumenfin-e2e_*_state.json | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-python scripts\export_finrun.py $state.FullName --out outputs\lumenfin-e2e-finrun.json
-```
-
-The benchmark project can then evaluate either the raw LumenFin `*_state.json`
-with `--adapter lumenfin` or the exported `FinRun` JSON. This keeps LumenFin as
-the generation/runtime project and FinAgentBench as the downstream reliability
-gate.
+[Docs index](docs/README.md) | [Architecture](docs/FINAL_ARCHITECTURE.md) |
+[Limitations](docs/PRODUCTION_LIMITATIONS.md) |
+[Demo guide](docs/DEMO_GUIDE.md)
 
 ---
 
-## Positioning (vs. a RAG chatbot)
+## Why this project
 
-| Dimension | Typical RAG chatbot | LumenFin |
-|-----------|---------------------|--------------|
-| Orchestration | Single prompt / ReAct loop | LangGraph explicit state machine |
-| Numbers | Model narration | `quant` node AST evaluation |
-| Evidence | Optional citations | Hybrid RAG + `rag_evidence` + page cites |
-| Quality | Subjective reading | Golden eval / RAG metrics / trace scorer |
-| Failure | Hallucinate or crash | Replanner -> degraded mode |
+Typical financial RAG demos often:
 
----
+- pull peer companies out of a 10-K body;
+- compute ratios from unsupported numbers;
+- emit fluent claims without citations;
+- invent precision when data is missing;
+- look correct when only the final answer is judged.
+
+LumenFin is built to make those failure modes visible and fail closed.
+
+## Key capabilities
+
+- SEC 10-K / Company Facts and live market snapshots
+- Issuer-only entity resolution and multi-company isolation
+- Hybrid RAG with structured financial facts
+- Verified claim objects bound to evidence before synthesis
+- Fail-closed `incomplete_data` when fundamentals are absent
+- Request-scoped runtime (concurrent issuer isolation)
+- FinRun export evaluated by FinAgentBench
 
 ## Architecture
 
-```mermaid
-flowchart TB
-  subgraph input [Input]
-    Q[User Query]
-    PDF[Uploaded PDF]
-  end
-
-  subgraph graph [LangGraph Pipeline]
-    IG[Input Guardrail]
-    QP[Query Planner]
-    SV[Supervisor]
-    RT[Retrieval]
-    QN[Quantitative Analyst]
-    PS[Psychologist]
-    CR[Critic]
-    RP2[Repair router-retry]
-    RP[Replanner]
-    SY[Synthesizer]
-  end
-
-  subgraph output [Artifacts]
-    RPT[report.md]
-    AUD[audit.json]
-    ST[state.json]
-    MAN[manifest.json]
-  end
-
-  Q --> IG
-  PDF --> IG
-  IG --> QP --> SV --> RT --> QN --> PS --> CR
-  CR -->|pass| SY
-  CR -->|needs fix| RP2
-  RP2 --> RT
-  RP2 --> QN
-  RP2 --> PS
-  CR -.->|max iterations| SY
-  RT -.->|data gap| RP
-  QN -.->|data gap| RP
-  RP -.->|retry| RT
-  RP -.->|give up| SY
-  SY --> RPT
-  SY --> AUD
-  SY --> ST
-  SY --> MAN
-```
-
-**Repair note:** `repair` is an **evaluator-router-retry prototype** (routes back to retrieval/quant/sentiment based on critic findings). It is not yet a full LLM-based repair policy that rewrites queries or patches data.
-
-**Retrieval detail:** PDF -> page chunks -> Milvus Lite -> vector + keyword -> RRF -> `filename#p{page}` citations.
-
----
-
-## Quick Start
-
-### 0. Encoding (Windows)
-
-PowerShell on Windows may use a legacy code page; run UTF-8 setup before running the app:
-
-```powershell
-cd lumenfin-agent
-. .\scripts\ensure_utf8.ps1
-```
-
-Or use VS Code task: **Tasks -> Run Task -> Run Demo (UTF-8)**.
-
-All repository text files are UTF-8 (see `.gitattributes`, `.editorconfig`, [docs/ENCODING.md](docs/ENCODING.md)).
-
-### 1. Install (once)
-
-```powershell
-cd lumenfin-agent
-.\.venv\Scripts\pip install -e .
-.\.venv\Scripts\python -c "import lumenfin; print('OK')"
-```
-
-### 2. Configure LLM
-
-```powershell
-copy .env.example .env
-# Edit .env - set DEEPSEEK_API_KEY=sk-...
-```
-
-In `APP_ENV=dev|test`, running without a DeepSeek key uses `local-fallback`
-(good for wiring tests; weaker reports). In non-dev environments, local fallback
-is disabled unless `ALLOW_LOCAL_FALLBACK=true` is set explicitly.
-
-### 3. CLI demo
-
-```powershell
-. .\scripts\ensure_utf8.ps1
-.\.venv\Scripts\python run_demo.py --thread-id learning-001
-```
-
-Outputs under `outputs/`:
-
 ```text
-learning-001_*_report.md
-learning-001_*_audit.json
-learning-001_*_state.json
-learning-001_*_manifest.json
+Query
+  → LangGraph orchestration
+  → Retrieval / tools / hybrid RAG
+  → Issuer financial grounding
+  → Claim binder
+  → Report synthesizer
+  → FinRun export → FinAgentBench
 ```
 
-Deterministic offline demo (no external LLM or market-data API):
+```mermaid
+flowchart LR
+  Q[Query] --> O[Orchestration]
+  O --> R[Retrieval]
+  R --> G[Financial Grounding]
+  G --> C[Claim + Evidence]
+  C --> S[Synthesizer]
+  S --> F[FinRun]
+  F --> B[FinAgentBench]
+```
+
+Details: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)
+
+## Reliability results
+
+Observed on the current controlled RC pack (not a universal accuracy claim):
+
+| Gate | Result |
+|------|--------|
+| Live RC pack | 8/8 PASS |
+| Completed-case FAB mean | 92.97 |
+| Entity / numeric / evidence floors | 100 / 100 / 100 |
+| Mutation detection | 4/4 |
+| Offline unit tests | 267 PASS, 1 skipped |
+
+Evidence: [reports/current/LumenFin_RC_Final_Reliability_Report.md](reports/current/LumenFin_RC_Final_Reliability_Report.md) |
+[reports/current/Joint_Compatibility_Report.md](reports/current/Joint_Compatibility_Report.md)
+
+## Quick start
+
+Supported environment: **Python 3.12** (CI). Local 3.11 may work but is not
+the release pin. Prefer the lockfile install path below.
 
 ```powershell
-.\.venv\Scripts\python scripts\run_portfolio_demo.py --write
-```
-
-This prints a compact JSON summary with workflow status, companies, evaluator score, audit steps, and exported artifact paths.
-
-### 4. Web UI + PDF upload
-
-```powershell
-. .\scripts\ensure_utf8.ps1
-.\.venv\Scripts\python start_api.py
-```
-
-| URL | Purpose |
-|-----|---------|
-| http://127.0.0.1:8000 | Web UI |
-| http://127.0.0.1:8000/docs | OpenAPI |
-
-HITL: ambiguous queries may return `workflow_status: needs_clarification`; resume with `POST /api/v1/clarify`. State is persisted in **SQLite** (`workflow_checkpoints`) so API restart can resume. See [docs/HITL_CLARIFICATION.md](docs/HITL_CLARIFICATION.md).
-
-Structured metrics (no PDF): `POST /api/v1/analyze-data` with a `company_metrics` object keyed by company name.
-
-```json
-{
-  "query": "Compare FY2025 margins",
-  "company_metrics": {
-    "NVIDIA": { "revenue_2025": 130.5, "ebitda_2025": 75.2 }
-  }
-}
-```
-
-### 5. Tests and eval
-
-Offline tests (mock LLM + fake market data, no external API):
-
-```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-lock.txt
+.\.venv\Scripts\python -m pip install -e . --no-deps
+copy .env.example .env
 .\.venv\Scripts\python scripts\run_tests.py
 ```
 
-Optional live integration test (requires DeepSeek key in `.env`):
+Offline reliability demo (sibling FinAgentBench repo):
 
 ```powershell
-$env:RUN_INTEGRATION_TESTS = "1"
-.\.venv\Scripts\python scripts\run_tests.py --integration
+cd ..\finagentbench-demo
+python scripts\run_offline_demo.py
+python scripts\validate_cross_repo.py --profile ci
 ```
 
-Eval scripts:
+Live configuration needs `DEEPSEEK_API_KEY`, optional DashScope embedding key,
+and `SEC_USER_AGENT` outside `dev`/`test`. See
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+Supported validation commands:
+[docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md).
+
+Full live RC pack (requires live providers; do not confuse infra failure with
+Agent failure):
 
 ```powershell
-.\.venv\Scripts\python scripts\run_golden_eval.py --write
-.\.venv\Scripts\python scripts\run_rag_eval.py
+cd ..\finagentbench-demo
+python scripts\run_rc_validation.py --help
+python scripts\run_rc_validation.py --dry-run
+python scripts\run_rc_validation.py
 ```
 
-`run_golden_eval.py` is intended as a live-quality regression check. It may call the configured LLM and market-data provider; use `run_portfolio_demo.py --write` for a deterministic offline portfolio demo.
-
----
-
-## Capabilities
-
-| Area | What is implemented |
-|------|---------------------|
-| Orchestration | LangGraph `StateGraph`, conditional edges, SQLite HITL checkpoint |
-| Hybrid RAG | Milvus Lite + keyword + RRF; page-level citations in state |
-| Deterministic quant | AST-safe formulas for margins, intensity, derived ratios |
-| Offline tests | 85+ unit tests; default harness avoids DeepSeek/Yahoo |
-| RAG metrics | Recall@K, MRR, citation coverage via `run_rag_eval.py` |
-| HITL | Clarification pause + `/clarify` resume; **SQLite-backed** checkpoint |
-| Run manifest | `*_manifest.json` with latency, tokens, evaluator, `data_sources` |
-| Offline portfolio demo | `scripts/run_portfolio_demo.py --write` produces a deterministic offline report + eval artifacts |
-| Input guardrail | PDF injection pattern scan (EN + Unicode CJK patterns) |
-| Parallel fan-out | Per-company thread pool in retrieval / quant / sentiment |
-| Telemetry | `audit_log` latency/tokens on **all pipeline nodes** |
-| Repair loop | Critic-driven router-retry prototype (max 2 iterations) |
-| Structured ingest | JSON metrics API (`/api/v1/analyze-data`) + JSON/CSV/Excel/Markdown file upload |
-| Tool transport | `local` in-process or `mcp` stdio for quant ratios |
-| MCP tool layer | `mcp_layer/servers` + `scripts/run_mcp_tools_demo.py` |
-
-### Non-goals (v0.3)
-
-- Production multi-tenant auth / RBAC (local demos may leave `MAS_API_KEY` empty when `APP_ENV=dev|test`; non-dev requires a key)
-- Production defaults to `DATA_MODE=live` and disables local LLM fallback unless explicitly overridden for a demo.
-- Full LangGraph Postgres channel saver (snapshot checkpoint only; compose Postgres is optional infra, not a completed multi-tenant store)
-- Shared Milvus Lite across API + CLI + worker processes (Lite uses a single-writer file lock; production needs a real Milvus service)
-- Image/chart OCR upload (use PDF or structured files)
-- Investment advice or trade execution
-- Silent sample fundamentals in `DATA_MODE=live` (demo mode keeps the sample DB and labels it explicitly)
-
-See [docs/architecture_decisions.md](docs/architecture_decisions.md) for design rationale.
-
-### MCP tool layer
-
-Financial primitives are also exposed as MCP servers under `mcp_layer/` (reusable outside LangGraph).
-
-```powershell
-.\.venv\Scripts\python scripts\run_mcp_tools_demo.py
-.\.venv\Scripts\python scripts\run_mcp_agent_demo.py
-```
-
-See [docs/MCP.md](docs/MCP.md).
-
----
-
-## Project layout
+## Example workflow: NVIDIA 10-K
 
 ```text
-run_demo.py / start_api.py
-src/lumenfin/
-  graph.py          # LangGraph wiring
-  agents.py         # node implementations
-  rag/              # Milvus hybrid retrieval
-  input_guardrail.py
-scripts/run_tests.py
-outputs/            # generated artifacts (gitignored)
+Query: Analyze NVIDIA using the uploaded FY2025 10-K
+  → companies == ["NVIDIA"]
+  → SEC grounding fills AST-computable fundamentals
+  → verified claims with evidence
+  → report citations / provenance
+  → FinAgentBench issuer gate
 ```
 
----
+Interview demos A/B/C: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
 
-## Further reading
+## Repository structure
 
-- [Architecture decisions](docs/architecture_decisions.md)
-- [Chinese overview](docs/README_zh.md)
-- [Milvus RAG design](docs/RAG_MILVUS.md)
-- [PDF input guardrail](docs/INPUT_GUARDRAIL.md)
-- [HITL clarification](docs/HITL_CLARIFICATION.md)
-- [Evaluation strategy](docs/evaluation_strategy.md)
+```text
+src/lumenfin/          Agent runtime, grounding, claims, FinRun, RAG
+tests/                 Unit and reliability regression tests
+tests/fixtures/sec/    Minimized manifested SEC extracts
+scripts/               Supported tests, diagnostics and fixture builders
+docs/                  Current architecture and guides
+reports/current/       Authoritative RC evidence
+reports/history/       Superseded engineering evidence
+tools/archived_audits/ Unsupported historical runners
+mcp_layer/             Optional MCP boundary (not production PDF RAG)
+fixtures/stress/       Small synthetic stress PDFs
+```
 
----
+## Limitations
 
-## Tech stack
+- Ready for **controlled** production deployment only
+- Milvus Lite and SQLite are not HA multi-tenant infrastructure
+- External LLM / embedding / SEC / Yahoo availability and quotas apply
+- Not an automated investment or legal decision system
+- No public license grant yet; repository is internal/portfolio-oriented
+- PyMuPDF (AGPL/commercial terms) blocks public Docker image redistribution
+  until an explicit compliance decision is made
 
-| Layer | Choice |
-|-------|--------|
-| Orchestration | LangGraph |
-| LLM | DeepSeek + local fallback |
-| Vector DB | Milvus Lite (no Docker) |
-| PDF | PyMuPDF |
-| API | FastAPI |
-| Persistence | SQLite |
-
----
+Full boundary: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 
 ## License / disclaimer
 
-AI-generated research output for demonstration only. Not investment advice.
+No public open-source license has been selected. Research output is for
+engineering evaluation only and is **not investment advice**.
+Third-party and SEC fixture notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

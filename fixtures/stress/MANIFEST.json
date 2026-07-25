@@ -1,5 +1,5 @@
 {
-  "root": "C:\\a_project\\Projects\\lumenfin-agent\\fixtures\\stress",
+  "root": "fixtures/stress",
   "files": [
     "MANIFEST.json",
     "alibaba_research_note.md",

@@ -122,3 +122,14 @@ graph memory extension -> Neo4j
 ```
 
 The project does not require every infrastructure component to run for the core workflow to be useful.
+
+## 10. Reliability Layers (RC)
+
+Current production reliability is layered (see [ARCHITECTURE_INDEX.md](ARCHITECTURE_INDEX.md)):
+
+1. **Issuer isolation** — uploads expand `issuer_companies` only (no peer fan-out).
+2. **Financial Grounding** — issuer SEC/Yahoo fills AST gaps when uploads are incomplete; `prefer_uploaded_only` still fail-closed.
+3. **Claim → Evidence Binding** — `claim_binder` verifies claims structurally; synthesizer consumes verified claims only.
+4. **Fail-closed reporting** — `incomplete_data` withholds invented ratios and verified numeric claims.
+
+Evaluation remains external via FinAgentBench on canonical FinRun export. Do not lower bench thresholds to pass releases.
