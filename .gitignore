@@ -64,3 +64,9 @@ docs/DEMO.md
 docs/MY_TEST_QUERIES.md
 docs/WHY_NOT_A_TOY.md
 docs/ADR.md
+docs/portfolio/
+
+# Regenerated local stress PDFs (tracked corpus remains explicit)
+fixtures/stress/apple_msft_fy2025_table.pdf
+fixtures/stress/apple_msft_fy2025_table_zh.pdf
+fixtures/stress/tsmc_fy2025_table.pdf

@@ -1,11 +1,34 @@
 # LumenFin RC Final Reliability Report
 
-Generated: 2026-07-25T12:23:40.064647+00:00
+Generated: 2026-07-25T16:24:44+00:00 (live pack)
+Frozen for release evidence: 2026-07-26
 
 Release Candidate validation of **current** LumenFin + FinAgentBench.
 No new claim/citation rules. No evaluator threshold changes.
 
 Canonical path: `LumenFin → export_finrun_state() → FinAgentBench (ci)`.
+
+## Candidate code state (live pack)
+
+| Item | Value |
+|------|-------|
+| LumenFin HEAD at live run | `2e28d74` (`docs(release): record clean-clone validation evidence`) |
+| FinAgentBench HEAD at live run | `6700846` (`docs(release): record clean-clone validation evidence`) |
+| Working-tree delta at live run | process `DEEPSEEK_API_KEY` cleared so AppConfig loaded project `.env` (no Agent/case/fixture edits) |
+| Live runner | `finagentbench-demo/scripts/run_rc_validation.py` |
+| Exit | `LIVE_RC_EXIT=0` |
+
+Post-live code HEADs (no Agent/case/fixture/threshold edits): LumenFin `0f895f8` (env fail-fast), FinAgentBench `f58e479` (live-RC fallback abort). See `reports/Clean_Clone_Validation_Report.md`.
+
+## Provider honesty
+
+| Item | Observed |
+|------|----------|
+| Provider | `deepseek` (all 8 cases) |
+| Model | `deepseek-v4-flash` (all 8 cases) |
+| HTTP 401 (DeepSeek chat) | `0` |
+| `local-fallback` count | `0` |
+| DeepSeek chat HTTP 200 | ~40 |
 
 ## 1. Offline gates
 
@@ -18,152 +41,56 @@ Canonical path: `LumenFin → export_finrun_state() → FinAgentBench (ci)`.
 
 ## 2. Expanded real-company RC pack
 
-| Cases | Passed |
-|------:|-------:|
+| Cases | Judgment |
+|------:|----------|
 | 8 | **8/8** |
+| completed | **6** |
+| expected fail-closed | **2** |
 
-| Case | Scenario | Status | OK | Entities | Verified claims | Report cov | #pN | Checkable | FAB score |
-|------|----------|--------|:--:|----------|----------------:|-----------:|----:|----------:|----------:|
-| Apple live | issuer_live | `completed` | Y | `['Apple']` | 13 | 1.0 | 0 | 3 | 92.97 |
-| NVIDIA 10-K PDF | issuer_pdf | `completed` | Y | `['NVIDIA']` | 13 | 1.0 | 36 | 3 | 92.97 |
-| Tesla live | issuer_live | `completed` | Y | `['Tesla']` | 13 | 1.0 | 0 | 3 | 92.97 |
-| Microsoft long 10-K | long_document | `completed` | Y | `['Microsoft']` | 8 | 1.0 | 13 | 2 | 92.97 |
-| Compare Apple vs Microsoft | multi_company | `completed` | Y | `['Apple', 'Microsoft']` | 23 | 1.0 | 0 | 5 | 92.97 |
-| Compare NVIDIA vs AMD | multi_company | `completed` | Y | `['NVIDIA', 'AMD']` | 26 | 1.0 | 0 | 6 | 92.97 |
-| OpenAI fail-closed | failure_recovery | `incomplete_data` | Y | `['OpenAI']` | 1 | 0.0 | 0 | 0 | None |
-| Sparse upload-only fail-closed | failure_recovery | `incomplete_data` | Y | `['Oracle']` | 1 | 0.0 | 2 | 0 | None |
+| Case | Scenario | Status | OK | Entities | Verified claims | Report cov | Checkable | FAB score |
+|------|----------|--------|:--:|----------|----------------:|-----------:|----------:|----------:|
+| Apple live | issuer_live | `completed` | Y | Apple | 13 | 1.0 | 3 | 92.97 |
+| NVIDIA 10-K PDF | issuer_pdf | `completed` | Y | NVIDIA | 10 | 1.0 | 2 | 92.97 |
+| Tesla live | issuer_live | `completed` | Y | Tesla | 13 | 1.0 | 3 | 92.97 |
+| Microsoft long 10-K | long_document | `completed` | Y | Microsoft | 10 | 1.0 | 2 | 92.97 |
+| Compare Apple vs Microsoft | multi_company | `completed` | Y | Apple, Microsoft | 23 | 1.0 | 5 | 92.97 |
+| Compare NVIDIA vs AMD | multi_company | `completed` | Y | NVIDIA, AMD | 26 | 1.0 | 6 | 92.97 |
+| OpenAI fail-closed | failure_recovery | `incomplete_data` | Y | OpenAI | 1 | 0.0 | 0 | — |
+| Sparse upload-only fail-closed | failure_recovery | `incomplete_data` | Y | Oracle | 1 | 0.0 | 0 | — |
 
-## 3. Claim coverage & failure recovery
+### Floors (completed cases)
 
-### Completed diligence
+| Metric | Floor |
+|--------|------:|
+| entity_leakage | 100 |
+| numeric_correctness | 100 |
+| evidence_coverage | 100 |
+| Completed-case FAB mean | **92.97** |
 
-| Case | Bind rate | Entity claim coverage | Page-anchored | Verified in report |
-|------|----------:|----------------------:|--------------:|-------------------:|
-| Apple live | 0.9286 | 1.0 | 0 | 13/13 |
-| NVIDIA 10-K PDF | 0.9286 | 1.0 | 6 | 13/13 |
-| Tesla live | 0.9286 | 1.0 | 0 | 13/13 |
-| Microsoft long 10-K | 0.6667 | 1.0 | 1 | 8/8 |
-| Compare Apple vs Microsoft | 0.8846 | 1.0 | 0 | 23/23 |
-| Compare NVIDIA vs AMD | 0.9286 | 1.0 | 0 | 26/26 |
+### Fail-closed honesty
 
-### Fail-closed
+OpenAI and sparse cases: `incomplete_data`, judgment ok, checkable=0, no invented numeric claims.
 
-| Case | Status | Checkable | Invented numeric? |
-|------|--------|----------:|:-----------------:|
-| OpenAI fail-closed | `incomplete_data` | 0 | N |
-| Sparse upload-only fail-closed | `incomplete_data` | 0 | N |
+## 3. Verdict
 
-## 4. FinAgentBench reliability (completed cases)
+**RC reliability gate: PASS.**
+**LIVE_RC_EXIT=0.**
 
-| Case | Score | evidence_coverage | evidence_consistency | numeric_correctness | entity_leakage |
-|------|------:|------------------:|---------------------:|--------------------:|---------------:|
-| Apple live | 92.97 | 100.0 | 100.0 | 100.0 | 100.0 |
-| NVIDIA 10-K PDF | 92.97 | 100.0 | 100.0 | 100.0 | 100.0 |
-| Tesla live | 92.97 | 100.0 | 100.0 | 100.0 | 100.0 |
-| Microsoft long 10-K | 92.97 | 100.0 | 100.0 | 100.0 | 100.0 |
-| Compare Apple vs Microsoft | 92.97 | 100.0 | 100.0 | 100.0 | 100.0 |
-| Compare NVIDIA vs AMD | 92.97 | 100.0 | 100.0 | 100.0 | 100.0 |
+## Artifacts (local, not committed)
 
-## 5. Prior phase evidence (synthesized)
+- `finagentbench-demo/outputs/lumenfin_rc_validation/validation.json`
+- `finagentbench-demo/outputs/lumenfin_rc_validation/offline_gates.json`
+- case state / finrun JSON under the same outputs tree
+
+## Prior phase evidence
 
 | Phase | Artifact | Present |
 |-------|----------|:-------:|
-| baseline | `C:\a_project\Projects\lumenfin-agent\LumenFin_Final_Reliability_Baseline.md` | Y |
-| grounding | `C:\a_project\Projects\lumenfin-agent\LumenFin_Financial_Grounding_Validation.md` | Y |
-| claim_binding | `C:\a_project\Projects\lumenfin-agent\LumenFin_Claim_Evidence_Binding_Report.md` | Y |
-| hardening | `C:\a_project\Projects\lumenfin-agent\LumenFin_Production_Hardening_Report.md` | Y |
-| e2e | `C:\a_project\Projects\lumenfin-agent\LumenFin_E2E_Audit_Report.md` | Y |
-| regression | `C:\a_project\Projects\lumenfin-agent\LumenFin_Regression_Comparison.md` | Y |
+| grounding | `reports/history/LumenFin_Financial_Grounding_Validation.md` | Y |
+| claim_binding | `reports/history/LumenFin_Claim_Evidence_Binding_Report.md` | Y |
+| hardening | `reports/history/LumenFin_Production_Hardening_Report.md` | Y |
+| e2e | `reports/history/LumenFin_E2E_Audit_Report.md` | Y |
+| regression | `reports/history/LumenFin_Regression_Comparison.md` | Y |
+| rc_current | `reports/current/LumenFin_RC_Final_Reliability_Report.md` | Y |
 
-Key prior results carried into RC:
-- Financial Grounding: NVDA checkable 0→3, numeric 100, issuer-only retained
-- Claim Binding: NVDA `#pN` 6→36; verified claims rendered inline (13/13)
-- Production Hardening: 5/5 (long MSFT, AAPL–MSFT, long AAPL, OpenAI, sparse)
-
-## 6. Gate detail
-
-### Apple live
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=completed expect=completed
-- **PASS** `claim_coverage_min` — verified=13 report_cov=1.0
-- **PASS** `long_or_metric_stability` — checkable=3 markers=0
-- **PASS** `fab_evidence_coverage` — 100.0
-- **PASS** `fab_numeric` — 100.0
-- **PASS** `fab_no_entity_leak` — 100.0
-
-### NVIDIA 10-K PDF
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=completed expect=completed
-- **PASS** `claim_coverage_min` — verified=13 report_cov=1.0
-- **PASS** `long_or_metric_stability` — checkable=3 markers=36
-- **PASS** `fab_evidence_coverage` — 100.0
-- **PASS** `fab_numeric` — 100.0
-- **PASS** `fab_no_entity_leak` — 100.0
-
-### Tesla live
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=completed expect=completed
-- **PASS** `claim_coverage_min` — verified=13 report_cov=1.0
-- **PASS** `long_or_metric_stability` — checkable=3 markers=0
-- **PASS** `fab_evidence_coverage` — 100.0
-- **PASS** `fab_numeric` — 100.0
-- **PASS** `fab_no_entity_leak` — 100.0
-
-### Microsoft long 10-K
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=completed expect=completed
-- **PASS** `claim_coverage_min` — verified=8 report_cov=1.0
-- **PASS** `long_or_metric_stability` — checkable=2 markers=13
-- **PASS** `fab_evidence_coverage` — 100.0
-- **PASS** `fab_numeric` — 100.0
-- **PASS** `fab_no_entity_leak` — 100.0
-
-### Compare Apple vs Microsoft
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=completed expect=completed
-- **PASS** `claim_coverage_min` — verified=23 report_cov=1.0
-- **PASS** `per_entity_numeric_claims` — {'Apple': {'verified': 13, 'numeric': 8, 'risk': 4, 'investment': 1}, 'Microsoft': {'verified': 10, 'numeric': 6, 'risk': 4, 'investment': 0}}
-- **PASS** `entity_set` — entities=['Apple', 'Microsoft']
-- **PASS** `fab_evidence_coverage` — 100.0
-- **PASS** `fab_numeric` — 100.0
-
-### Compare NVIDIA vs AMD
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=completed expect=completed
-- **PASS** `claim_coverage_min` — verified=26 report_cov=1.0
-- **PASS** `per_entity_numeric_claims` — {'NVIDIA': {'verified': 13, 'numeric': 8, 'risk': 4, 'investment': 1}, 'AMD': {'verified': 13, 'numeric': 8, 'risk': 4, 'investment': 1}}
-- **PASS** `entity_set` — entities=['NVIDIA', 'AMD']
-- **PASS** `fab_evidence_coverage` — 100.0
-- **PASS** `fab_numeric` — 100.0
-
-### OpenAI fail-closed
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=incomplete_data expect=incomplete_data
-- **PASS** `fail_closed_no_checkable` — checkable=0
-- **PASS** `no_invented_numeric_claims` — {'OpenAI': {'verified': 1, 'numeric': 0, 'risk': 1, 'investment': 0}}
-- **PASS** `recovery_completed_path` — status=incomplete_data
-
-### Sparse upload-only fail-closed
-
-- **PASS** `no_crash` — ok
-- **PASS** `expected_workflow` — got=incomplete_data expect=incomplete_data
-- **PASS** `fail_closed_no_checkable` — checkable=0
-- **PASS** `no_invented_numeric_claims` — {'Oracle': {'verified': 1, 'numeric': 0, 'risk': 1, 'investment': 0}}
-- **PASS** `recovery_completed_path` — status=incomplete_data
-
-## 7. Verdict
-
-**RC reliability gate: PASS.**
-
-## Artifacts
-
-- `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_rc_validation\validation.json`
-- `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_rc_validation\offline_gates.json`
-- FinRuns: `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_rc_validation\finrun`
+This report intentionally omits API keys, Authorization headers, `.env` contents, and user-home absolute paths.

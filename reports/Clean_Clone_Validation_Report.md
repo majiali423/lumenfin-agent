@@ -1,35 +1,35 @@
 # Clean Clone Validation Report
 
-Date: 2026-07-26  
-Method: detached git worktrees from local candidate HEADs (no `.env` / outputs / DB copy)
+Date: 2026-07-26
+Method: detached git worktrees from final local HEADs (no `.env` / outputs / DB copy from developer trees)
 
-## Candidate HEADs
+## Candidate HEADs (final post-RC commits)
 
-| Repository | HEAD |
-|------------|------|
-| FinAgentBench | `e5cffe2e9fca3d7c052b2c5db193d0f6796008f6` |
-| LumenFin | `8b944f7d9927bc2a726fc57ec5b12f3c4b7ebd10` (includes fixture-path follow-up) |
+| Repository | HEAD | Subject |
+|------------|------|---------|
+| LumenFin | `0f895f85fdd3c39446900c639caaa616d9e7a756` | `fix(config): fail fast on conflicting provider credentials` |
+| FinAgentBench | `f58e47978af1badf431221bb1911c0c952b982f1` | `fix(validation): reject fallback during live RC` |
 
-Initial dual worktree run used LumenFin `f503f68`; fixture-path commit `8b944f7` was added afterward so optional SEC tests no longer depend on ignored `fixtures/e2e_real/`.
+Worktrees: clean (`status --porcelain` empty) at validation start.
 
 ## Results
 
 | Gate | Result |
 |------|--------|
-| FAB `unittest discover` | 77 tests OK |
-| FAB mutation suite | 4/4 |
+| LumenFin `tests.test_env_bootstrap_conflicts` | 4/4 OK |
+| LumenFin `scripts/run_tests.py` | **271** OK (1 skip: live integration unless `RUN_INTEGRATION_TESTS=1`) |
+| FAB `unittest discover` | **78** OK (1 skip) |
+| FAB `tests.test_rc_runner_import` | 3/3 OK |
+| FAB mutation suite | **4/4** |
 | FAB offline demo | PASS |
-| FAB import side-effect tests | 2/2 PASS |
-| LumenFin `scripts/run_tests.py` | 267 tests OK (1 skip: live integration unless `RUN_INTEGRATION_TESTS=1`) |
 | Cross-repo gate (`ci`) | PASS; both worktrees dirty=false |
 | RC `--dry-run` | PASS |
 
-## Notes
+## Live RC consistency
 
-- Offline demo / cross-repo / RC dry-run entrypoints live in FinAgentBench.
-- Clean worktrees did not copy `.env`, databases, Milvus state, or full SEC downloads.
-- Remaining untracked in developer trees (not required for clean clone): inventory/cleanup plans, portfolio notes, generated stress PDFs.
+Live 8-case pack ran earlier on HEADs `2e28d74` / `6700846` with process env cleaned (`LIVE_RC_EXIT=0`).
+Delta to these final HEADs is env fail-fast + live-RC fallback abort + reports only — no Agent/case/fixture/threshold changes. Full live pack not re-run.
 
-## Judgment for Phase 6
+## Judgment
 
-Offline clean-clone gates: **PASS**. Live RC may proceed when live providers are configured.
+Final-HEAD offline clean-clone gates: **PASS**.
