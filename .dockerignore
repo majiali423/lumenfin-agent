@@ -5,6 +5,7 @@ outputs
 output
 uploads
 test_artifacts
+data
 .env
 .venv
 .cursor

@@ -5,8 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from repo_paths import finagentbench_root
+
 ROOT = Path(__file__).resolve().parents[1]
-FAB = Path(r"C:\a_project\Projects\finagentbench-demo")
+FAB = finagentbench_root()
 CASE = FAB / "fixtures/case_lumenfin_generic.json"
 
 

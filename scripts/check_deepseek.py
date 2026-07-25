@@ -35,11 +35,12 @@ def main() -> int:
     print("find_dotenv:", find_dotenv())
 
     load_dotenv(env_path, override=True)
-    key = os.getenv("DEEPSEEK_API_KEY", "")
-    base = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
+    base = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
+    model = (os.getenv("DEEPSEEK_MODEL") or "deepseek-chat").strip()
 
-    print("DEEPSEEK_API_KEY:", diag_key(key))
+    key_diag = diag_key(key)
+    print("DEEPSEEK_API_KEY:", key_diag)
     print("DEEPSEEK_BASE_URL:", base)
     print("DEEPSEEK_MODEL:", model)
 
@@ -49,8 +50,8 @@ def main() -> int:
                 val = line.split("=", 1)[1] if "=" in line else ""
                 print("raw .env value:", diag_key(val))
 
-    if not key or "your-key" in key.lower():
-        print("\nFAIL: fix DEEPSEEK_API_KEY in .env first")
+    if not key_diag.startswith("OK"):
+        print(f"\nFAIL: fix DEEPSEEK_API_KEY in .env first ({key_diag})")
         return 1
 
     url = f"{base.rstrip('/')}/chat/completions"
@@ -73,6 +74,8 @@ def main() -> int:
             print("SUCCESS, reply:", content[:80])
             return 0
         print("FAIL body:", resp.text[:300])
+        if resp.status_code in {401, 403}:
+            print("HINT: 401/403 means DEEPSEEK_API_KEY is wrong — not MAS_API_KEY.")
         return 1
     except Exception as exc:
         print("FAIL exception:", type(exc).__name__, exc)

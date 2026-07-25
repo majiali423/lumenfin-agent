@@ -17,6 +17,7 @@ from lumenfin.rag.embeddings import DeterministicEmbeddingProvider
 from lumenfin.rag.hybrid_retriever import HybridEvidenceRetriever
 from lumenfin.rag.metrics import evaluate_retrieval_case, summarize_eval_results
 from lumenfin.rag.milvus_store import MilvusRAGStore
+from lumenfin.rag.telemetry import evaluate_rag_gates
 from lumenfin.stdio import configure_stdio_utf8
 
 
@@ -30,6 +31,16 @@ def main() -> int:
     parser.add_argument("--cases", default=str(ROOT / "data" / "eval_rag" / "rag_cases.json"))
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--json-out", default="")
+    parser.add_argument(
+        "--gate",
+        action="store_true",
+        help="Fail when summary metrics fall below release thresholds.",
+    )
+    parser.add_argument("--min-pass-rate", type=float, default=1.0)
+    parser.add_argument("--min-mean-recall-at-3", type=float, default=1.0)
+    parser.add_argument("--min-mean-citation-coverage", type=float, default=1.0)
+    parser.add_argument("--min-mean-mrr", type=float, default=0.5)
+    parser.add_argument("--min-mean-groundedness", type=float, default=0.2)
     args = parser.parse_args()
 
     cases_path = Path(args.cases)
@@ -93,9 +104,26 @@ def main() -> int:
     print(f"  mean citation coverage: {summary['mean_citation_coverage']:.0%}")
     print(f"  mean groundedness: {summary['mean_groundedness']:.3f}")
 
+    gate = evaluate_rag_gates(
+        summary,
+        min_pass_rate=args.min_pass_rate,
+        min_mean_recall_at_3=args.min_mean_recall_at_3,
+        min_mean_citation_coverage=args.min_mean_citation_coverage,
+        min_mean_mrr=args.min_mean_mrr,
+        min_mean_groundedness=args.min_mean_groundedness,
+    )
+    if args.gate:
+        print("\nRAG release gate")
+        for name, item in gate["checks"].items():
+            mark = "PASS" if item["actual"] + 1e-9 >= item["minimum"] else "FAIL"
+            print(f"  [{mark}] {name}: actual={item['actual']:.3f} min={item['minimum']:.3f}")
+        if not gate["passed"]:
+            print(f"  Gate failures: {', '.join(gate['failures'])}")
+
     if args.json_out:
         payload = {
             "summary": summary,
+            "gate": gate,
             "cases": [result.to_dict() for result in results],
         }
         out_path = Path(args.json_out)
@@ -103,6 +131,8 @@ def main() -> int:
         out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         print(f"\nWrote metrics to {out_path}")
 
+    if args.gate:
+        return 0 if gate["passed"] else 1
     return 0 if summary["passed"] == summary["cases"] else 1
 
 

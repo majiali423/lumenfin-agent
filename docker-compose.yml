@@ -1,4 +1,6 @@
-version: "3.9"
+# Production-oriented stack: API + analysis worker + Postgres/Redis/Neo4j.
+# MCP servers are intentionally NOT included — optional demo side channel only
+# (see docs/MCP.md). Production evidence RAG is in-process LangGraph Retrieval.
 
 services:
   lumenfin-api:
@@ -6,22 +8,25 @@ services:
     ports:
       - "8000:8000"
     environment:
+      APP_ENV: production
+      DATA_MODE: live
       MAS_HOST: 0.0.0.0
       MAS_PORT: 8000
       MAS_OUTPUT_DIR: /app/outputs
       MAS_UPLOAD_DIR: /app/uploads
       MAS_DB_PATH: /app/data/lumenfin.db
-      MAS_DATABASE_URL: postgresql+psycopg://mas_user:mas_password@postgres:5432/lumenfin
+      MAS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mas_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lumenfin}
       MAS_REDIS_URL: redis://redis:6379/0
       MAS_REDIS_QUEUE_NAME: finance-analysis
       MAS_NEO4J_URI: bolt://neo4j:7687
       MAS_NEO4J_USERNAME: neo4j
-      MAS_NEO4J_PASSWORD: neo4j_password
+      MAS_NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
       MAS_MARKET_DATA_PROVIDER: yahoo
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
-      MAS_API_KEY: ${MAS_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:?Set SEC_USER_AGENT}
+      MAS_API_KEY: ${MAS_API_KEY:?Set MAS_API_KEY}
     volumes:
       - ./outputs:/app/outputs
       - ./data:/app/data
@@ -35,19 +40,22 @@ services:
     build: .
     command: ["python", "start_worker.py"]
     environment:
+      APP_ENV: production
+      DATA_MODE: live
       MAS_OUTPUT_DIR: /app/outputs
       MAS_UPLOAD_DIR: /app/uploads
       MAS_DB_PATH: /app/data/lumenfin.db
-      MAS_DATABASE_URL: postgresql+psycopg://mas_user:mas_password@postgres:5432/lumenfin
+      MAS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mas_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lumenfin}
       MAS_REDIS_URL: redis://redis:6379/0
       MAS_REDIS_QUEUE_NAME: finance-analysis
       MAS_NEO4J_URI: bolt://neo4j:7687
       MAS_NEO4J_USERNAME: neo4j
-      MAS_NEO4J_PASSWORD: neo4j_password
+      MAS_NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
       MAS_MARKET_DATA_PROVIDER: yahoo
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:?Set SEC_USER_AGENT}
     volumes:
       - ./outputs:/app/outputs
       - ./data:/app/data
@@ -60,25 +68,18 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: lumenfin
-      POSTGRES_USER: mas_user
-      POSTGRES_PASSWORD: mas_password
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-lumenfin}
+      POSTGRES_USER: ${POSTGRES_USER:-mas_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
 
   redis:
     image: redis:7
-    ports:
-      - "6379:6379"
 
   neo4j:
     image: neo4j:5
     environment:
-      NEO4J_AUTH: neo4j/neo4j_password
-    ports:
-      - "7474:7474"
-      - "7687:7687"
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
     volumes:
       - ./data/neo4j:/data

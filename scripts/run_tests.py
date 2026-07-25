@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -14,6 +15,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+
+# Pin CI RAG profile before any lumenfin import / dotenv load from discover().
+from lumenfin.rag.profiles import apply_ci_rag_env
+
+apply_ci_rag_env()
 
 
 def configure_quiet_test_logging() -> None:
@@ -39,8 +45,6 @@ def main() -> int:
 
     configure_quiet_test_logging()
     if args.integration:
-        import os
-
         os.environ["RUN_INTEGRATION_TESTS"] = "1"
 
     loader = unittest.TestLoader()

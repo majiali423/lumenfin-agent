@@ -21,9 +21,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from lumenfin.rag.profiles import apply_showcase_rag_env
 from lumenfin.stdio import configure_stdio_utf8
+from repo_paths import finagentbench_root
 
-FAB = Path(r"C:\a_project\Projects\finagentbench-demo")
+FAB = finagentbench_root()
 GENERIC_CASE = FAB / "fixtures/case_lumenfin_generic.json"
 OUT = ROOT / "outputs" / "e2e_stress"
 FIX = ROOT / "fixtures" / "stress"
@@ -61,7 +63,7 @@ class CaseResult:
 def _run(cmd: list[str], cwd: Path, timeout: int = 900) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.setdefault("PYTHONUTF8", "1")
-    env.setdefault("MAS_MILVUS_ISOLATE", "true")
+    apply_showcase_rag_env(env, overwrite=False)
     # Caller may already force DATA_MODE=live via .env
     return subprocess.run(
         cmd,

@@ -21,8 +21,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.stdio import configure_stdio_utf8
+from repo_paths import finagentbench_root
 
-FAB = Path(r"C:\a_project\Projects\finagentbench-demo")
+FAB = finagentbench_root()
 GENERIC_CASE = FAB / "fixtures/case_lumenfin_generic.json"
 DILIGENCE_CASE = FAB / "fixtures/case_lumenfin_diligence.json"
 OUT = ROOT / "outputs" / "e2e_linked"
@@ -365,7 +366,7 @@ def _scenario_chinese_tencent() -> ScenarioResult:
     incomplete = result.workflow_status == "incomplete_data"
     audit = list(state.get("audit_log") or [])
     steps_seen = [str(a.get("step") or a.get("agent") or "") for a in audit]
-    skipped_quant = "quant" not in steps_seen and "critic" not in steps_seen and "replanner" not in steps_seen
+    skipped_quant = "quant" not in steps_seen and "critic" not in steps_seen and "appendix_replan" not in steps_seen and "replanner" not in steps_seen
     result.notes.append(
         f"fail_loud incomplete={incomplete} gate_passed={result.gate_passed} "
         f"companies={result.companies} steps={steps_seen}"

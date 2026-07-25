@@ -1,16 +1,4 @@
-langgraph
-networkx
-fastapi
-uvicorn
-httpx
-python-dotenv
-sqlalchemy
-psycopg[binary]
-redis
-rq
-neo4j
-pymupdf
-python-multipart
-yfinance
-pymilvus[milvus_lite]>=2.4.0
-milvus-lite>=3.0
+# Compatibility entry point. pyproject.toml is the dependency source of truth;
+# requirements-lock.txt is generated with:
+#   python -m piptools compile pyproject.toml -o requirements-lock.txt --strip-extras
+-r requirements-lock.txt
