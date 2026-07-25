@@ -27,8 +27,8 @@ def compute_ratio_tool(formula: str, variables: dict[str, float]) -> dict:
     """Evaluate a safe arithmetic formula.
 
     Args:
-        formula: Expression like r_and_d_2025 / revenue_2025
-        variables: Numeric bindings, e.g. r_and_d_2025=33.4, revenue_2025=412.0
+        formula: Expression like r_and_d / revenue
+        variables: Numeric bindings, e.g. r_and_d=33.4, revenue=412.0
     """
     return compute_ratio(formula, variables)
 

@@ -28,7 +28,7 @@ def query_company_metrics_tool(company: str, metrics: list[str] | None = None) -
 
     Args:
         company: Company name, e.g. Apple, Microsoft, NVIDIA.
-        metrics: Optional metric keys such as revenue_2025, r_and_d_2025.
+        metrics: Optional metric keys such as revenue, r_and_d (legacy *_2025 aliases accepted).
     """
     return query_company_metrics(company, metrics)
 

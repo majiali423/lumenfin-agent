@@ -1,4 +1,4 @@
-"""Document search for MCP: keyword notes and optional Milvus hybrid RAG."""
+"""Document search for MCP: research-notes sidecar (not production upload RAG)."""
 from __future__ import annotations
 
 import os
@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .doc_context import DOCS_DIR, load_research_document_contexts, resolve_company_hint
+from .scope import SCOPE_DOCUMENT_SEARCH, stamp_scope
 
 _SESSION_ID = "mcp-document-search"
 
@@ -18,7 +19,16 @@ def _tokenize(text: str) -> set[str]:
 def _keyword_search(query: str, top_k: int, docs_dir: Path) -> dict[str, Any]:
     root = docs_dir
     if not root.exists():
-        return {"query": query, "hits": [], "source": "mcp_layer.data.docs", "warning": "docs directory missing"}
+        return stamp_scope(
+            {
+                "query": query,
+                "hits": [],
+                "source": "mcp_layer.data.docs",
+                "warning": "docs directory missing",
+                "retrieval_mode": "keyword",
+            },
+            SCOPE_DOCUMENT_SEARCH,
+        )
 
     query_tokens = _tokenize(query)
     hits: list[dict[str, Any]] = []
@@ -47,13 +57,17 @@ def _keyword_search(query: str, top_k: int, docs_dir: Path) -> dict[str, Any]:
             )
 
     hits.sort(key=lambda item: item["score"], reverse=True)
-    return {
-        "query": query,
-        "hits": hits[:top_k],
-        "source": "mcp_layer.data.docs",
-        "retrieval_mode": "keyword",
-        "total_candidates": len(hits),
-    }
+    return stamp_scope(
+        {
+            "query": query,
+            "hits": hits[:top_k],
+            "source": "mcp_layer.data.docs",
+            "retrieval_mode": "keyword",
+            "total_candidates": len(hits),
+            "corpus": "mcp_layer/data/docs",
+        },
+        SCOPE_DOCUMENT_SEARCH,
+    )
 
 
 def _hybrid_search(query: str, top_k: int, company: str | None, docs_dir: Path) -> dict[str, Any]:
@@ -65,7 +79,7 @@ def _hybrid_search(query: str, top_k: int, company: str | None, docs_dir: Path) 
     if retriever is None or retriever.rag_store is None:
         payload = _keyword_search(query, top_k, docs_dir)
         payload["retrieval_mode"] = "keyword_fallback"
-        payload["warning"] = "Milvus RAG unavailable; fell back to keyword search."
+        payload["warning"] = "Milvus RAG unavailable; fell back to keyword search on MCP research notes."
         return payload
 
     document_contexts = load_research_document_contexts(docs_dir)
@@ -79,6 +93,7 @@ def _hybrid_search(query: str, top_k: int, company: str | None, docs_dir: Path) 
                 company_name = context["detected_companies"][0]
                 break
     company_name = company_name or "Apple"
+    # Ephemeral index over research notes only — not DocumentIndexer / upload PDF path.
     retriever.rag_store.index_documents(document_contexts, session_id=_SESSION_ID)
     hits = retriever.retrieve_for_company(
         query=query,
@@ -96,15 +111,23 @@ def _hybrid_search(query: str, top_k: int, company: str | None, docs_dir: Path) 
         }
         for hit in hits[:top_k]
     ]
-    return {
-        "query": query,
-        "company": company_name,
-        "hits": formatted,
-        "source": "lumenfin.milvus_hybrid",
-        "retrieval_mode": "milvus_hybrid",
-        "session_id": _SESSION_ID,
-        "total_candidates": len(formatted),
-    }
+    return stamp_scope(
+        {
+            "query": query,
+            "company": company_name,
+            "hits": formatted,
+            "source": "lumenfin.milvus_hybrid_mcp_notes",
+            "retrieval_mode": "milvus_hybrid_sidecar",
+            "session_id": _SESSION_ID,
+            "total_candidates": len(formatted),
+            "corpus": "mcp_layer/data/docs",
+            "warning": (
+                "Sidecar hybrid over MCP research notes only. "
+                "Production upload PDF RAG uses DocumentIndexer + Retrieval node."
+            ),
+        },
+        SCOPE_DOCUMENT_SEARCH,
+    )
 
 
 def search_research_documents(
@@ -127,5 +150,5 @@ def search_research_documents(
     except Exception:
         payload = _keyword_search(query, top_k, root)
         payload["retrieval_mode"] = "keyword_fallback"
-        payload["warning"] = "Hybrid search failed; fell back to keyword search."
+        payload["warning"] = "Hybrid search failed; fell back to keyword search on MCP research notes."
         return payload
