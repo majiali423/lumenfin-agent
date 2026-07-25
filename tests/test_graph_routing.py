@@ -31,6 +31,7 @@ def build_test_config(root: Path) -> AppConfig:
         database_url=f"sqlite:///{db_path.as_posix()}",
         redis_url=None,
         redis_queue_name="finance-analysis-test",
+        redis_index_queue_name="rag-document-index-test",
         neo4j_uri=None,
         neo4j_username=None,
         neo4j_password=None,
@@ -50,11 +51,24 @@ def build_test_config(root: Path) -> AppConfig:
         rag_enabled=True,
         milvus_uri=str(root / "data" / f"milvus_{uuid4().hex[:8]}.db"),
         milvus_collection="lumenfin_chunks_test",
+        milvus_isolate=True,
         embedding_provider="deterministic",
         embedding_dimension=384,
         rag_top_k=5,
+        rag_index_mode="sync_on_run",
+        rag_tenant_id="test-tenant",
+        rag_require_ready=False,
+        embedding_max_retries=3,
+        embedding_backoff_seconds=0.01,
+        embedding_timeout_seconds=30.0,
+        rag_min_score=0.0,
+        rag_degrade_on_vector_error=True,
+        rag_sanitize_hits=True,
+        rag_rerank_enabled=True,
+        rag_rerank_candidates=20,
         critic_max_iterations=2,
         company_parallelism=4,
+        profile_llm_max_attempts=1,
         input_guardrail_enabled=True,
         input_guardrail_mode="sanitize",
         tool_backend="local",
@@ -64,9 +78,9 @@ def build_test_config(root: Path) -> AppConfig:
 
 
 class GraphRoutingTestCase(unittest.TestCase):
-    def test_critic_routes_to_synthesizer_when_clean(self) -> None:
+    def test_critic_routes_to_claim_binder_when_clean(self) -> None:
         state = {"compliance_findings": [], "critic_iterations": 0, "critic_max_iterations": 2}
-        self.assertEqual(route_after_critic(state), "synthesizer")
+        self.assertEqual(route_after_critic(state), "claim_binder")
 
     def test_critic_routes_to_repair_when_findings_remain(self) -> None:
         state = {
@@ -76,13 +90,13 @@ class GraphRoutingTestCase(unittest.TestCase):
         }
         self.assertEqual(route_after_critic(state), "repair")
 
-    def test_critic_routes_to_synthesizer_after_max_iterations(self) -> None:
+    def test_critic_routes_to_claim_binder_after_max_iterations(self) -> None:
         state = {
             "compliance_findings": ["Apple: missing quantitative results."],
             "critic_iterations": 2,
             "critic_max_iterations": 2,
         }
-        self.assertEqual(route_after_critic(state), "synthesizer")
+        self.assertEqual(route_after_critic(state), "claim_binder")
 
     def test_classify_repair_target_for_quant_gap(self) -> None:
         findings = ["Apple: missing quantitative results."]
@@ -103,9 +117,9 @@ class GraphRoutingTestCase(unittest.TestCase):
         state = {"critic_repair_target": "quant"}
         self.assertEqual(route_after_repair(state), "quant")
 
-    def test_retrieval_routes_to_synthesizer_on_fatal_data_gap(self) -> None:
+    def test_retrieval_routes_to_claim_binder_on_fatal_data_gap(self) -> None:
         state = {"fatal_data_gap": True, "replan_reason": "should be ignored"}
-        self.assertEqual(route_after_retrieval(state), "synthesizer")
+        self.assertEqual(route_after_retrieval(state), "claim_binder")
 
     def test_retrieval_routes_to_quant_when_healthy(self) -> None:
         state = {"fatal_data_gap": False, "replan_reason": None}

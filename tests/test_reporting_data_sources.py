@@ -9,7 +9,12 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from lumenfin.reporting import build_data_sources, build_run_manifest
+from lumenfin.reporting import (
+    build_data_sources,
+    build_run_manifest,
+    format_rag_citation_section,
+    report_contains_page_citations,
+)
 
 
 class ReportingDataSourcesTestCase(unittest.TestCase):
@@ -96,6 +101,33 @@ class ReportingDataSourcesTestCase(unittest.TestCase):
         )
         self.assertIn("data_sources", manifest)
         self.assertEqual(manifest["data_sources"]["structured"], "sample_db")
+
+    def test_format_rag_citation_section_emits_page_anchors(self) -> None:
+        lines = format_rag_citation_section(
+            {
+                "Apple": [
+                    {
+                        "citation": "apple_msft_fy2025_table.pdf#p1",
+                        "retrieval_method": "hybrid",
+                        "text": "Apple revenue $391B",
+                    }
+                ],
+                "Microsoft": [
+                    {
+                        "filename": "apple_msft_fy2025_table.pdf",
+                        "page": 1,
+                        "method": "dense",
+                        "excerpt": "Microsoft revenue $245B",
+                    }
+                ],
+            }
+        )
+        report = "\n".join(lines)
+        self.assertIn("Retrieved Document Citations", report)
+        self.assertIn("apple_msft_fy2025_table.pdf#p1", report)
+        self.assertTrue(report_contains_page_citations(report))
+        self.assertEqual(format_rag_citation_section({}), [])
+        self.assertFalse(report_contains_page_citations("no citations here"))
 
 
 if __name__ == "__main__":

@@ -57,8 +57,13 @@ class HitlWorkflowTestCase(unittest.TestCase):
             route_after_query_planner({"missing_fields": ["company"], "user_clarification": {}}),
             "await_clarification",
         )
+        # Partial clarification that leaves missing_fields should still pause.
         self.assertEqual(
             route_after_query_planner({"missing_fields": ["company"], "user_clarification": {"company": "Apple"}}),
+            "await_clarification",
+        )
+        self.assertEqual(
+            route_after_query_planner({"missing_fields": [], "user_clarification": {"company": "Apple"}}),
             "supervisor",
         )
 

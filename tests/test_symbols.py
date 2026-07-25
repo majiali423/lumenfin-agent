@@ -26,6 +26,20 @@ class SymbolDerivationTestCase(unittest.TestCase):
         symbols = derive_target_symbols(companies, query)
         self.assertEqual(symbols["NVIDIA"], "NVDA")
 
+    def test_multi_company_does_not_spray_unrelated_paren_ticker(self) -> None:
+        companies = ["NVIDIA", "AMD"]
+        query = "Compare NVIDIA and AMD (FY25) R&D"
+        symbols = derive_target_symbols(companies, query)
+        self.assertEqual(symbols["NVIDIA"], "NVDA")
+        self.assertEqual(symbols["AMD"], "AMD")
+
+    def test_known_paren_ticker_binds_to_matching_company(self) -> None:
+        companies = ["Apple", "Microsoft"]
+        query = "Compare Apple (AAPL) and Microsoft"
+        symbols = derive_target_symbols(companies, query)
+        self.assertEqual(symbols["Apple"], "AAPL")
+        self.assertEqual(symbols["Microsoft"], "MSFT")
+
 
 if __name__ == "__main__":
     unittest.main()

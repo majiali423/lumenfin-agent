@@ -29,6 +29,7 @@ class McpDocSearchTestCase(unittest.TestCase):
         payload = search_research_documents("supply chain risk", top_k=1, mode="keyword")
         self.assertEqual(payload["retrieval_mode"], "keyword")
         self.assertGreaterEqual(len(payload["hits"]), 1)
+        self.assertFalse(payload["affects_diligence_state"])
 
 
 if __name__ == "__main__":

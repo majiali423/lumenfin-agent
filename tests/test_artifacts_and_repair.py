@@ -54,9 +54,16 @@ class RepairPolicyTestCase(unittest.TestCase):
             "psychologist",
         )
 
-    def test_unknown_violation_falls_back_to_retrieval(self) -> None:
+    def test_unknown_violation_falls_back_to_quant(self) -> None:
         violations = [Violation(code="unexpected_issue", severity="low", message="unknown")]
-        self.assertEqual(resolve_repair_target(violations), "retrieval")
+        self.assertEqual(resolve_repair_target(violations), "quant")
+
+    def test_disclaimer_codes_do_not_route_to_retrieval(self) -> None:
+        violations = [
+            Violation(code="missing_risk_disclaimer", severity="high", message="disclaimer"),
+            Violation(code="missing_data_provenance", severity="medium", message="provenance"),
+        ]
+        self.assertEqual(resolve_repair_target(violations), "quant")
 
     def test_policy_table_covers_all_critic_codes(self) -> None:
         expected_codes = {
@@ -114,7 +121,7 @@ class CriticChecksTestCase(unittest.TestCase):
         )
         self.assertEqual(check_report_compliance(report), [])
 
-    def test_run_critic_checks_collects_multiple_issue_types(self) -> None:
+    def test_run_critic_checks_skips_pre_synth_report_compliance(self) -> None:
         state = {
             "data_mode": "demo",
             "companies": ["Apple", "Microsoft"],
@@ -126,14 +133,15 @@ class CriticChecksTestCase(unittest.TestCase):
         codes = {item.code for item in violations}
         self.assertIn("missing_quantitative_results", codes)
         self.assertIn("missing_sentiment_analysis", codes)
-        self.assertIn("missing_risk_disclaimer", codes)
+        self.assertNotIn("missing_risk_disclaimer", codes)
+        self.assertNotIn("missing_data_provenance", codes)
 
 
 class RetrievalArtifactTestCase(unittest.TestCase):
     def test_legacy_payload_preserves_provenance_and_confidence(self) -> None:
         artifact = RetrievalArtifact(
             company="Apple",
-            market_data={"revenue_2025": 412.0},
+            market_data={"revenue": 412.0},
             supply_chain={"risk_level": "medium", "signals": []},
             earnings_call_quotes=["quote"],
             source_documents=[{"filename": "apple.md", "excerpt": "revenue 412"}],
@@ -153,7 +161,7 @@ class RetrievalArtifactTestCase(unittest.TestCase):
             structured_source="sample_db",
         )
         payload = artifact.to_legacy_payload()
-        self.assertEqual(payload["market_data"]["revenue_2025"], 412.0)
+        self.assertEqual(payload["market_data"]["revenue"], 412.0)
         self.assertEqual(payload["provenance"]["structured_source"], "sample_db")
         self.assertAlmostEqual(payload["confidence"]["overall"], 0.9)
 

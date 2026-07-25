@@ -50,6 +50,36 @@ class AgentEvaluationTestCase(unittest.TestCase):
         self.assertLess(result.score, 60)
         self.assertIn("supervisor", result.checks["pipeline_completeness"]["missing_steps"])
 
+    def test_incomplete_data_uses_minimal_report_contract(self) -> None:
+        report = "\n".join(
+            [
+                "# Incomplete Diligence Output",
+                "## 1. Executive Summary",
+                "No computable fundamentals.",
+                "**Evidence Boundary:** withheld invented metrics.",
+                "## 4. Financial Performance Analysis",
+                "Not available.",
+                "## 7. Risk Architecture",
+                "Data limitation risk.",
+                "## 10. Compliance Review & Data Integrity",
+                "Fail-closed.",
+                "## 11. Methodology, Data Sources & Disclaimer",
+                "**Disclaimer:** research only. Not investment advice. " + ("detail " * 20),
+            ]
+        )
+        state = {
+            "workflow_status": "incomplete_data",
+            "companies": ["Oracle"],
+            "audit_log": [{"step": "synthesizer", "status": "incomplete_data"}],
+            "final_report": report,
+            "degraded_mode": True,
+        }
+        result = evaluate_run_state(state)
+        contract = result.checks["report_contract"]
+        self.assertEqual(contract.get("contract"), "incomplete_data_minimal")
+        self.assertTrue(contract["passed"])
+        self.assertEqual(contract["missing_markers"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

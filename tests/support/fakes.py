@@ -66,6 +66,25 @@ class TimeoutLLMClient:
 
 
 class EmptyHybridRetriever:
+    """Stand-in that returns no hits and has no vector store (failure-injection)."""
+
+    rag_store = None
+
+    def retrieve_for_company(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return []
+
+    def retrieve_for_company_with_meta(self, **kwargs: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        return [], {
+            "degraded": False,
+            "degrade_reason": "",
+            "mode": "empty",
+            "vector_hits": 0,
+            "keyword_hits": 0,
+        }
+
+    def build_source_documents(self, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return []
+
     def search(
         self,
         *,

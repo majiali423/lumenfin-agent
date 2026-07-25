@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "policy": {
+    "full_download_root": ".local-fixtures/sec/downloads",
+    "full_filings_committed": false,
+    "sec_affiliation": false
+  },
+  "fixtures": [
+    {
+      "id": "aapl-fy2024-minimal-html",
+      "issuer": "Apple Inc.",
+      "cik": "0000320193",
+      "form": "10-K",
+      "accession_number": "0000320193-24-000123",
+      "filing_date": "2024-11-01",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm",
+      "retrieved_at": "2026-07-24",
+      "source_sha256": "",
+      "fixture_path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html",
+      "fixture_sha256": "73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456",
+      "transformation": "Minimal table and risk extract authored for parser tests; scripts, images, logos, signatures and unrelated exhibits omitted.",
+      "official_sec_pdf": false
+    },
+    {
+      "id": "nvda-fy2025-derived-pdf",
+      "issuer": "NVIDIA Corporation",
+      "cik": "0001045810",
+      "form": "10-K",
+      "accession_number": "0001045810-25-000023",
+      "filing_date": "2025-02-26",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1045810/000104581025000023/nvda-20250126.htm",
+      "retrieved_at": "2026-07-24",
+      "source_sha256": "",
+      "source_extract": "tests/fixtures/sec/sources/nvda_fy2025_10k_extract.txt",
+      "source_extract_sha256": "f54c45fd82caf41a1c6ea80999212f4202ad2a6f87f0f2269f66b6adac34d9fb",
+      "fixture_path": "tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf",
+      "fixture_sha256": "7f85d2c353ab625abb6a779d2175be499ee8e53970d49b3eb574ec1c34b68208",
+      "derived_pdf": {
+        "path": "tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf",
+        "pages": 8
+      },
+      "transformation": "Selected facts and paraphrased risk excerpts paginated as a derived fixture.",
+      "official_sec_pdf": false
+    },
+    {
+      "id": "msft-fy2024-long-derived-pdf",
+      "issuer": "Microsoft Corporation",
+      "cik": "0000789019",
+      "form": "10-K",
+      "accession_number": "0000950170-24-087843",
+      "filing_date": "2024-07-30",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/789019/000095017024087843/msft-20240630.htm",
+      "retrieved_at": "2026-07-24",
+      "source_sha256": "",
+      "source_extract": "tests/fixtures/sec/sources/msft_fy2024_10k_long_extract.txt",
+      "source_extract_sha256": "6911d6844b872d512df5783b60475648c8036549b392944906831d99d9f3a030",
+      "fixture_path": "tests/fixtures/sec/derived/msft_fy2024_10k_long_excerpt.pdf",
+      "fixture_sha256": "6835c9c67947bed3acd6eb282885b8698ba1f4e0d928f1788acf539665a61480",
+      "derived_pdf": {
+        "path": "tests/fixtures/sec/derived/msft_fy2024_10k_long_excerpt.pdf",
+        "pages": 80
+      },
+      "transformation": "Selected/paraphrased excerpts repeated with page markers solely for long-document stress.",
+      "official_sec_pdf": false
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+DERIVED TEST FIXTURE — NOT AN OFFICIAL SEC PDF OR COMPLETE FILING
+
+Issuer: NVIDIA Corporation
+CIK: 0001045810
+Form: 10-K
+Accession: 0001045810-25-000023
+Filed: 2025-02-26
+Fiscal year ended: 2025-01-26
+
+Selected consolidated financial facts (USD millions):
+Revenue: 130,497
+Operating income: 81,453
+Research and development expense: 12,914
+Net income: 72,880
+
+Selected business context:
+NVIDIA provides accelerated computing platforms spanning compute, networking
+and software. Demand growth includes data-center workloads and generative AI.
+
+Selected risk excerpts, paraphrased for testing:
+- Manufacturing, assembly, testing and packaging depend on third parties.
+- Export controls and regulatory changes can limit product availability.
+- Customer and geographic concentration can amplify demand volatility.
+- Rapid product transitions and supply constraints can affect results.
+
+This minimized text exists only to test issuer resolution, retrieval,
+page-addressable citations and claim/evidence binding.

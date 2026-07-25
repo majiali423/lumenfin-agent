@@ -27,7 +27,7 @@ class FallbackLLMTestCase(unittest.TestCase):
     def test_company_extractor_returns_nvidia(self) -> None:
         client = LocalFallbackLLMClient()
         raw = client.chat(
-            system_prompt='返回 JSON 格式: {"companies": ["公司1"]}',
+            system_prompt='你是一个公司名称提取器。返回 JSON 格式: {"companies": ["公司1"]}',
             user_prompt="NVIDIA FY2025 数据中心 GPU 收入",
         )
         companies = extract_companies_from_query("NVIDIA FY2025 数据中心 GPU 收入", llm_client=client)

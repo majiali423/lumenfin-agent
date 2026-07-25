@@ -1,0 +1,29 @@
+DERIVED LONG-DOCUMENT TEST FIXTURE — NOT AN OFFICIAL SEC PDF OR COMPLETE FILING
+
+Issuer: Microsoft Corporation
+CIK: 0000789019
+Form: 10-K
+Accession: 0000950170-24-087843
+Filed: 2024-07-30
+Fiscal year ended: 2024-06-30
+
+Selected consolidated financial facts (USD millions):
+Revenue: 245,122
+Operating income: 109,433
+Research and development expense: 29,510
+Net income: 88,136
+
+Selected business context:
+Microsoft reports productivity and business processes, intelligent cloud, and
+more personal computing activities. Cloud demand, datacenter capacity and AI
+infrastructure are material operating themes.
+
+Selected risk excerpts, paraphrased for testing:
+- Cloud and online services depend on datacenter capacity and reliability.
+- Cybersecurity incidents could disrupt services or expose information.
+- Competition and rapid technology change can affect demand and margins.
+- Regulatory requirements differ across jurisdictions.
+
+The PDF generator repeats labelled excerpts to create a long-document stress
+fixture while preserving a small, reviewable source file. Repetition is
+synthetic and must not be interpreted as additional filing content.

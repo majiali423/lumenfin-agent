@@ -26,17 +26,23 @@ class McpAdapterTestCase(unittest.TestCase):
         core = safe_execute_formula(formula, variables)
         self.assertEqual(adapter["result"], core)
         self.assertEqual(adapter["engine"], "lumenfin.tools.safe_execute_formula")
+        self.assertFalse(adapter["affects_diligence_state"])
+        self.assertEqual(adapter["production_scope"]["data_contract"], "ast_formula_only")
 
     def test_finance_db_reads_sample_data(self) -> None:
         payload = query_company_metrics("NVIDIA", ["revenue_2025"])
         self.assertTrue(payload["found"])
         self.assertEqual(payload["source"], "lumenfin.sample_financial_data")
         self.assertEqual(payload["metrics"]["revenue_2025"]["value"], 130.5)
+        self.assertFalse(payload["affects_diligence_state"])
+        self.assertEqual(payload["production_scope"]["data_contract"], "sample_financial_data_only")
 
     def test_document_search_returns_hits(self) -> None:
-        payload = search_research_documents("supply chain risk", top_k=1)
+        payload = search_research_documents("supply chain risk", top_k=1, mode="keyword")
         self.assertGreaterEqual(len(payload["hits"]), 1)
         self.assertIn("doc", payload["hits"][0])
+        self.assertFalse(payload["affects_diligence_state"])
+        self.assertEqual(payload["production_scope"]["data_contract"], "mcp_research_notes_sidecar")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from dataclasses import replace
+from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -23,6 +24,15 @@ from tests.test_graph_routing import build_test_config
 
 
 class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
+    def test_production_compose_fails_closed_on_credentials(self) -> None:
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("APP_ENV: production", compose)
+        self.assertIn("DATA_MODE: live", compose)
+        self.assertIn("MAS_API_KEY: ${MAS_API_KEY:?Set MAS_API_KEY}", compose)
+        self.assertIn("POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}", compose)
+        self.assertNotIn('"5432:5432"', compose)
+        self.assertNotIn('"6379:6379"', compose)
+
     def test_production_env_defaults_to_live_data_and_no_local_fallback(self) -> None:
         with patch.dict(
             "os.environ",
@@ -94,6 +104,18 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
                 llm_client=LocalFallbackLLMClient(),
                 market_data_client=FakeMarketDataClient(),
             )
+
+    def test_api_version_matches_installed_package(self) -> None:
+        config = replace(
+            build_test_config(ROOT / "test_artifacts" / f"version-{uuid4().hex[:8]}"),
+            app_env="test",
+        )
+        app = create_app(
+            config,
+            llm_client=LocalFallbackLLMClient(),
+            market_data_client=FakeMarketDataClient(),
+        )
+        self.assertEqual(app.version, version("lumenfin-agent"))
 
     def test_analyze_response_defaults_to_compact_state(self) -> None:
         config = replace(

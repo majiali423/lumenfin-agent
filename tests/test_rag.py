@@ -39,6 +39,34 @@ class RagModuleTestCase(unittest.TestCase):
         self.assertIn("financial_metric", chunk_types)
         self.assertIn("risk_signal", chunk_types)
 
+    def test_peer_table_splits_per_company_rows(self) -> None:
+        document = {
+            "document_id": "peer-table",
+            "filename": "apple_msft_fy2025_table.pdf",
+            "detected_companies": ["Apple", "Microsoft"],
+            "pages": [
+                "\n".join(
+                    [
+                        "Consolidated Peer Fundamentals Table",
+                        "Metric Apple Microsoft",
+                        "Revenue 383.3 245.1",
+                        "EBITDA 130.1 128.4",
+                        "Operating Income 118.2 109.4",
+                        "R&D Expense 31.4 29.5",
+                        "Apple supply chain risk remains medium due to assembly concentration.",
+                        "Microsoft Azure remains a primary growth engine.",
+                    ]
+                )
+            ],
+        }
+        chunks = chunk_document(document)
+        self.assertGreaterEqual(len(chunks), 8)
+        apple_only = [c for c in chunks if c["companies"] == ["Apple"]]
+        msft_only = [c for c in chunks if c["companies"] == ["Microsoft"]]
+        self.assertTrue(any("Revenue" in c["text"] and "383.3" in c["text"] for c in apple_only))
+        self.assertTrue(any("Revenue" in c["text"] and "245.1" in c["text"] for c in msft_only))
+        self.assertFalse(any("245.1" in c["text"] for c in apple_only if "Revenue" in c["text"]))
+
     def test_milvus_index_and_vector_search(self) -> None:
         tmp_dir, uri = _make_temp_milvus_uri()
         embedder = DeterministicEmbeddingProvider()

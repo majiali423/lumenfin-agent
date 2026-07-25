@@ -105,6 +105,33 @@ class FailureInjectionTestCase(unittest.TestCase):
         self.assertEqual(content, "ok")
         self.assertEqual(mock_http.__enter__.return_value.post.call_count, 2)
 
+    def test_deepseek_client_does_not_retry_http_401(self) -> None:
+        settings = LLMSettings(
+            api_key="bad-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-chat",
+            timeout_seconds=1,
+            max_retries=3,
+            retry_backoff_seconds=0,
+        )
+        response = MagicMock()
+        response.status_code = 401
+        request = MagicMock()
+        error = httpx.HTTPStatusError("unauthorized", request=request, response=response)
+        response.raise_for_status.side_effect = error
+        mock_http = MagicMock()
+        mock_http.__enter__.return_value.post.return_value = response
+
+        with (
+            patch("lumenfin.llm.httpx.Client", return_value=mock_http),
+            patch("lumenfin.llm.time.sleep", return_value=None) as sleep,
+        ):
+            with self.assertRaises(httpx.HTTPStatusError):
+                DeepSeekChatClient(settings).chat("system", "user")
+
+        self.assertEqual(mock_http.__enter__.return_value.post.call_count, 1)
+        sleep.assert_not_called()
+
     def test_market_provider_unauthorized_is_handled_by_agent_runtime(self) -> None:
         config = build_test_config(ROOT / "test_artifacts" / f"market-fail-{uuid4().hex[:8]}")
         app = LumenFinAgentSystem(

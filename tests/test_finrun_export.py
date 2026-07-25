@@ -19,6 +19,7 @@ class FinRunExportTestCase(unittest.TestCase):
     def test_export_finrun_state_maps_lumenfin_trace(self) -> None:
         finrun = export_finrun_state(_sample_state())
 
+        self.assertEqual(finrun["schema_version"], "1.0")
         self.assertEqual(finrun["run_id"], "lumenfin-sample")
         self.assertEqual({entity["name"] for entity in finrun["entities"]}, {"Apple"})
         self.assertTrue(any(step["name"] == "retrieval" for step in finrun["steps"]))

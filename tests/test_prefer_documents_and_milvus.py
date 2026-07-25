@@ -27,7 +27,7 @@ class PreferDocumentMetricsTestCase(unittest.TestCase):
         ]
         payload = retrieve_company_payload("NVIDIA", document_contexts=docs, allow_sample_data=True)
         self.assertEqual(payload["structured_source"], "document_extracted")
-        self.assertEqual(payload["market_data"]["revenue_2025"], 999.0)
+        self.assertEqual(payload["market_data"]["revenue"], 999.0)
 
     def test_sample_used_when_documents_lack_metrics(self) -> None:
         docs = [
@@ -40,7 +40,33 @@ class PreferDocumentMetricsTestCase(unittest.TestCase):
         ]
         payload = retrieve_company_payload("NVIDIA", document_contexts=docs, allow_sample_data=True)
         self.assertEqual(payload["structured_source"], "sample_db")
-        self.assertIn("revenue_2025", payload["market_data"])
+        self.assertIn("revenue", payload["market_data"])
+        self.assertTrue(payload["fundamentals_meta"].get("live_fallback_used"))
+        self.assertIn("lacked AST-computable", payload["fundamentals_meta"].get("fallback_reason", ""))
+
+    def test_prefer_uploaded_only_blocks_sample_and_live_backfill(self) -> None:
+        docs = [
+            {
+                "detected_companies": ["Oracle"],
+                "metric_hints": {},
+                "excerpt": "Oracle remains strategically important. No financial tables.",
+                "text": "Oracle remains strategically important. No financial tables.",
+                "filename": "oracle_sparse_fluff.pdf",
+            }
+        ]
+        payload = retrieve_company_payload(
+            "Oracle",
+            document_contexts=docs,
+            allow_sample_data=True,
+            fetch_live_fundamentals=True,
+            fetch_sec_fundamentals=True,
+            prefer_uploaded_only=True,
+        )
+        self.assertEqual(payload.get("structured_source"), "none")
+        self.assertFalse(payload.get("market_data"))
+        self.assertTrue(payload["fundamentals_meta"].get("prefer_uploaded_only"))
+        self.assertFalse(payload["fundamentals_meta"].get("live_fallback_used"))
+        self.assertIn("refused SEC/Yahoo/sample", payload["fundamentals_meta"].get("fallback_reason", ""))
 
 
 class MilvusIsolateTestCase(unittest.TestCase):

@@ -43,13 +43,23 @@ class OfflineSystemTestCase(unittest.TestCase):
         self.assertIn("Microsoft", result["final_report"])
         self.assertEqual(result["llm_backend"], "local-fallback")
         self.assertIn("Evidence Boundary", result["final_report"])
-        self.assertIn("Risk scores are model-derived screening indicators", result["final_report"])
+        self.assertIn("Risk-model scores remain screening indicators", result["final_report"])
         self.assertIn("Research Thesis & Positioning", result["final_report"])
         self.assertNotIn("Recommend overweight", result["final_report"])
         self.assertNotIn("cautious accumulation", result["final_report"])
 
         steps = [event["step"] for event in result["audit_log"]]
-        for required in ("input_guardrail", "query_planner", "supervisor", "retrieval", "quant", "psychologist", "critic", "synthesizer"):
+        for required in (
+            "input_guardrail",
+            "query_planner",
+            "supervisor",
+            "retrieval",
+            "quant",
+            "psychologist",
+            "critic",
+            "claim_binder",
+            "synthesizer",
+        ):
             self.assertIn(required, steps)
 
     def test_replanner_path_and_exports(self) -> None:
@@ -81,6 +91,7 @@ class OfflineSystemTestCase(unittest.TestCase):
             "quant",
             "psychologist",
             "critic",
+            "claim_binder",
             "synthesizer",
         ]
         self.assertEqual(first["audit_log"][0]["step"], "input_guardrail")
