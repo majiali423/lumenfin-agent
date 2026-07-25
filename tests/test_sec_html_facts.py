@@ -72,7 +72,7 @@ class SecHtmlFactRankingTestCase(unittest.TestCase):
         self.assertNotEqual(str(top.get("value")).replace(",", ""), "201183")
 
     def test_real_aapl_html_fixture_parses_tables(self) -> None:
-        path = ROOT / "fixtures" / "e2e_real" / "aapl-20240928.htm"
+        path = ROOT / "tests" / "fixtures" / "sec" / "minimal" / "aapl_fy2024_10k_extract.html"
         if not path.exists():
             self.skipTest("Apple HTML fixture missing")
         doc = parse_sec_html_document(path)

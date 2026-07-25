@@ -56,9 +56,16 @@ class DocumentPrimaryEntityTestCase(unittest.TestCase):
         self.assertEqual(set(entity["issuer_companies"]), {"Apple", "Microsoft"})
 
     def test_real_nvda_fixture_primary_is_nvidia_only(self) -> None:
-        path = ROOT / "fixtures" / "e2e_real" / "nvda_fy2025_10k_sec.pdf"
+        path = (
+            ROOT
+            / "tests"
+            / "fixtures"
+            / "sec"
+            / "derived"
+            / "nvda_fy2025_10k_excerpt.pdf"
+        )
         if not path.exists():
-            self.skipTest("NVIDIA E2E fixture missing")
+            self.skipTest("NVIDIA derived SEC fixture missing")
         parsed = parse_pdf_document(path)
         self.assertEqual(parsed["detected_companies"], ["NVIDIA"])
         self.assertEqual(parsed["primary_company"]["name"], "NVIDIA")
