@@ -4,14 +4,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
-
+from .env_bootstrap import assert_no_env_conflicts, bootstrap_dotenv
 from .llm import LLMSettings
 
 # Prefer project-root .env (stable regardless of cwd), then cwd as secondary.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(_PROJECT_ROOT / ".env")
-load_dotenv()
+# Process env wins; conflicting non-empty process vs .env values fail fast.
+_PROJECT_ROOT = bootstrap_dotenv(strict_conflicts=True)
 
 _RAG_INDEX_MODES = frozenset({"sync_on_run", "async_on_upload"})
 
@@ -90,6 +88,8 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
+        # Re-check on every load so preflight and runtime share the same path.
+        assert_no_env_conflicts(root=_PROJECT_ROOT)
         raw_output_dir = os.getenv("MAS_OUTPUT_DIR", "outputs")
         raw_db_path = os.getenv("MAS_DB_PATH", "data/lumenfin.db")
         app_env = os.getenv("APP_ENV", "dev").strip().lower() or "dev"
