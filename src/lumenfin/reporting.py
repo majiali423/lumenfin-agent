@@ -11,6 +11,484 @@ from .evaluation import evaluate_run_state
 
 _PAGE_CITATION_RE = re.compile(r"#p\d+", re.IGNORECASE)
 
+REPORT_OUTPUT_FORMATS = frozenset({"research_report", "executive_summary", "table_summary"})
+DEFAULT_REPORT_OUTPUT_FORMAT = "research_report"
+
+
+def normalize_requested_output_format(value: Any) -> str | None:
+    """Return a valid explicit report mode, or None when absent/invalid (treat as full)."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    aliases = {
+        "full": "research_report",
+        "complete": "research_report",
+        "brief": "executive_summary",
+        "summary": "executive_summary",
+        "executive": "executive_summary",
+        "table": "table_summary",
+    }
+    normalized = aliases.get(text, text)
+    if normalized in REPORT_OUTPUT_FORMATS:
+        return normalized
+    return None
+
+
+def effective_report_output_format(state: dict[str, Any] | None) -> str:
+    """Report length mode: only explicit requested_output_format may shorten the report.
+
+    Keyword-detected query_plan.output_format is intentionally ignored so phrases like
+    "摘要" inside a full-report request cannot silently trim diligence sections.
+    """
+    requested = normalize_requested_output_format((state or {}).get("requested_output_format"))
+    return requested or DEFAULT_REPORT_OUTPUT_FORMAT
+
+
+def format_next_actions(state: dict[str, Any] | None) -> list[str]:
+    """Rule-based补件清单 from existing gap fields (no LLM)."""
+    state = state or {}
+    companies = [str(c) for c in (state.get("companies") or [])]
+    coverage = state.get("coverage_matrix") or {}
+    comparable = [
+        company for company in companies if (coverage.get(company) or {}).get("comparable")
+    ]
+    non_comparable = list(state.get("non_comparable_companies") or [])
+    if not non_comparable and coverage:
+        non_comparable = [
+            company for company in companies if not (coverage.get(company) or {}).get("comparable")
+        ]
+    detail = str(state.get("data_gap_detail") or "").strip()
+    fatal = bool(state.get("fatal_data_gap"))
+    partial = bool(state.get("partial_data_gap"))
+    status = str(state.get("workflow_status") or "")
+
+    if not fatal and not partial and status != "incomplete_data":
+        return []
+
+    lines = [
+        "## Next Actions（补件清单）",
+        "",
+        f"- Status: `{status or ('incomplete_data' if fatal else 'partial')}`"
+        f"{'; fatal_data_gap' if fatal else ''}{' / partial_data_gap' if partial else ''}",
+        f"- Comparable: {', '.join(comparable) if comparable else '(none)'}",
+        f"- Non-comparable: {', '.join(non_comparable) if non_comparable else '(none)'}",
+    ]
+    if detail:
+        lines.append(f"- Gap detail: {detail}")
+    lines.extend(
+        [
+            "- Suggested next steps:",
+            "  1. Upload 10-K/annual filings (PDF) for non-comparable issuers with extractable FY metrics, or",
+            "  2. Narrow the compare set to comparable companies only, or",
+            "  3. Clarify fiscal year / company_scope via HITL and resume the same thread.",
+            "",
+        ]
+    )
+    return lines
+
+
+_FY_RE = re.compile(r"(?:FY\s*)?(20\d{2})", re.IGNORECASE)
+
+# Peer metrics shown in comparison capsule / matrix (pct vs multiple).
+COMPARE_METRIC_SPECS: tuple[tuple[str, str, bool], ...] = (
+    ("ebitda_margin", "EBITDA Margin", True),
+    ("operating_margin", "Operating Margin", True),
+    ("r_and_d_intensity", "R&D Intensity", True),
+    ("pe_ratio", "P/E (TTM)", False),
+)
+
+
+def parse_requested_fiscal_year(*texts: Any) -> int | None:
+    """Extract a single FY year from planner/query strings (e.g. FY2024, 2024)."""
+    for raw in texts:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        # Prefer explicit FY#### tokens.
+        fy_hits = re.findall(r"FY\s*(20\d{2})", text, flags=re.IGNORECASE)
+        if fy_hits:
+            return int(fy_hits[-1])
+        hits = _FY_RE.findall(text)
+        if hits:
+            return int(hits[-1])
+    return None
+
+
+def requested_fiscal_year_from_state(state: dict[str, Any] | None) -> int | None:
+    state = state or {}
+    plan = state.get("query_plan") or {}
+    return parse_requested_fiscal_year(
+        plan.get("time_range"),
+        state.get("query"),
+        (state.get("user_clarification") or {}).get("time_range"),
+        (state.get("user_clarification") or {}).get("fiscal_year"),
+    )
+
+
+def used_fiscal_year_for_company(state: dict[str, Any] | None, company: str) -> int | None:
+    payload = ((state or {}).get("retrieved_docs") or {}).get(company) or {}
+    meta = payload.get("fundamentals_meta") or {}
+    for key in ("fiscal_year", "fy"):
+        value = meta.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            text = str(value)
+            if re.fullmatch(r"20\d{2}", text):
+                return int(text)
+    period = str(meta.get("period") or meta.get("period_end") or "")
+    match = re.search(r"(20\d{2})", period)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
+    """Disclose requested vs used fiscal periods (never silent FY swap)."""
+    state = state or {}
+    requested = requested_fiscal_year_from_state(state)
+    companies = [str(c) for c in (state.get("companies") or [])]
+    if not companies:
+        return []
+
+    rows: list[tuple[str, str, str]] = []
+    any_mismatch = False
+    for company in companies:
+        used = used_fiscal_year_for_company(state, company)
+        payload = (state.get("retrieved_docs") or {}).get(company) or {}
+        meta = payload.get("fundamentals_meta") or {}
+        alignment = str(meta.get("period_alignment") or "")
+        used_label = f"FY{used}" if used is not None else "n/a"
+        if requested is None:
+            status = alignment or "no FY requested"
+        elif used is None:
+            status = "requested FY not found in structured fundamentals"
+            any_mismatch = True
+        elif int(used) == int(requested):
+            status = "exact match"
+        else:
+            status = f"FALLBACK — requested FY{requested}, using {used_label}"
+            any_mismatch = True
+        req_label = f"FY{requested}" if requested is not None else "—"
+        rows.append((company, req_label, f"{used_label} ({status})"))
+
+    if requested is None and not any(
+        ((state.get("retrieved_docs") or {}).get(c) or {}).get("fundamentals_meta")
+        for c in companies
+    ):
+        return []
+
+    lines = [
+        "## Period Alignment",
+        "",
+        "| Company | Requested | Used (status) |",
+        "|---------|-----------|---------------|",
+    ]
+    for company, req, used in rows:
+        lines.append(f"| {company} | {req} | {used} |")
+    lines.append("")
+    if any_mismatch:
+        lines.append(
+            "**Period notice:** Structured fundamentals are not aligned to the requested fiscal year "
+            "for at least one issuer. Treat YoY / same-year peer statements as non-comparable until "
+            "the requested FY is available or the query is restated."
+        )
+        lines.append("")
+    elif requested is not None:
+        lines.append(f"**Period notice:** Structured fundamentals match requested FY{requested}.")
+        lines.append("")
+    return lines
+
+
+def _fmt_metric_value(value: Any, *, is_pct: bool) -> str:
+    if not isinstance(value, (int, float)):
+        return "n/a"
+    if is_pct:
+        return f"{float(value):.1%}"
+    return f"{float(value):.2f}x"
+
+
+def format_peer_metric_matrix(state: dict[str, Any] | None) -> list[str]:
+    """Wide compare table with explicit n/a cells when a peer lacks a metric."""
+    state = state or {}
+    companies = [str(c) for c in (state.get("companies") or [])]
+    if len(companies) < 2:
+        return []
+    metrics_by_company = state.get("financial_metrics") or {}
+    lines = [
+        "### Peer Metric Matrix (comparable columns; gaps are explicit)",
+        "",
+        "| Metric | " + " | ".join(companies) + " | Notes |",
+        "|--------|" + "|".join(["------"] * len(companies)) + "|-------|",
+    ]
+    for key, label, is_pct in COMPARE_METRIC_SPECS:
+        cells: list[str] = []
+        present: list[str] = []
+        missing: list[str] = []
+        for company in companies:
+            metrics = metrics_by_company.get(company) or {}
+            value = metrics.get(key)
+            if isinstance(value, (int, float)):
+                cells.append(_fmt_metric_value(value, is_pct=is_pct))
+                present.append(company)
+            else:
+                cells.append("n/a")
+                missing.append(company)
+        if missing and present:
+            note = f"asymmetric: missing for {', '.join(missing)}"
+        elif missing and not present:
+            note = "unavailable for all peers"
+        else:
+            note = "comparable"
+        lines.append(f"| {label} | " + " | ".join(cells) + f" | {note} |")
+    lines.append("")
+    return lines
+
+
+def format_comparison_capsule(state: dict[str, Any] | None) -> list[str]:
+    """Rule-based compare conclusions from financial_metrics only (no LLM)."""
+    state = state or {}
+    companies = [str(c) for c in (state.get("companies") or [])]
+    if len(companies) < 2:
+        return []
+    metrics_by_company = state.get("financial_metrics") or {}
+    bullets: list[str] = []
+    for key, label, is_pct in COMPARE_METRIC_SPECS:
+        scored: list[tuple[str, float]] = []
+        missing: list[str] = []
+        for company in companies:
+            value = (metrics_by_company.get(company) or {}).get(key)
+            if isinstance(value, (int, float)):
+                scored.append((company, float(value)))
+            else:
+                missing.append(company)
+        if len(scored) >= 2:
+            ranked = sorted(scored, key=lambda item: item[1], reverse=True)
+            leader, lead_v = ranked[0]
+            trailer, trail_v = ranked[-1]
+            if lead_v == trail_v:
+                bullets.append(
+                    f"- {label}: tied at {_fmt_metric_value(lead_v, is_pct=is_pct)} "
+                    f"({', '.join(c for c, _ in ranked)})."
+                )
+            else:
+                delta = lead_v - trail_v
+                delta_txt = _fmt_metric_value(delta, is_pct=is_pct) if is_pct else f"{delta:.2f}"
+                bullets.append(
+                    f"- {label}: **{leader}** {_fmt_metric_value(lead_v, is_pct=is_pct)} > "
+                    f"{trailer} {_fmt_metric_value(trail_v, is_pct=is_pct)} "
+                    f"(delta {delta_txt})."
+                )
+            if missing:
+                bullets.append(
+                    f"  - Not comparable for {', '.join(missing)} (metric n/a)."
+                )
+        elif len(scored) == 1 and missing:
+            only_co, only_v = scored[0]
+            bullets.append(
+                f"- {label}: only {only_co} has "
+                f"{_fmt_metric_value(only_v, is_pct=is_pct)}; "
+                f"missing for {', '.join(missing)} — peer comparison withheld."
+            )
+        elif missing:
+            bullets.append(f"- {label}: n/a for all peers in this run.")
+    if not bullets:
+        return []
+    return [
+        "**Comparison capsule (rule-based from AST metrics):**",
+        *bullets,
+        "",
+    ]
+
+
+def is_low_signal_claim(claim: Any) -> bool:
+    """True for brief-unfriendly template noise (unknown supply-chain / empty thesis)."""
+    claim_type = getattr(claim, "claim_type", None) or (claim.get("claim_type") if isinstance(claim, dict) else None)
+    metric = getattr(claim, "metric_name", None) or (claim.get("metric_name") if isinstance(claim, dict) else None)
+    statement = str(
+        getattr(claim, "statement", None)
+        or (claim.get("statement") if isinstance(claim, dict) else "")
+        or ""
+    ).lower()
+    if claim_type == "investment_conclusion":
+        return True
+    if claim_type == "risk_conclusion":
+        if metric == "supply_chain_risk" or "supply-chain risk signal is 'unknown'" in statement:
+            return True
+        if "unknown" in statement and "supply" in statement:
+            return True
+    return False
+
+
+def filter_claims_for_brief(claims: list[Any]) -> list[Any]:
+    """Brief ledger/summary: numeric (+ growth) only; drop thesis/unknown-risk filler."""
+    kept: list[Any] = []
+    for claim in claims:
+        claim_type = getattr(claim, "claim_type", None) or (
+            claim.get("claim_type") if isinstance(claim, dict) else None
+        )
+        if claim_type not in {"numeric", "growth"}:
+            continue
+        if is_low_signal_claim(claim):
+            continue
+        kept.append(claim)
+    return kept
+
+
+def build_clerk_executive_summary(
+    state: dict[str, Any] | None,
+    verified_claims: list[Any],
+    *,
+    brief: bool = False,
+) -> str:
+    """Clerk-oriented summary: compare capsule first; single-issuer falls back to numeric claims."""
+    state = state or {}
+    companies = [str(c) for c in (state.get("companies") or [])]
+    parts: list[str] = []
+    capsule = format_comparison_capsule(state)
+    # Multi-company: capsule alone is the clerk conclusion (no claim dump).
+    if capsule:
+        parts.extend(line for line in capsule if line.strip())
+        parts.append(
+            "Assertions above are limited to verified claim objects / AST metrics with bound evidence."
+        )
+        return "\n".join(parts)
+
+    claims = filter_claims_for_brief(verified_claims) if brief else list(verified_claims)
+    if brief:
+        claims = [
+            c
+            for c in claims
+            if (getattr(c, "claim_type", None) or (c.get("claim_type") if isinstance(c, dict) else None))
+            == "numeric"
+        ]
+
+    if not companies:
+        return (
+            "This run produced a research report, but no target company was available "
+            "for a grounded executive summary."
+        )
+    if not claims:
+        return (
+            "No structurally verified financial claims were available. "
+            "This executive summary withholds numeric and investment assertions rather than inventing citations."
+        )
+
+    per_company: list[str] = []
+    for company in companies:
+        company_claims = [
+            c
+            for c in claims
+            if (getattr(c, "entity", None) or (c.get("entity") if isinstance(c, dict) else None)) == company
+        ]
+        # Prefer margin/intensity metrics for compact summary.
+        preferred_order = (
+            "operating_margin",
+            "ebitda_margin",
+            "r_and_d_intensity",
+            "pe_ratio",
+            "revenue",
+        )
+        picked: list[Any] = []
+        remaining = list(company_claims)
+        for metric in preferred_order:
+            for claim in list(remaining):
+                metric_name = getattr(claim, "metric_name", None) or (
+                    claim.get("metric_name") if isinstance(claim, dict) else None
+                )
+                if metric_name == metric:
+                    picked.append(claim)
+                    remaining.remove(claim)
+                    break
+            if len(picked) >= (2 if brief else 3):
+                break
+        if len(picked) < (2 if brief else 3):
+            for claim in remaining:
+                if claim in picked:
+                    continue
+                picked.append(claim)
+                if len(picked) >= (2 if brief else 3):
+                    break
+        if not picked:
+            continue
+        rendered = []
+        for claim in picked:
+            if hasattr(claim, "render_with_citation"):
+                rendered.append(claim.render_with_citation())
+            else:
+                rendered.append(str(claim.get("statement") or ""))
+        per_company.append(f"{company}: " + " ".join(rendered))
+
+    if per_company:
+        parts.append(" ".join(per_company))
+    parts.append(
+        "Assertions above are limited to verified claim objects / AST metrics with bound evidence."
+    )
+    return "\n".join(p for p in parts if p)
+
+
+# Used by AgentRuntime.retrieval for SEC prefer_fiscal_year.
+def _requested_fiscal_year_from_state(state: dict[str, Any] | None) -> int | None:
+    return requested_fiscal_year_from_state(state)
+
+
+def build_metrics_csv_rows(result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Flatten financial_metrics for CSV export (no recomputation)."""
+    result = result or {}
+    coverage = result.get("coverage_matrix") or {}
+    retrieved = result.get("retrieved_docs") or {}
+    workflow_status = str(result.get("workflow_status") or "")
+    rows: list[dict[str, Any]] = []
+    metrics_by_company = result.get("financial_metrics") or {}
+    for company in result.get("companies") or list(metrics_by_company.keys()):
+        company_key = str(company)
+        metrics = metrics_by_company.get(company) or metrics_by_company.get(company_key) or {}
+        if not isinstance(metrics, dict):
+            continue
+        cov = coverage.get(company) or coverage.get(company_key) or {}
+        comparable = bool(cov.get("comparable")) if cov else bool(metrics)
+        structured = str(
+            cov.get("structured_source")
+            or (retrieved.get(company) or retrieved.get(company_key) or {}).get("structured_source")
+            or ""
+        )
+        for metric_name, value in metrics.items():
+            rows.append(
+                {
+                    "company": company_key,
+                    "metric": str(metric_name),
+                    "value": value,
+                    "comparable": "yes" if comparable else "no",
+                    "structured_source": structured or "unknown",
+                    "workflow_status": workflow_status,
+                }
+            )
+    return rows
+
+
+def write_metrics_csv(path: Path, result: dict[str, Any] | None) -> Path:
+    import csv
+
+    rows = build_metrics_csv_rows(result)
+    fieldnames = [
+        "company",
+        "metric",
+        "value",
+        "comparable",
+        "structured_source",
+        "workflow_status",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return path
+
 
 def format_rag_citation_section(
     rag_evidence: dict[str, Any] | None,
@@ -275,6 +753,7 @@ def export_run_artifacts(
         report_path = output_dir / f"{base_name}_report.md"
         audit_path = output_dir / f"{base_name}_audit.json"
         state_path = output_dir / f"{base_name}_state.json"
+        metrics_csv_path = output_dir / f"{base_name}_metrics.csv"
 
         report_path.write_text(result.get("final_report", "") or "", encoding="utf-8")
         audit_path.write_text(
@@ -285,6 +764,11 @@ def export_run_artifacts(
             json.dumps(result, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
+        try:
+            write_metrics_csv(metrics_csv_path, result)
+            metrics_csv_key = str(metrics_csv_path)
+        except Exception:
+            metrics_csv_key = ""
         artifacts.update(
             {
                 "report_path": str(report_path),
@@ -292,6 +776,8 @@ def export_run_artifacts(
                 "state_path": str(state_path),
             }
         )
+        if metrics_csv_key:
+            artifacts["metrics_csv_path"] = metrics_csv_key
 
     manifest = build_run_manifest(
         result,

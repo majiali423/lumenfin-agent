@@ -15,6 +15,13 @@ class AnalyzeDataRequest(BaseModel):
         default=False,
         description="When true, return the full internal run state. Default is a compact summary only.",
     )
+    output_format: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explicit report length mode: research_report | executive_summary | table_summary. "
+            "Omitted/invalid values keep the full research report (keywords never auto-trim)."
+        ),
+    )
 
 
 class AnalyzeRequest(BaseModel):
@@ -24,6 +31,13 @@ class AnalyzeRequest(BaseModel):
     include_state: bool = Field(
         default=False,
         description="When true, return the full internal run state. Default is a compact summary only.",
+    )
+    output_format: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explicit report length mode: research_report | executive_summary | table_summary. "
+            "Omitted/invalid values keep the full research report (keywords never auto-trim)."
+        ),
     )
 
 
@@ -76,6 +90,10 @@ class SubmitJobRequest(BaseModel):
     query: str = Field(..., description="User query for asynchronous financial analysis.")
     thread_id: Optional[str] = Field(default=None, description="Optional workflow thread id.")
     export_artifacts: bool = Field(default=True, description="Whether the background job should export files.")
+    output_format: Optional[str] = Field(
+        default=None,
+        description="Explicit report length mode; same semantics as AnalyzeRequest.output_format.",
+    )
 
 
 class SubmitJobResponse(BaseModel):

@@ -785,16 +785,13 @@ def _build_clarification_questions(
         q = ", ".join(query_companies or []) or "(none)"
         u = ", ".join(upload_companies or []) or "(none)"
         questions.append(
-            "查询公司与上传材料不一致："
-            f"查询提及 [{q}]，上传检测到 [{u}]。"
-            "请选择 company_scope=uploaded（只分析上传材料中的公司）/"
-            "query（只分析查询公司）/both（两者都分析，缺数可能 fail-loud），"
-            "或直接提供 companies 列表。"
+            f"查询与上传公司不一致：查询 [{q}] / 上传 [{u}]。"
+            "请选 company_scope=uploaded | query | both（或直接提供 companies）。"
         )
     if "company" in missing_fields:
-        questions.append("请明确要分析的公司名称（例如 Apple、Microsoft）。")
+        questions.append("请填写公司名称（例如 Apple、Microsoft）。")
     if "time_range" in missing_fields:
-        questions.append("请说明分析的时间范围或财年（例如 FY2025、2025 年报）。")
+        questions.append("请填写时间范围或财年（例如 FY2025）。")
     return questions
 
 

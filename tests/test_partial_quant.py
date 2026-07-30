@@ -91,6 +91,11 @@ class PartialQuantTestCase(unittest.TestCase):
         self.assertEqual(update["non_comparable_companies"], ["Microsoft"])
         self.assertIsNone(update.get("replan_reason"))
         self.assertEqual(update["peer_comparison"]["comparable_companies"], ["Apple"])
+        self.assertEqual(
+            update["peer_comparison"]["summary"],
+            "Peer comparison is unavailable because only Apple has "
+            "comparable structured ratio metrics in this run.",
+        )
 
     def test_quant_does_not_route_to_appendix_replan_on_partial_gap(self) -> None:
         state = {

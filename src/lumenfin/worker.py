@@ -11,6 +11,7 @@ def execute_analysis_job(
     thread_id: str,
     export_artifacts: bool = True,
     document_paths: list[str] | None = None,
+    output_format: str | None = None,
 ) -> None:
     config = AppConfig.from_env()
     service = LumenFinAnalysisService(config)
@@ -20,6 +21,7 @@ def execute_analysis_job(
         thread_id=thread_id,
         export_artifacts=export_artifacts,
         document_paths=document_paths or [],
+        output_format=output_format,
     )
 
 
@@ -38,4 +40,5 @@ def work_forever() -> None:
             thread_id=payload["thread_id"],
             export_artifacts=payload.get("export_artifacts", True),
             document_paths=payload.get("document_paths", []),
+            output_format=payload.get("output_format"),
         )

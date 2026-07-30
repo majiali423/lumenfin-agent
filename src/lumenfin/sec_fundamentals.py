@@ -166,8 +166,27 @@ def resolve_cik(
     return get_cik_for_ticker(ticker, client=client, errors=errors)
 
 
-def _latest_annual_value(concept: dict[str, Any]) -> tuple[float, dict[str, Any]] | None:
-    """Pick the latest USD annual (10-K / FY) fact for a US-GAAP concept."""
+def _item_fiscal_year(item: dict[str, Any]) -> int | None:
+    try:
+        if item.get("fy") is not None:
+            return int(item["fy"])
+    except (TypeError, ValueError):
+        pass
+    end = str(item.get("end") or "")
+    if len(end) >= 4 and end[:4].isdigit():
+        try:
+            return int(end[:4])
+        except ValueError:
+            return None
+    return None
+
+
+def _latest_annual_value(
+    concept: dict[str, Any],
+    *,
+    prefer_fiscal_year: int | None = None,
+) -> tuple[float, dict[str, Any]] | None:
+    """Pick a USD annual (10-K / FY) fact; prefer requested FY when present."""
     units = (concept or {}).get("units") or {}
     series = units.get("USD") or []
     if not series:
@@ -195,7 +214,13 @@ def _latest_annual_value(concept: dict[str, Any]) -> tuple[float, dict[str, Any]
     def sort_key(item: dict[str, Any]) -> tuple:
         return (str(item.get("end") or ""), str(item.get("filed") or ""))
 
-    best = sorted(annual, key=sort_key)[-1]
+    pool = annual
+    if prefer_fiscal_year is not None:
+        matched = [item for item in annual if _item_fiscal_year(item) == prefer_fiscal_year]
+        if matched:
+            pool = matched
+
+    best = sorted(pool, key=sort_key)[-1]
     try:
         value = float(best["val"])
     except (TypeError, ValueError, KeyError):
@@ -205,20 +230,37 @@ def _latest_annual_value(concept: dict[str, Any]) -> tuple[float, dict[str, Any]
     return value, best
 
 
-def _fact_from_tags(gaap: dict[str, Any], tags: tuple[str, ...]) -> tuple[float, str, dict[str, Any]] | None:
-    """Across candidate tags, prefer the fact with the latest period end."""
+def _fact_from_tags(
+    gaap: dict[str, Any],
+    tags: tuple[str, ...],
+    *,
+    prefer_fiscal_year: int | None = None,
+) -> tuple[float, str, dict[str, Any]] | None:
+    """Across candidate tags, prefer requested FY when possible, else latest period end."""
     best: tuple[float, str, dict[str, Any]] | None = None
     best_end = ""
+    best_exact = False
     for tag in tags:
         concept = gaap.get(tag)
         if not isinstance(concept, dict):
             continue
-        hit = _latest_annual_value(concept)
+        hit = _latest_annual_value(concept, prefer_fiscal_year=prefer_fiscal_year)
         if hit is None:
             continue
         value, meta = hit
         end = str(meta.get("end") or "")
-        if best is None or end > best_end:
+        exact = prefer_fiscal_year is not None and _item_fiscal_year(meta) == prefer_fiscal_year
+        if best is None:
+            best = (value, tag, meta)
+            best_end = end
+            best_exact = exact
+            continue
+        if exact and not best_exact:
+            best = (value, tag, meta)
+            best_end = end
+            best_exact = True
+            continue
+        if exact == best_exact and end > best_end:
             best = (value, tag, meta)
             best_end = end
     return best
@@ -268,6 +310,7 @@ def fetch_sec_companyfacts_fundamentals(
     *,
     client: httpx.Client | None = None,
     errors: list[dict[str, Any]] | None = None,
+    prefer_fiscal_year: int | None = None,
 ) -> dict[str, Any] | None:
     """Return LumenFin market_data payload from SEC companyfacts, or None."""
     symbol = (ticker or "").strip().upper()
@@ -318,7 +361,9 @@ def fetch_sec_companyfacts_fundamentals(
             )
             return None
 
-        revenue_hit = _fact_from_tags(gaap, _REVENUE_TAGS)
+        revenue_hit = _fact_from_tags(
+            gaap, _REVENUE_TAGS, prefer_fiscal_year=prefer_fiscal_year
+        )
         if revenue_hit is None:
             append_provider_error(
                 errors,
@@ -395,6 +440,14 @@ def fetch_sec_companyfacts_fundamentals(
         except Exception:
             fiscal_year = None
 
+        period_alignment = "unspecified"
+        if prefer_fiscal_year is not None and fiscal_year is not None:
+            period_alignment = (
+                "exact" if int(fiscal_year) == int(prefer_fiscal_year) else "fallback_latest"
+            )
+        elif prefer_fiscal_year is not None:
+            period_alignment = "fallback_latest"
+
         return {
             "market_data": market_data,
             "structured_source": "sec_companyfacts",
@@ -404,6 +457,8 @@ def fetch_sec_companyfacts_fundamentals(
                 "cik": cik,
                 "entity_name": entity,
                 "fiscal_year": fiscal_year,
+                "requested_fiscal_year": prefer_fiscal_year,
+                "period_alignment": period_alignment,
                 "period_end": period_end,
                 "form": revenue_meta.get("form"),
                 "filed": revenue_meta.get("filed"),

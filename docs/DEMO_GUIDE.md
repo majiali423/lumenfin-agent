@@ -3,6 +3,12 @@
 Use the offline demo first. Live demos require configured providers and should
 never print API keys.
 
+## Report length mode (UI / API)
+
+Optional explicit `output_format`: `research_report` (default) |
+`executive_summary` (brief) | `table_summary`. Only the UI button / API field
+shortens the report; query keywords such as「简版」do **not** auto-trim.
+
 ## Offline reliability demo
 
 ```bash

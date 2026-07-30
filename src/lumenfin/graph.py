@@ -80,8 +80,11 @@ def _base_initial_state(
     rag_index_stats: dict[str, Any] | None = None,
     rag_document_ids: list[str] | None = None,
     rag_tenant_id: str | None = None,
+    requested_output_format: str | None = None,
 ) -> FinanceState:
-    return {
+    from .reporting import normalize_requested_output_format
+
+    state: FinanceState = {
         "query": query,
         "thread_id": thread_id,
         "document_contexts": document_contexts or [],
@@ -114,6 +117,10 @@ def _base_initial_state(
         "input_guardrail_summary": {},
         "data_mode": app_config.data_mode,
     }
+    normalized = normalize_requested_output_format(requested_output_format)
+    if normalized:
+        state["requested_output_format"] = normalized
+    return state
 
 
 class LumenFinAgentSystem:
@@ -254,6 +261,7 @@ class LumenFinAgentSystem:
         rag_index_stats: dict[str, Any] | None = None,
         rag_document_ids: list[str] | None = None,
         rag_tenant_id: str | None = None,
+        output_format: str | None = None,
     ) -> dict[str, Any]:
         self.reasoning_memory.events.clear()
         initial_state = _base_initial_state(
@@ -264,6 +272,7 @@ class LumenFinAgentSystem:
             rag_index_stats=rag_index_stats,
             rag_document_ids=rag_document_ids,
             rag_tenant_id=rag_tenant_id,
+            requested_output_format=output_format,
         )
         config = {"configurable": {"thread_id": thread_id}}
         result = self.graph.invoke(initial_state, config=config)

@@ -16,6 +16,10 @@ from .tools import KNOWN_ALIASES, alias_mentioned
 logger = logging.getLogger(__name__)
 
 
+class EmptyVisibleCompletionError(RuntimeError):
+    """Raised when a provider returns no user-visible assistant content."""
+
+
 def _extract_companies_from_text(text: str) -> list[str]:
     lowered = text.lower()
     found: list[str] = []
@@ -103,6 +107,7 @@ class DeepSeekChatClient(BaseLLMClient):
             ],
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "thinking": {"type": "disabled"},
         }
         last_error: Exception | None = None
         data: dict | None = None
@@ -112,9 +117,22 @@ class DeepSeekChatClient(BaseLLMClient):
                     response = client.post(url, headers=headers, json=payload)
                     response.raise_for_status()
                     data = response.json()
+                choice = data["choices"][0]
+                visible_content = (choice["message"].get("content") or "").strip()
+                if not visible_content:
+                    finish_reason = str(choice.get("finish_reason") or "unknown")
+                    raise EmptyVisibleCompletionError(
+                        "DeepSeek returned empty visible content "
+                        f"(finish_reason={finish_reason}, attempt={attempt + 1})."
+                    )
                 break
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
+                if isinstance(exc, EmptyVisibleCompletionError):
+                    if attempt >= self.settings.max_retries - 1:
+                        raise
+                    time.sleep(self.settings.retry_backoff_seconds * (2**attempt))
+                    continue
                 # 401/400/etc. are permanent — do not burn retries.
                 if not is_transient_exception(exc) or attempt >= self.settings.max_retries - 1:
                     raise
@@ -127,12 +145,7 @@ class DeepSeekChatClient(BaseLLMClient):
             int(usage.get("prompt_tokens", 0)),
             int(usage.get("completion_tokens", 0)),
         )
-        message = data["choices"][0]["message"]
-        content = (message.get("content") or "").strip()
-        # DeepSeek v4 may emit reasoning_content; prefer visible content.
-        if not content:
-            content = (message.get("reasoning_content") or "").strip()
-        return content
+        return visible_content
 
 
 def _is_company_extract_prompt(prompt_lower: str) -> bool:

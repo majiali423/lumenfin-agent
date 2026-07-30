@@ -404,6 +404,25 @@ textarea.sidebar-input{min-height:100px;line-height:1.6;}
     <div class="shortcut-hint">Ctrl+Enter to submit</div>
 
     <div class="sidebar-section">
+      <div class="sidebar-label">报告模式 / Report Mode</div>
+      <div class="report-mode-row" style="display:flex;gap:8px;flex-wrap:wrap;">
+        <label class="report-mode-option" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="radio" name="outputFormat" value="research_report" checked>
+          完整报告
+        </label>
+        <label class="report-mode-option" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="radio" name="outputFormat" value="executive_summary">
+          简版
+        </label>
+        <label class="report-mode-option" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+          <input type="radio" name="outputFormat" value="table_summary">
+          仅表格
+        </label>
+      </div>
+      <div class="upload-hint" style="margin-top:6px;">仅按钮生效；query 里的「简版/摘要」不会自动裁剪长报告。</div>
+    </div>
+
+    <div class="sidebar-section">
       <div class="sidebar-label">Session ID</div>
       <input type="text" class="sidebar-input" id="threadId" placeholder="Auto-generated..." style="min-height:auto;">
     </div>
@@ -476,6 +495,16 @@ textarea.sidebar-input{min-height:100px;line-height:1.6;}
         <div class="clarify-title">需要补充信息</div>
         <div class="clarify-desc">Query Planner 检测到查询缺少关键上下文。请补充后继续分析（将从同一 checkpoint 恢复）。</div>
         <ul class="clarify-questions" id="clarifyQuestions"></ul>
+        <div class="sidebar-section" style="margin-bottom:12px;">
+          <div class="clarify-label">Company scope（查询与上传不一致时）</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('uploaded')">uploaded</button>
+            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('query')">query</button>
+            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('both')">both</button>
+          </div>
+          <input type="hidden" id="clarifyCompanyScope" value="">
+          <div class="upload-hint" id="clarifyScopeHint" style="margin-top:6px;">未选择 scope</div>
+        </div>
         <div class="clarify-fields">
           <div>
             <div class="clarify-label">Company / 公司</div>
@@ -688,9 +717,18 @@ async function runProgressFromAudit(auditLog){
 }
 
 // ═══════════ RUN ANALYSIS ═══════════
+function selectedOutputFormat(){
+  var el=document.querySelector('input[name="outputFormat"]:checked');
+  return el?el.value:'research_report';
+}
+function setCompanyScope(scope){
+  document.getElementById('clarifyCompanyScope').value=scope;
+  document.getElementById('clarifyScopeHint').textContent='已选 company_scope='+scope;
+}
 async function runAnalysis(){
   var query=document.getElementById('query').value.trim();
   if(!query){showToast('Please enter an analysis query');return;}
+  var outputFormat=selectedOutputFormat();
   var btn=document.getElementById('submitBtn'),btnText=document.getElementById('btnText'),spinner=document.getElementById('btnSpinner');
   btn.disabled=true;btnText.textContent='Pipeline Running...';spinner.style.display='inline-block';
   resetProgress();
@@ -706,12 +744,12 @@ async function runAnalysis(){
   try{
     var r,d;
     if(uploadedFiles.length>0){
-      var fd=new FormData();fd.append('query',query);fd.append('thread_id',document.getElementById('threadId').value||'');fd.append('export_artifacts','true');
+      var fd=new FormData();fd.append('query',query);fd.append('thread_id',document.getElementById('threadId').value||'');fd.append('export_artifacts','true');fd.append('output_format',outputFormat);
       for(var i=0;i<uploadedFiles.length;i++)fd.append('files',uploadedFiles[i]);
       r=await fetch('/api/v1/analyze-upload',{method:'POST',body:fd});
     }else{
       r=await fetch('/api/v1/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({query:query,thread_id:document.getElementById('threadId').value||undefined,export_artifacts:true})});
+        body:JSON.stringify({query:query,thread_id:document.getElementById('threadId').value||undefined,export_artifacts:true,output_format:outputFormat})});
     }
     clearInterval(progressTimer);
     if(!r.ok){var err=await r.json().catch(function(){return{};});throw new Error(err.detail||r.statusText);}
@@ -739,20 +777,27 @@ function showClarificationPanel(d){
   document.getElementById('clarifyQuestions').innerHTML=qs.length?qs.map(function(q){return'<li>'+q+'</li>';}).join(''):'<li>请补充公司与分析时间范围。</li>';
   document.getElementById('clarifyCompany').value='';
   document.getElementById('clarifyTimeRange').value='';
+  document.getElementById('clarifyCompanyScope').value='';
+  document.getElementById('clarifyScopeHint').textContent='未选择 scope';
   lucide.createIcons();
 }
 async function submitClarification(){
   if(!pendingClarification||!pendingClarification.thread_id){showToast('No pending clarification session');return;}
   var company=document.getElementById('clarifyCompany').value.trim();
   var timeRange=document.getElementById('clarifyTimeRange').value.trim();
-  if(!company&&!timeRange){showToast('请至少填写公司或时间范围');return;}
+  var companyScope=document.getElementById('clarifyCompanyScope').value.trim();
+  if(!company&&!timeRange&&!companyScope){showToast('请填写公司/时间范围，或选择 company_scope');return;}
   var btn=document.getElementById('clarifyBtn'),btnText=document.getElementById('clarifyBtnText'),spinner=document.getElementById('clarifySpinner');
   btn.disabled=true;btnText.textContent='Resuming...';spinner.style.display='inline-block';
   document.getElementById('clarifyState').style.display='none';
   document.getElementById('loadingState').style.display='';
   try{
+    var clarification={};
+    if(company)clarification.company=company;
+    if(timeRange)clarification.time_range=timeRange;
+    if(companyScope)clarification.company_scope=companyScope;
     var r=await fetch('/api/v1/clarify',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({thread_id:pendingClarification.thread_id,clarification:{company:company,time_range:timeRange},export_artifacts:true})});
+      body:JSON.stringify({thread_id:pendingClarification.thread_id,clarification:clarification,export_artifacts:true})});
     if(!r.ok){var err=await r.json().catch(function(){return{};});throw new Error(err.detail||r.statusText);}
     var d=await r.json();lastResult=d;pendingClarification=null;
     document.getElementById('loadingState').style.display='none';

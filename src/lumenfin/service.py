@@ -156,6 +156,7 @@ class LumenFinAnalysisService:
         structured_metrics: dict[str, dict] | None = None,
         document_ids: list[str] | None = None,
         tenant_id: str | None = None,
+        output_format: str | None = None,
     ) -> dict:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
         system = self._system_for(actual_thread_id)
@@ -210,6 +211,7 @@ class LumenFinAnalysisService:
             rag_index_stats=rag_index_stats or None,
             rag_document_ids=rag_document_ids or None,
             rag_tenant_id=tenant,
+            output_format=output_format,
         )
         self.checkpoint_repo.upsert(
             thread_id=actual_thread_id,
@@ -303,6 +305,7 @@ class LumenFinAnalysisService:
         thread_id: str,
         export_artifacts: bool = True,
         document_paths: list[str] | None = None,
+        output_format: str | None = None,
     ) -> bool:
         if not self.config.redis_url:
             return False
@@ -314,6 +317,7 @@ class LumenFinAnalysisService:
                 "thread_id": thread_id,
                 "export_artifacts": export_artifacts,
                 "document_paths": document_paths or [],
+                "output_format": output_format,
             }
         )
         return True
@@ -325,6 +329,7 @@ class LumenFinAnalysisService:
         thread_id: str,
         export_artifacts: bool = True,
         document_paths: list[str] | None = None,
+        output_format: str | None = None,
     ) -> None:
         self.repository.update_job_status(job_id=job_id, status="running")
         try:
@@ -333,6 +338,7 @@ class LumenFinAnalysisService:
                 thread_id=thread_id,
                 export_artifacts=export_artifacts,
                 document_paths=document_paths,
+                output_format=output_format,
             )
             self.repository.update_job_status(
                 job_id=job_id,

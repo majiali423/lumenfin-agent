@@ -181,6 +181,7 @@ def create_app(
                 query=payload.query,
                 thread_id=payload.thread_id,
                 export_artifacts=payload.export_artifacts,
+                output_format=payload.output_format,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -206,6 +207,7 @@ def create_app(
                 thread_id=payload.thread_id,
                 export_artifacts=payload.export_artifacts,
                 structured_metrics=payload.company_metrics,
+                output_format=payload.output_format,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -217,6 +219,7 @@ def create_app(
         thread_id: str | None = Form(default=None),
         export_artifacts: bool = Form(default=True),
         include_state: bool = Form(default=False),
+        output_format: str | None = Form(default=None),
         files: list[UploadFile] = File(...),
         _: None = Depends(auth_dependency),
     ) -> AnalyzeResponse:
@@ -232,6 +235,7 @@ def create_app(
                 thread_id=thread_id,
                 export_artifacts=export_artifacts,
                 document_paths=saved_paths,
+                output_format=output_format,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -335,6 +339,7 @@ def create_app(
             payload.query,
             created["thread_id"],
             payload.export_artifacts,
+            output_format=payload.output_format,
         )
         if not queued:
             background_tasks.add_task(
@@ -343,6 +348,8 @@ def create_app(
                 payload.query,
                 created["thread_id"],
                 payload.export_artifacts,
+                None,
+                payload.output_format,
             )
         return SubmitJobResponse(**created, queue_backend="redis" if queued else "background-task")
 
@@ -352,6 +359,7 @@ def create_app(
         query: str = Form(...),
         thread_id: str | None = Form(default=None),
         export_artifacts: bool = Form(default=True),
+        output_format: str | None = Form(default=None),
         files: list[UploadFile] = File(...),
         _: None = Depends(auth_dependency),
     ) -> SubmitJobResponse:
@@ -363,6 +371,7 @@ def create_app(
             created["thread_id"],
             export_artifacts,
             document_paths=saved_paths,
+            output_format=output_format,
         )
         if not queued:
             background_tasks.add_task(
@@ -372,6 +381,7 @@ def create_app(
                 created["thread_id"],
                 export_artifacts,
                 saved_paths,
+                output_format,
             )
         return SubmitJobResponse(**created, queue_backend="redis" if queued else "background-task")
 

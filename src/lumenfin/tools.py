@@ -166,6 +166,7 @@ def retrieve_company_payload(
     fetch_live_fundamentals: bool = False,
     fetch_sec_fundamentals: bool = False,
     prefer_uploaded_only: bool = False,
+    prefer_fiscal_year: int | None = None,
 ) -> dict[str, Any]:
     """Build a company payload from documents / SEC / Yahoo / sample.
 
@@ -283,10 +284,25 @@ def retrieve_company_payload(
     if fetch_sec_fundamentals:
         from .sec_fundamentals import fetch_sec_companyfacts_fundamentals
 
-        sec_live = fetch_sec_companyfacts_fundamentals(symbol, errors=provider_errors)
+        sec_live = fetch_sec_companyfacts_fundamentals(
+            symbol,
+            errors=provider_errors,
+            prefer_fiscal_year=prefer_fiscal_year,
+        )
         if sec_live and sec_live.get("market_data"):
             merged, filled = _merge_live(sec_live)
             merged = _annotate_fallback(merged, provider="sec_companyfacts", filled_keys=filled)
+            if prefer_fiscal_year is not None:
+                meta = dict(merged.get("fundamentals_meta") or {})
+                meta.setdefault("requested_fiscal_year", prefer_fiscal_year)
+                if meta.get("period_alignment") is None:
+                    used = meta.get("fiscal_year")
+                    meta["period_alignment"] = (
+                        "exact"
+                        if used is not None and int(used) == int(prefer_fiscal_year)
+                        else "fallback_latest"
+                    )
+                merged["fundamentals_meta"] = meta
             if provider_errors:
                 merged["provider_errors"] = list(provider_errors)
             return _finalize_company_payload(merged)

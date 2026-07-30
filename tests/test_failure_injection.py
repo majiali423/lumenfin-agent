@@ -104,6 +104,58 @@ class FailureInjectionTestCase(unittest.TestCase):
 
         self.assertEqual(content, "ok")
         self.assertEqual(mock_http.__enter__.return_value.post.call_count, 2)
+        sent_payload = mock_http.__enter__.return_value.post.call_args.kwargs["json"]
+        self.assertEqual(sent_payload["thinking"], {"type": "disabled"})
+
+    def test_deepseek_never_returns_reasoning_content_as_visible_text(self) -> None:
+        settings = LLMSettings(
+            api_key="test-key",
+            base_url="https://api.deepseek.com",
+            model="deepseek-v4-flash",
+            timeout_seconds=1,
+            max_retries=2,
+            retry_backoff_seconds=0,
+        )
+        empty_response = MagicMock()
+        empty_response.raise_for_status = MagicMock()
+        empty_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "internal reasoning must not escape",
+                    },
+                    "finish_reason": "length",
+                }
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 220},
+        }
+        visible_response = MagicMock()
+        visible_response.raise_for_status = MagicMock()
+        visible_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {"content": "Safe visible answer."},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+        }
+        mock_http = MagicMock()
+        mock_http.__enter__.return_value.post.side_effect = [
+            empty_response,
+            visible_response,
+        ]
+
+        with (
+            patch("lumenfin.llm.httpx.Client", return_value=mock_http),
+            patch("lumenfin.llm.time.sleep", return_value=None),
+        ):
+            content = DeepSeekChatClient(settings).chat("system", "user")
+
+        self.assertEqual(content, "Safe visible answer.")
+        self.assertNotIn("internal reasoning", content)
+        self.assertEqual(mock_http.__enter__.return_value.post.call_count, 2)
 
     def test_deepseek_client_does_not_retry_http_401(self) -> None:
         settings = LLMSettings(

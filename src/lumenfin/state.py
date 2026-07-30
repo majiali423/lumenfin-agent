@@ -20,6 +20,7 @@ class AuditEvent(TypedDict, total=False):
 
 class FinanceState(TypedDict, total=False):
     query: str
+    requested_output_format: str
     companies: list[str]
     target_symbols: dict[str, str]
     query_plan: dict[str, Any]
