@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +87,9 @@ def parse_pdf_document(file_path: Path) -> dict[str, Any]:
     detected_companies = list(entity.get("detected_companies") or [])
     mentioned = list(entity.get("mentioned_companies") or detected_companies)
     # Document-level hints remain a fallback for single-entity filings.
-    metric_hints = _extract_metric_hints(full_text)
+    extracted = extract_metric_amounts(full_text)
+    metric_hints = _compatibility_hints(extracted)
+    metric_hint_meta = {key: amount_to_meta(amount) for key, amount in extracted.items()}
     hint_scope = detected_companies or mentioned
     per_company_hints = merge_per_company_metric_hints(full_text, hint_scope)
     if len(detected_companies) == 1 and detected_companies[0] in per_company_hints:
@@ -104,6 +107,7 @@ def parse_pdf_document(file_path: Path) -> dict[str, Any]:
         "mentioned_companies": mentioned,
         "primary_company": entity.get("primary_company"),
         "metric_hints": metric_hints,
+        "metric_hint_meta": metric_hint_meta,
         "per_company_metric_hints": per_company_hints,
         "source_type": "pdf",
     }
@@ -111,63 +115,195 @@ def parse_pdf_document(file_path: Path) -> dict[str, Any]:
 
 # Absolute metrics that live on LumenFin's billion-USD scale after normalization.
 _ABS_BILLION_METRICS = frozenset({"revenue", "ebitda", "operating_income", "r_and_d"})
-# Unitless extracted values above this are almost never already-in-billions annual figures;
-# SEC tables commonly express them in millions without repeating the unit on each cell.
+# Unitless magnitudes at/above this may be inferred as statement millions (low confidence).
 _UNITLESS_MILLION_FLOOR = 1000.0
+
+_METRIC_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("revenue", [r"revenue", r"revenues", r"收入", r"营收"]),
+    ("ebitda", [r"ebitda"]),
+    ("r_and_d", [r"r\s*[&]\s*d\b", r"r\s+&\s+d\b", r"research\s+(?:and|&)\s+development", r"研发"]),
+    ("operating_income", [r"operating\s+income", r"营业利润", r"经营利润"]),
+]
+
+
+@dataclass(frozen=True)
+class ExtractedAmount:
+    raw_value: float
+    raw_scale: str | None
+    currency: str | None
+    normalized_value: float | None
+    normalized_unit: str | None
+    normalization_source: str
+    confidence: str
+    period_hint: str | None = None
+
+
+def amount_to_meta(amount: ExtractedAmount) -> dict[str, Any]:
+    return asdict(amount)
 
 
 def detect_statement_scale(text: str) -> str | None:
     """Detect filing table/statement unit from captions like '(In millions)'.
 
     Returns ``million``, ``thousand``, ``billion``, or ``None`` when undeclared.
+    When multiple distinct statement scales appear in one blob, returns ``None`` so
+    callers do not silently apply one caption to another table (low-confidence path).
     """
     lowered = (text or "").lower()
     if not lowered:
         return None
-    # Prefer the most specific / common SEC caption forms first.
+    found: list[str] = []
     if re.search(
-        r"\(\s*in\s+millions(?:\s+of\s+(?:u\.?s\.?\s+)?dollars)?\s*\)"
-        r"|\bin\s+millions\s+of\s+(?:u\.?s\.?\s+)?dollars\b"
+        r"\(\s*in\s+millions(?:\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros))?\s*\)"
+        r"|\bin\s+millions\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros)\b"
         r"|\b\(millions\)\b"
         r"|单位[：:]\s*百万",
         lowered,
     ):
-        return "million"
+        found.append("million")
     if re.search(
-        r"\(\s*in\s+thousands(?:\s+of\s+(?:u\.?s\.?\s+)?dollars)?\s*\)"
-        r"|\bin\s+thousands\s+of\s+(?:u\.?s\.?\s+)?dollars\b"
+        r"\(\s*in\s+thousands(?:\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros))?\s*\)"
+        r"|\bin\s+thousands\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros)\b"
         r"|\b\(thousands\)\b"
         r"|单位[：:]\s*千",
         lowered,
     ):
-        return "thousand"
+        found.append("thousand")
     if re.search(
-        r"\(\s*in\s+billions(?:\s+of\s+(?:u\.?s\.?\s+)?dollars)?\s*\)"
-        r"|\bin\s+billions\s+of\s+(?:u\.?s\.?\s+)?dollars\b"
+        r"\(\s*in\s+billions(?:\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros))?\s*\)"
+        r"|\bin\s+billions\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros)\b"
         r"|\b\(billions\)\b"
         r"|单位[：:]\s*十亿",
         lowered,
     ):
-        return "billion"
+        found.append("billion")
+    unique = list(dict.fromkeys(found))
+    if len(unique) == 1:
+        return unique[0]
     return None
+
+
+def detect_statement_currency(text: str) -> str | None:
+    lowered = (text or "").lower()
+    if not lowered:
+        return None
+    if re.search(r"\b(?:eur|euro|euros)\b|单位[：:]\s*欧元", lowered):
+        return "EUR"
+    if re.search(r"\b(?:u\.?s\.?\s*)?dollars?\b|\busd\b|\$", lowered):
+        return "USD"
+    return None
+
+
+def detect_period_hint(text: str) -> str | None:
+    lowered = (text or "").lower()
+    if re.search(r"\bthree months ended\b|\bquarter(?:ly)?\b|\bq[1-4]\b", lowered):
+        return "quarter"
+    if re.search(r"\bfiscal year\b|\bfy\s*20\d{2}\b|\byear ended\b", lowered):
+        return "annual"
+    return None
+
+
+def _looks_already_normalized(value: float, scale: str | None) -> bool:
+    """Avoid double-scaling values already projected onto billion scale."""
+    if scale not in {"million", "thousand"}:
+        return False
+    magnitude = abs(float(value))
+    if magnitude >= _UNITLESS_MILLION_FLOOR:
+        return False
+    # Fractional magnitudes under a statement caption are usually already projected
+    # (e.g. re-running normalize on 245.122). Integer table cells like 500 still scale.
+    return abs(magnitude - round(magnitude, 0)) > 1e-9 and magnitude > 0.05
+
+
+def normalize_extracted_amount(
+    raw_value: float,
+    *,
+    raw_scale: str | None,
+    currency: str | None,
+    normalization_source: str,
+    period_hint: str | None = None,
+) -> ExtractedAmount:
+    """Project one raw statement amount exactly once."""
+    value = float(raw_value)
+    scale = raw_scale
+    confidence = "high"
+    source = normalization_source
+    unit: str | None = None
+    normalized: float | None = value
+
+    if currency not in (None, "USD"):
+        return ExtractedAmount(
+            raw_value=value,
+            raw_scale=scale,
+            currency=currency,
+            normalized_value=None,
+            normalized_unit=None,
+            normalization_source=source or "non_usd",
+            confidence="low",
+            period_hint=period_hint,
+        )
+
+    if scale == "million":
+        if not _looks_already_normalized(value, scale):
+            normalized = value / 1000.0
+        unit = "billion_usd"
+        confidence = "high" if source in {"table_caption", "inline_unit"} else confidence
+    elif scale == "thousand":
+        if not _looks_already_normalized(value, scale):
+            normalized = value / 1_000_000.0
+        unit = "billion_usd"
+        confidence = "high"
+    elif scale == "billion":
+        normalized = value
+        unit = "billion_usd"
+        confidence = "high"
+    elif abs(value) >= _UNITLESS_MILLION_FLOOR:
+        normalized = value / 1000.0
+        scale = "million"
+        unit = "billion_usd"
+        source = "inferred_million"
+        confidence = "low"
+    else:
+        unit = "billion_usd"
+        source = source or "unitless"
+        confidence = "low"
+
+    if period_hint == "quarter" and confidence == "high":
+        confidence = "low"
+
+    if normalized is not None:
+        normalized = round(float(normalized), 4)
+    return ExtractedAmount(
+        raw_value=value,
+        raw_scale=scale,
+        currency=currency or "USD",
+        normalized_value=normalized,
+        normalized_unit=unit,
+        normalization_source=source,
+        confidence=confidence,
+        period_hint=period_hint,
+    )
 
 
 def normalize_metric_hints_to_billion_usd(
     hints: dict[str, float],
     *,
     text: str = "",
+    hint_meta: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, float]:
-    """Normalize absolute document hints onto the shared billion-USD scale.
+    """Normalize absolute document hints onto the shared billion-USD scale (compat path).
 
-    - Honors document-level ``(In millions)`` / thousands captions when present.
-    - For unitless absurd magnitudes (e.g. 245122), assumes millions and divides by 1e3.
-    - Drops revenue that remains implausible after scaling (shared Yahoo ceiling).
+    Scaling happens once per value. Unitless large magnitudes may still be projected for
+    compatibility, but accompanying ``hint_meta`` (when built via ``extract_metric_amounts``)
+    marks them ``confidence=low``.
     """
     if not hints:
         return {}
     from .fundamentals import is_plausible_revenue_billion_usd
 
     scale = detect_statement_scale(text)
+    currency = detect_statement_currency(text)
+    period_hint = detect_period_hint(text)
     out: dict[str, float] = {}
     for key, raw in hints.items():
         try:
@@ -175,23 +311,26 @@ def normalize_metric_hints_to_billion_usd(
         except (TypeError, ValueError):
             continue
         base_key = key[:-5] if key.endswith("_2025") else key
-        if base_key in _ABS_BILLION_METRICS:
-            if scale == "million" and value >= _UNITLESS_MILLION_FLOOR:
-                # "(In millions)" tables: 245122 → 245.122B. Keep smaller values that
-                # already look like billion-scale (e.g. prose "245.1 billion").
-                value = value / 1000.0
-            elif scale == "thousand" and value >= 10_000:
-                value = value / 1_000_000.0
-            elif scale is None and value >= _UNITLESS_MILLION_FLOOR:
-                value = value / 1000.0
-            value = round(value, 4)
-        out[key] = value
+        if base_key not in _ABS_BILLION_METRICS:
+            out[key] = value
+            continue
+        meta = (hint_meta or {}).get(key) or (hint_meta or {}).get(base_key)
+        if meta and meta.get("normalized_value") is not None and meta.get("normalized_unit") == "billion_usd":
+            out[key] = float(meta["normalized_value"])
+            continue
+        amount = normalize_extracted_amount(
+            value,
+            raw_scale=scale,
+            currency=currency,
+            normalization_source="table_caption" if scale else "unitless",
+            period_hint=period_hint,
+        )
+        if amount.normalized_unit == "billion_usd" and amount.normalized_value is not None:
+            out[key] = float(amount.normalized_value)
 
     revenue = out.get("revenue")
     if revenue is not None and not is_plausible_revenue_billion_usd(revenue):
-        # Only attempt a millions→billions rescue when the residual still looks like
-        # an unscaled table magnitude (not a barely-over-ceiling billion figure).
-        if float(revenue) >= _UNITLESS_MILLION_FLOOR:
+        if abs(float(revenue)) >= _UNITLESS_MILLION_FLOOR:
             rescued = round(float(revenue) / 1000.0, 4)
             if is_plausible_revenue_billion_usd(rescued):
                 out["revenue"] = rescued
@@ -199,7 +338,7 @@ def normalize_metric_hints_to_billion_usd(
                     base_key = key[:-5] if key.endswith("_2025") else key
                     if (
                         base_key in _ABS_BILLION_METRICS - {"revenue"}
-                        and out[key] >= _UNITLESS_MILLION_FLOOR
+                        and abs(out[key]) >= _UNITLESS_MILLION_FLOOR
                     ):
                         out[key] = round(float(out[key]) / 1000.0, 4)
             else:
@@ -209,40 +348,144 @@ def normalize_metric_hints_to_billion_usd(
     return out
 
 
+def _parse_raw_metric_number(
+    context: str,
+    *,
+    document_scale: str | None = None,
+    document_currency: str | None = None,
+    period_hint: str | None = None,
+) -> ExtractedAmount | None:
+    """Raw extraction only; normalization is applied once via ``normalize_extracted_amount``.
+
+    Forward context may contain a later table's caption; do not let that override the
+    caller-provided local/document scale. Inline units on the number itself still win.
+    """
+    local_currency = detect_statement_currency(context) or document_currency
+    local_period = detect_period_hint(context) or period_hint
+    for num_match in re.finditer(r"[-$]?\s*([0-9][0-9,\.]+)", context):
+        raw = num_match.group(1).replace(",", "")
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if context[num_match.start() : num_match.start() + 1] == "-" or (
+            num_match.start() > 0 and context[num_match.start() - 1] == "-"
+        ):
+            value = -abs(value)
+        suffix = context[num_match.end() : num_match.end() + 4].lstrip()
+        if suffix.startswith("%"):
+            continue
+        if 2020 <= value <= 2035 and value == int(value):
+            continue
+        after = context[num_match.end() : num_match.end() + 24].strip().lower()
+        has_billion = any(token in after for token in ("billion", "亿", "万亿", "bn"))
+        has_million = any(token in after for token in ("million", "万", "mm")) and not has_billion
+        if has_million:
+            scale = "million"
+            source = "inline_unit"
+        elif has_billion:
+            scale = "billion"
+            source = "inline_unit"
+        elif document_scale:
+            scale = document_scale
+            source = "table_caption"
+        else:
+            scale = None
+            source = "unitless"
+        return normalize_extracted_amount(
+            value,
+            raw_scale=scale,
+            currency=local_currency,
+            normalization_source=source,
+            period_hint=local_period,
+        )
+    return None
+
+
+def _extract_metric_amounts_raw(
+    text: str,
+    *,
+    document_scale: str | None = None,
+) -> dict[str, ExtractedAmount]:
+    amounts: dict[str, ExtractedAmount] = {}
+    lowered = text.lower()
+    doc_scale = document_scale if document_scale is not None else detect_statement_scale(text)
+    doc_currency = detect_statement_currency(text)
+    period_hint = detect_period_hint(text)
+
+    for metric, keywords in _METRIC_KEYWORDS:
+        for kw in keywords:
+            kw_match = re.search(kw, lowered, flags=re.IGNORECASE)
+            if not kw_match:
+                continue
+            # Captions often sit before the label; keep numeric search forward-only.
+            prefix = lowered[max(0, kw_match.start() - 160) : kw_match.start()]
+            local_scale = detect_statement_scale(prefix) or doc_scale
+            local_currency = detect_statement_currency(prefix) or doc_currency
+            context = lowered[kw_match.end() : kw_match.end() + 200]
+            # Preserve a leading minus that sits just before the match window.
+            window_start = kw_match.end()
+            if window_start > 0 and text[window_start - 1] == "-":
+                context = "-" + context
+            amount = _parse_raw_metric_number(
+                context,
+                document_scale=local_scale,
+                document_currency=local_currency,
+                period_hint=period_hint,
+            )
+            if amount is not None:
+                amounts[metric] = amount
+                break
+    return amounts
+
+
+def extract_metric_amounts(text: str) -> dict[str, ExtractedAmount]:
+    return _extract_metric_amounts_raw(text)
+
+
+def _compatibility_hints(amounts: dict[str, ExtractedAmount]) -> dict[str, float]:
+    from .fundamentals import is_plausible_revenue_billion_usd
+
+    out: dict[str, float] = {}
+    for key, amount in amounts.items():
+        if amount.normalized_unit != "billion_usd" or amount.normalized_value is None:
+            continue
+        out[key] = float(amount.normalized_value)
+    revenue = out.get("revenue")
+    if revenue is not None and not is_plausible_revenue_billion_usd(revenue):
+        out.pop("revenue", None)
+    return out
+
+
+def extract_metric_hint_meta(text: str, metric: str = "revenue") -> dict[str, Any] | None:
+    """Return auditable normalization metadata for one metric (Phase-2 contract)."""
+    amounts = extract_metric_amounts(text)
+    amount = amounts.get(metric)
+    if amount is None:
+        # Fall back to first number after an explicit metric-less window for unit tests.
+        amount = _parse_raw_metric_number(
+            text.lower(),
+            document_scale=detect_statement_scale(text),
+            document_currency=detect_statement_currency(text),
+            period_hint=detect_period_hint(text),
+        )
+        if amount is None:
+            return None
+    return amount_to_meta(amount)
+
+
 def _extract_metric_hints_raw(
     text: str,
     *,
     document_scale: str | None = None,
 ) -> dict[str, float]:
-    """Extract raw absolute hints before shared billion-USD normalization."""
-    hints: dict[str, float] = {}
-    lowered = text.lower()
-    doc_scale = document_scale if document_scale is not None else detect_statement_scale(text)
-
-    for metric, keywords in [
-        ("revenue", [r"revenue", r"revenues", r"收入", r"营收"]),
-        ("ebitda", [r"ebitda"]),
-        ("r_and_d", [r"r\s*[&]\s*d\b", r"r\s+&\s+d\b", r"research\s+(?:and|&)\s+development", r"研发"]),
-        ("operating_income", [r"operating\s+income", r"营业利润", r"经营利润"]),
-    ]:
-        for kw in keywords:
-            kw_match = re.search(kw, lowered, flags=re.IGNORECASE)
-            if not kw_match:
-                continue
-            # Captions like "(In millions)" often sit before the label; inspect them for
-            # scale only. Numeric search stays forward so prior metrics are not stolen.
-            prefix = lowered[max(0, kw_match.start() - 120) : kw_match.start()]
-            local_scale = detect_statement_scale(prefix) or doc_scale
-            context = lowered[kw_match.end() : kw_match.end() + 200]
-            value = _first_metric_number(context, document_scale=local_scale)
-            if value is not None:
-                hints[metric] = value
-                break
-    return hints
+    """Extract raw absolute statement numbers (no billion projection)."""
+    amounts = _extract_metric_amounts_raw(text, document_scale=document_scale)
+    return {key: amount.raw_value for key, amount in amounts.items()}
 
 
 def _extract_metric_hints(text: str) -> dict[str, float]:
-    return normalize_metric_hints_to_billion_usd(_extract_metric_hints_raw(text), text=text)
+    return _compatibility_hints(extract_metric_amounts(text))
 
 
 _COLUMNAR_METRIC_LABELS: list[tuple[str, re.Pattern[str]]] = [
@@ -388,13 +631,13 @@ def extract_metric_hints_for_company(text: str, company: str) -> dict[str, float
     sentence_hits: dict[str, float] = {}
     loose_hits: dict[str, float] = {}
     for window in windows:
-        # Pass document-level scale so window extraction inherits "(In millions)" captions.
-        hints = _extract_metric_hints_raw(window, document_scale=doc_scale)
+        amounts = _extract_metric_amounts_raw(window, document_scale=doc_scale)
+        hints = _compatibility_hints(amounts)
         bucket = sentence_hits if _window_looks_sentence_metric(window) else loose_hits
         for metric, value in hints.items():
             bucket.setdefault(metric, value)
     # Sentence-style evidence wins over first-number-after-header-window noise.
-    return normalize_metric_hints_to_billion_usd({**loose_hits, **sentence_hits}, text=text)
+    return {**loose_hits, **sentence_hits}
 
 
 def merge_per_company_metric_hints(
@@ -426,31 +669,15 @@ def _first_metric_number(
     *,
     document_scale: str | None = None,
 ) -> float | None:
-    local_scale = detect_statement_scale(context) or document_scale
-    for num_match in re.finditer(r"\$?\s*([0-9][0-9,\.]+)", context):
-        raw = num_match.group(1).replace(",", "")
-        try:
-            value = float(raw)
-        except ValueError:
-            continue
-        suffix = context[num_match.end() : num_match.end() + 4].lstrip()
-        if suffix.startswith("%"):
-            continue
-        if 2020 <= value <= 2035 and value == int(value):
-            continue
-        after = context[num_match.end() : num_match.end() + 20].strip().lower()
-        has_billion = any(u in after for u in ["billion", "亿", "万亿", "bn"])
-        has_million = any(u in after for u in ["million", "万", "mm"]) and not has_billion
-        if has_million:
-            value /= 1000
-        elif has_billion:
-            pass
-        elif local_scale == "million" and value >= _UNITLESS_MILLION_FLOOR:
-            value /= 1000
-        elif local_scale == "thousand" and value >= 10_000:
-            value /= 1_000_000
-        elif local_scale is None and value >= _UNITLESS_MILLION_FLOOR:
-            # Unlabeled SEC-style millions (e.g. 245122) → billion USD.
-            value /= 1000
-        return round(value, 1)
-    return None
+    """Compatibility wrapper: return once-normalized billion-USD magnitude when available."""
+    amount = _parse_raw_metric_number(
+        context,
+        document_scale=document_scale,
+        document_currency=detect_statement_currency(context),
+        period_hint=detect_period_hint(context),
+    )
+    if amount is None or amount.normalized_value is None:
+        return None
+    if amount.normalized_unit != "billion_usd":
+        return None
+    return round(float(amount.normalized_value), 1)

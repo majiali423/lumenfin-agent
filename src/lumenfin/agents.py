@@ -477,18 +477,31 @@ class AgentRuntime:
                 for doc in document_contexts
                 if isinstance(doc, dict)
             )
+            hint_meta: dict[str, dict] = {}
+            for doc in document_contexts:
+                if isinstance(doc, dict) and isinstance(doc.get("metric_hint_meta"), dict):
+                    hint_meta.update(doc["metric_hint_meta"])
             normalized_hints = normalize_metric_hints_to_billion_usd(
                 dict(document_summary["metric_hints"]),
                 text=doc_text,
+                hint_meta=hint_meta or None,
             )
+            def _hint_ok(metric: str) -> bool:
+                meta = hint_meta.get(metric) or {}
+                # Missing meta keeps legacy behavior; explicit low confidence cannot alone
+                # promote document_extracted verified absolutes.
+                return meta.get("confidence", "high") != "low"
+
             applied_abs = False
-            if normalized_hints.get("revenue") is not None and is_plausible_revenue_billion_usd(
-                normalized_hints["revenue"]
+            if (
+                normalized_hints.get("revenue") is not None
+                and is_plausible_revenue_billion_usd(normalized_hints["revenue"])
+                and _hint_ok("revenue")
             ):
                 set_fundamental(payload["market_data"], "revenue", normalized_hints["revenue"])
                 applied_abs = True
             for key in ("ebitda", "r_and_d", "operating_income"):
-                if normalized_hints.get(key) is not None:
+                if normalized_hints.get(key) is not None and _hint_ok(key):
                     set_fundamental(payload["market_data"], key, normalized_hints[key])
                     applied_abs = True
             # Prefer document label only when upload alone provided the AST spine.
