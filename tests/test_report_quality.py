@@ -75,6 +75,7 @@ class ReportQualityHelpersTestCase(unittest.TestCase):
                     "fundamentals_meta": {
                         "fiscal_year": 2024,
                         "period_end": "2024-09-28",
+                        "period_end_source": "sec_companyfacts",
                         "period_alignment": "exact",
                     }
                 },
@@ -82,6 +83,7 @@ class ReportQualityHelpersTestCase(unittest.TestCase):
                     "fundamentals_meta": {
                         "fiscal_year": 2024,
                         "period_end": "2024-06-30",
+                        "period_end_source": "sec_companyfacts",
                         "period_alignment": "exact",
                     }
                 },

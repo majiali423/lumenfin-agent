@@ -152,32 +152,51 @@ def infer_fiscal_year_from_documents(
     return None, None
 
 
-# Typical fiscal year-end month/day for common issuers when filing extract has no period_end.
-# These are convention hints for analyst disclosure — not a substitute for filing metadata.
-_ISSUER_FY_END_HINTS: dict[str, tuple[int, int]] = {
-    "Apple": (9, 30),
-    "Microsoft": (6, 30),
-    "NVIDIA": (1, 26),  # late January fiscal year end (approx)
-    "AMD": (12, 28),
-    "Tesla": (12, 31),
-    "Amazon": (12, 31),
-    "Alphabet": (12, 31),
-    "Meta": (12, 31),
+# Typical fiscal calendars for common issuers when filing extract has no period_end.
+# Text hints only — never mint a precise YYYY-MM-DD into period_end facts.
+_ISSUER_FY_CALENDAR_HINTS: dict[str, str] = {
+    "Apple": "typically ends in late September",
+    "Microsoft": "typically ends in late June",
+    "NVIDIA": "typically uses a late-January fiscal year end",
+    "AMD": "calendar-year issuer (late December)",
+    "Tesla": "calendar-year issuer",
+    "Amazon": "calendar-year issuer",
+    "Alphabet": "calendar-year issuer",
+    "Meta": "calendar-year issuer",
 }
+
+# Sources that may populate period_end as an auditable filing/provider fact.
+_PERIOD_END_FACT_SOURCES = frozenset(
+    {
+        "sec_companyfacts",
+        "yahoo_fundamentals",
+        "upload_text",
+        "upload_filename",
+        "filing_text",
+        "provider_metadata",
+        "document_extracted",
+    }
+)
 
 
 def suggest_period_end_hint(company: str | None, fiscal_year: int | None) -> tuple[str | None, str | None]:
-    """Return (YYYY-MM-DD, source_tag) from issuer convention when FY is known."""
-    if not company or fiscal_year is None:
+    """Compatibility wrapper: convention hints are no longer precise dates.
+
+    Returns ``(None, None)`` so callers cannot mint YYYY-MM-DD facts from issuer calendars.
+    Use ``suggest_fiscal_calendar_hint`` for disclosure text.
+    """
+    del company, fiscal_year
+    return None, None
+
+
+def suggest_fiscal_calendar_hint(company: str | None) -> tuple[str | None, str | None]:
+    """Return (human calendar hint, source_tag) from issuer convention tables."""
+    if not company:
         return None, None
-    tip = _ISSUER_FY_END_HINTS.get(str(company))
+    tip = _ISSUER_FY_CALENDAR_HINTS.get(str(company))
     if not tip:
         return None, None
-    month, day = tip
-    try:
-        return f"{int(fiscal_year):04d}-{month:02d}-{day:02d}", "issuer_convention_hint"
-    except (TypeError, ValueError):
-        return None, None
+    return tip, "issuer_convention"
 
 
 def annotate_upload_period_meta(
@@ -191,18 +210,22 @@ def annotate_upload_period_meta(
 
     Priority: existing meta fiscal_year → filename/text inference → query FY
     (tagged ``assumed_from_query`` so analysts know it was not filing-labeled).
-    When period_end is missing, may attach an issuer-convention hint date.
+    Issuer conventions are stored only as ``fiscal_calendar_hint``, never as ``period_end``.
     """
     out = dict(meta or {})
     if prefer_fiscal_year is not None:
         out.setdefault("requested_fiscal_year", int(prefer_fiscal_year))
 
-    def _finalize(used: int | None) -> dict[str, Any]:
-        if used is not None and not str(out.get("period_end") or "").strip():
-            hint, src = suggest_period_end_hint(company, used)
+    def _attach_calendar_hint() -> dict[str, Any]:
+        # Strip legacy convention dates that were previously written into period_end.
+        if str(out.get("period_end_source") or "") == "issuer_convention_hint":
+            out.pop("period_end", None)
+            out.pop("period_end_source", None)
+        if not str(out.get("period_end") or "").strip():
+            hint, src = suggest_fiscal_calendar_hint(company)
             if hint:
-                out["period_end"] = hint
-                out["period_end_source"] = src
+                out["fiscal_calendar_hint"] = hint
+                out["fiscal_calendar_hint_source"] = src
         return out
 
     existing = out.get("fiscal_year")
@@ -220,7 +243,7 @@ def annotate_upload_period_meta(
                 )
             else:
                 out.setdefault("period_alignment", "upload_labeled")
-            return _finalize(used)
+            return _attach_calendar_hint()
 
     inferred, source = infer_fiscal_year_from_documents(
         document_contexts, company=company
@@ -234,17 +257,17 @@ def annotate_upload_period_meta(
             out["period_alignment"] = "fallback_latest"
         else:
             out["period_alignment"] = source or "upload_labeled"
-        return _finalize(int(inferred))
+        return _attach_calendar_hint()
 
     if prefer_fiscal_year is not None:
         # Upload has computable metrics but no FY tag — use query FY with an honest label.
         out["fiscal_year"] = int(prefer_fiscal_year)
         out["fiscal_year_source"] = "query"
         out["period_alignment"] = "assumed_from_query"
-        return _finalize(int(prefer_fiscal_year))
+        return _attach_calendar_hint()
 
     out.setdefault("period_alignment", "unspecified")
-    return _finalize(None)
+    return _attach_calendar_hint()
 
 
 def requested_fiscal_year_from_state(state: dict[str, Any] | None) -> int | None:
@@ -279,9 +302,16 @@ def used_fiscal_year_for_company(state: dict[str, Any] | None, company: str) -> 
 
 
 def period_end_for_company(state: dict[str, Any] | None, company: str) -> str | None:
-    """Return an analyst-facing period-end date string (YYYY-MM-DD) when metadata has one."""
+    """Return filing/provider period_end only when an auditable fact source is present."""
     payload = ((state or {}).get("retrieved_docs") or {}).get(company) or {}
     meta = payload.get("fundamentals_meta") or {}
+    source = str(meta.get("period_end_source") or "").strip()
+    if not source or source == "issuer_convention_hint":
+        return None
+    if source not in _PERIOD_END_FACT_SOURCES and not any(
+        token in source for token in ("sec", "yahoo", "upload", "filing", "provider", "document")
+    ):
+        return None
     for key in ("period_end", "period"):
         raw = str(meta.get(key) or "").strip()
         if not raw:
@@ -289,7 +319,6 @@ def period_end_for_company(state: dict[str, Any] | None, company: str) -> str | 
         match = re.search(r"(20\d{2}-\d{2}-\d{2})", raw)
         if match:
             return match.group(1)
-        # Yahoo sometimes stores column labels like 2024-06-30 00:00:00
         match = re.search(r"(20\d{2}-\d{2}-\d{2})", raw.replace("/", "-"))
         if match:
             return match.group(1)
@@ -348,8 +377,7 @@ def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
         fy_source = str(meta.get("fiscal_year_source") or "")
         period_end = period_end_for_company(state, company) or "n/a"
         pe_source = str(meta.get("period_end_source") or "")
-        if period_end != "n/a" and pe_source == "issuer_convention_hint":
-            period_end = f"{period_end} (issuer convention hint)"
+        calendar_hint = str(meta.get("fiscal_calendar_hint") or "").strip()
         used_label = f"FY{used}" if used is not None else "n/a"
         if requested is None:
             status = alignment or "no FY requested"
@@ -360,13 +388,7 @@ def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
             status = "upload extract; FY assumed from query (filing not year-tagged)"
             any_assumed = True
         elif int(used) == int(requested):
-            if pe_source == "issuer_convention_hint" and fy_source in {
-                "upload_filename",
-                "upload_text",
-                "query",
-            }:
-                status = f"FY label match ({fy_source or alignment}); period-end is convention hint"
-            elif fy_source in {"upload_filename", "upload_text"} or alignment in {
+            if fy_source in {"upload_filename", "upload_text"} or alignment in {
                 "upload_filename",
                 "upload_text",
                 "upload_labeled",
@@ -379,6 +401,13 @@ def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
             any_mismatch = True
         req_label = f"FY{requested}" if requested is not None else "—"
         rows.append((company, req_label, f"{used_label} ({status})", period_end))
+        if calendar_hint:
+            rows[-1] = (
+                company,
+                req_label,
+                f"{used_label} ({status})",
+                period_end if period_end != "n/a" else "n/a",
+            )
 
     if requested is None and not any(
         ((state.get("retrieved_docs") or {}).get(c) or {}).get("fundamentals_meta")
@@ -435,6 +464,21 @@ def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
                 "comparison unless period-end dates above are close."
             )
             lines.append("")
+
+    hint_bits: list[str] = []
+    for company in companies:
+        meta = ((state.get("retrieved_docs") or {}).get(company) or {}).get("fundamentals_meta") or {}
+        tip = str(meta.get("fiscal_calendar_hint") or "").strip()
+        if tip:
+            hint_bits.append(f"{company}: {tip}")
+    if hint_bits:
+        if not any(line.startswith("**Calendar note:**") for line in lines):
+            lines.append("**Calendar note:** Issuer fiscal-calendar conventions (not filing facts):")
+        else:
+            lines.append("Issuer fiscal-calendar conventions (not filing facts):")
+        for bit in hint_bits:
+            lines.append(f"- {bit}")
+        lines.append("")
     return lines
 
 
