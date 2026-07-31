@@ -311,8 +311,128 @@ class PeriodMatch:
     source: str | None = None
 
 
+@dataclass(frozen=True)
+class PeriodIdentity:
+    kind: str
+    year: int | None = None
+    quarter: int | None = None
+    raw: str | None = None
+
+
 _PERIOD_TYPE_TOKENS = frozenset({"annual", "quarter", "ttm", "latest", "model"})
 _ACCEPTABLE_PERIOD_STATUS = frozenset({"exact", "text_match", "not_required"})
+
+
+def parse_period_identity(value: str | None) -> PeriodIdentity:
+    """Parse a concrete fiscal/calendar period label into a comparable identity."""
+    raw = str(value or "").strip()
+    if not raw:
+        return PeriodIdentity("unknown", raw=None)
+    if raw.lower() in _PERIOD_TYPE_TOKENS:
+        return PeriodIdentity("unknown", raw=raw)
+
+    upper = raw.upper()
+    date_match = re.fullmatch(r"(20\d{2})-(\d{2})-(\d{2})", upper)
+    if date_match:
+        year = int(date_match.group(1))
+        month = int(date_match.group(2))
+        quarter = (month - 1) // 3 + 1
+        return PeriodIdentity("date", year=year, quarter=quarter, raw=raw)
+
+    q_match = re.search(
+        r"(?:^|\b)(?:Q\s*([1-4])\s*(20\d{2})|(20\d{2})\s*Q\s*([1-4]))(?:\b|$)",
+        upper,
+    )
+    if q_match:
+        if q_match.group(1) and q_match.group(2):
+            return PeriodIdentity(
+                "quarter", year=int(q_match.group(2)), quarter=int(q_match.group(1)), raw=raw
+            )
+        return PeriodIdentity(
+            "quarter", year=int(q_match.group(3)), quarter=int(q_match.group(4)), raw=raw
+        )
+
+    fy_match = re.search(
+        r"(?:^|\b)(?:FY\s*(20\d{2})|FISCAL\s+YEAR\s*(20\d{2}))(?:\b|$)",
+        upper,
+    )
+    if fy_match:
+        year = int(fy_match.group(1) or fy_match.group(2))
+        return PeriodIdentity("fiscal_year", year=year, raw=raw)
+
+    year_match = re.fullmatch(r"(20\d{2})", upper)
+    if year_match:
+        return PeriodIdentity("calendar_year", year=int(year_match.group(1)), raw=raw)
+
+    # Fallback: extract year if present but keep unknown kind so we do not over-match.
+    years = re.findall(r"20\d{2}", upper)
+    if len(years) == 1 and re.search(r"\bQ[1-4]\b", upper):
+        q = int(re.search(r"\bQ([1-4])\b", upper).group(1))
+        return PeriodIdentity("quarter", year=int(years[0]), quarter=q, raw=raw)
+    if len(years) == 1 and re.search(r"\bFY\b|FISCAL", upper):
+        return PeriodIdentity("fiscal_year", year=int(years[0]), raw=raw)
+    return PeriodIdentity("unknown", year=int(years[0]) if years else None, raw=raw)
+
+
+def _period_identities_compatible(left: PeriodIdentity, right: PeriodIdentity) -> bool:
+    # Both unspecified: compatible when the claim itself does not require a concrete period.
+    if left.kind == "unknown" and right.kind == "unknown":
+        return True
+    if left.kind == "unknown" or right.kind == "unknown":
+        return False
+    if left.year is None or right.year is None or left.year != right.year:
+        return False
+    annual = {"fiscal_year", "calendar_year"}
+    if left.kind in annual and right.kind in annual:
+        return True
+    if left.kind == "quarter" and right.kind == "quarter":
+        return left.quarter == right.quarter
+    if left.kind == "date" and right.kind == "date":
+        return left.quarter == right.quarter
+    # date may align to quarter of same year/quarter number
+    if {left.kind, right.kind} <= {"date", "quarter"}:
+        return left.quarter == right.quarter
+    # annual vs quarter/date is never the same identity
+    return False
+
+
+def _extract_period_identities_from_text(text: str) -> list[PeriodIdentity]:
+    found: list[PeriodIdentity] = []
+    upper = (text or "").upper()
+    for match in re.finditer(r"\bQ\s*([1-4])\s*(20\d{2})\b|\b(20\d{2})\s*Q\s*([1-4])\b", upper):
+        if match.group(1) and match.group(2):
+            found.append(
+                PeriodIdentity(
+                    "quarter",
+                    year=int(match.group(2)),
+                    quarter=int(match.group(1)),
+                    raw=match.group(0),
+                )
+            )
+        else:
+            found.append(
+                PeriodIdentity(
+                    "quarter",
+                    year=int(match.group(3)),
+                    quarter=int(match.group(4)),
+                    raw=match.group(0),
+                )
+            )
+    for match in re.finditer(r"\bFY\s*(20\d{2})\b|\bFISCAL\s+YEAR\s*(20\d{2})\b", upper):
+        year = int(match.group(1) or match.group(2))
+        found.append(PeriodIdentity("fiscal_year", year=year, raw=match.group(0)))
+    for match in re.finditer(r"\b(20\d{2})-(\d{2})-(\d{2})\b", upper):
+        year = int(match.group(1))
+        month = int(match.group(2))
+        found.append(
+            PeriodIdentity(
+                "date",
+                year=year,
+                quarter=(month - 1) // 3 + 1,
+                raw=match.group(0),
+            )
+        )
+    return found
 
 
 def _periods_compatible(claim_period: str | None, evidence_period: str | None, text: str) -> bool:
@@ -333,49 +453,59 @@ def match_period(
     text: str = "",
     *,
     period_type: str | None = None,
+    prefer_local_text: bool = False,
 ) -> PeriodMatch:
     """Compare claim period identity against evidence period / local text."""
     del period_type  # period_type never proves a concrete FY/Q identity.
     if not claim_period:
         return PeriodMatch("not_required", True, None)
 
-    claim = str(claim_period).strip()
-    claim_upper = claim.upper()
-    claim_years = set(re.findall(r"20\d{2}", claim_upper))
-    if not claim_years and not re.search(r"\bQ[1-4]\b", claim_upper):
+    claim_id = parse_period_identity(claim_period)
+    if claim_id.kind == "unknown" and claim_id.year is None:
         return PeriodMatch("not_required", True, None)
+
+    local_ids = _extract_period_identities_from_text(text or "")
+    if local_ids:
+        compatible = [item for item in local_ids if _period_identities_compatible(claim_id, item)]
+        conflicting = [item for item in local_ids if not _period_identities_compatible(claim_id, item)]
+        # Any explicit conflicting label in the inspected window wins over metadata.
+        if conflicting:
+            return PeriodMatch("mismatch", False, "text")
+        if compatible:
+            return PeriodMatch("text_match", True, "text")
+
+    if prefer_local_text and local_ids:
+        # Local labels already handled above; empty compatible set means unknown locally.
+        return PeriodMatch("unknown", False, "text")
 
     specific = str(evidence_period or "").strip()
     if specific.lower() in _PERIOD_TYPE_TOKENS:
         specific = ""
-
     if specific:
-        specific_upper = specific.upper()
-        evidence_years = set(re.findall(r"20\d{2}", specific_upper))
-        if claim_years and evidence_years:
-            if claim_years & evidence_years:
-                return PeriodMatch("exact", True, "evidence.period")
-            return PeriodMatch("mismatch", False, "evidence.period")
-        if claim_upper == specific_upper or claim_upper in specific_upper or specific_upper in claim_upper:
+        evidence_id = parse_period_identity(specific)
+        if evidence_id.kind == "unknown" and evidence_id.year is None:
+            return PeriodMatch("unknown", False, None)
+        if _period_identities_compatible(claim_id, evidence_id):
             return PeriodMatch("exact", True, "evidence.period")
-        if evidence_years or re.search(r"\b(?:FY|Q[1-4])\b", specific_upper):
-            return PeriodMatch("mismatch", False, "evidence.period")
+        return PeriodMatch("mismatch", False, "evidence.period")
 
-    window = (text or "")[:500]
-    window_upper = window.upper()
-    text_years = set(re.findall(r"20\d{2}", window_upper))
-    if claim_years and text_years:
-        if claim_years & text_years:
-            # Prefer an explicit FY/Q token near the year when present.
-            if re.search(rf"\bFY\s*{next(iter(claim_years))}\b", window_upper) or re.search(
-                rf"\b{re.escape(claim_upper)}\b", window_upper
-            ):
-                return PeriodMatch("text_match", True, "text")
-            return PeriodMatch("text_match", True, "text")
-        return PeriodMatch("mismatch", False, "text")
-    if re.search(r"\bFY\s*20\d{2}\b|\bQ[1-4]\s*20\d{2}\b", window_upper):
-        return PeriodMatch("mismatch", False, "text")
     return PeriodMatch("unknown", False, None)
+
+
+def match_local_period(
+    claim_period: str | None,
+    local_text: str,
+    fallback_period: str | None,
+    period_type: str | None = None,
+) -> PeriodMatch:
+    """Prefer explicit local FY/Q labels; fall back to evidence.period only when absent."""
+    return match_period(
+        claim_period,
+        fallback_period,
+        local_text,
+        period_type=period_type,
+        prefer_local_text=True,
+    )
 
 
 def _values_close(left: float, right: float, *, tol: float = 0.02) -> bool:
@@ -573,7 +703,18 @@ def match_numeric_evidence(
 
     text = evidence.text or ""
     period_type = getattr(evidence, "period_type", None)
-    period_result = match_period(period, evidence.period, text, period_type=period_type)
+    # For formula claims, defer text-window period checks to each input span.
+    period_result = match_period(
+        period,
+        evidence.period,
+        "" if formula_inputs else text,
+        period_type=period_type,
+    )
+    if not formula_inputs:
+        # Still surface metadata/text conflicts on the full evidence text.
+        text_period = match_period(period, evidence.period, text, period_type=period_type)
+        if text_period.status == "mismatch":
+            period_result = text_period
     if period_result.status == "mismatch":
         return EvidenceMatch(
             False, None, False, False, False, None, None, "none", "period_mismatch"
@@ -611,7 +752,19 @@ def match_numeric_evidence(
                 "none",
                 "metric_value_mismatch",
             )
-        if evidence.unit and unit and str(evidence.unit) != str(unit):
+        if not (evidence.unit or "").strip():
+            return EvidenceMatch(
+                False,
+                float(evidence.value),
+                True,
+                period_ok,
+                False,
+                None,
+                None,
+                "none",
+                "unit_missing",
+            )
+        if unit and str(evidence.unit) != str(unit):
             return EvidenceMatch(
                 False,
                 float(evidence.value),
@@ -623,19 +776,19 @@ def match_numeric_evidence(
                 "none",
                 "unit_mismatch",
             )
-        if period_state == "unknown":
+        if evidence.confidence is None:
             return EvidenceMatch(
                 False,
                 float(evidence.value),
                 True,
-                False,
+                period_ok,
                 True,
                 None,
                 None,
                 "none",
-                "period_unknown",
+                "confidence_missing",
             )
-        if (evidence.confidence or "high") != "high":
+        if evidence.confidence != "high":
             return EvidenceMatch(
                 False,
                 float(evidence.value),
@@ -694,6 +847,7 @@ def match_numeric_evidence(
                 "none",
                 "formula_input_incomplete",
             )
+        input_periods: list[PeriodIdentity] = []
         for input_name, input_value in formula_inputs.items():
             if evidence.has_structured_fields:
                 # Single structured metric record cannot alone bind a multi-input formula.
@@ -711,6 +865,24 @@ def match_numeric_evidence(
                         "none",
                         "formula_input_incomplete",
                     )
+                local_period = match_local_period(
+                    period, evidence.text or "", evidence.period, period_type
+                )
+                if local_period.status == "unknown":
+                    return EvidenceMatch(
+                        False, None, False, False, False, None, None, "none",
+                        "formula_input_period_unknown",
+                    )
+                if local_period.status == "mismatch":
+                    return EvidenceMatch(
+                        False, None, False, False, False, None, None, "none",
+                        "formula_input_period_mismatch",
+                    )
+                input_periods.append(
+                    parse_period_identity(evidence.period)
+                    if evidence.period
+                    else parse_period_identity(period)
+                )
                 continue
             hit = _find_number_span(
                 text, float(input_value), unit="billion_usd", metric_name=input_name
@@ -729,7 +901,7 @@ def match_numeric_evidence(
                 )
             idx, _, conversion, span = hit
             local_text = text[max(0, idx - 80) : idx + 80]
-            local_period = match_period(period, evidence.period, local_text, period_type=period_type)
+            local_period = match_local_period(period, local_text, evidence.period, period_type)
             if local_period.status == "unknown":
                 return EvidenceMatch(
                     False,
@@ -744,8 +916,23 @@ def match_numeric_evidence(
                 )
             if local_period.status == "mismatch":
                 return EvidenceMatch(
-                    False, None, False, False, False, None, span, "none", "period_mismatch"
+                    False,
+                    None,
+                    False,
+                    False,
+                    False,
+                    None,
+                    span,
+                    "none",
+                    "formula_input_period_mismatch",
                 )
+            local_ids = _extract_period_identities_from_text(local_text)
+            if local_ids:
+                input_periods.append(local_ids[0])
+            elif evidence.period:
+                input_periods.append(parse_period_identity(evidence.period))
+            else:
+                input_periods.append(parse_period_identity(period))
             if not _metric_alias_near(text, input_name, idx):
                 return EvidenceMatch(
                     False,
@@ -757,11 +944,6 @@ def match_numeric_evidence(
                     span,
                     "none",
                     "metric_label_mismatch",
-                )
-            years_in_text = set(re.findall(r"FY\s*(20\d{2})", text, flags=re.I))
-            if len(years_in_text) > 1:
-                return EvidenceMatch(
-                    False, None, False, False, False, None, None, "none", "period_mismatch"
                 )
             if not conversion and not _unit_declared_near(text, idx):
                 return EvidenceMatch(
@@ -775,6 +957,20 @@ def match_numeric_evidence(
                     "low",
                     "unit_ambiguous",
                 )
+        claim_id = parse_period_identity(period) if period else PeriodIdentity("unknown")
+        if claim_id.kind != "unknown":
+            for item in input_periods:
+                if item.kind == "unknown" or not _period_identities_compatible(claim_id, item):
+                    return EvidenceMatch(
+                        False, None, False, False, False, None, None, "none",
+                        "formula_input_period_mismatch",
+                    )
+            for left, right in zip(input_periods, input_periods[1:]):
+                if not _period_identities_compatible(left, right):
+                    return EvidenceMatch(
+                        False, None, False, False, False, None, None, "none",
+                        "formula_input_period_mismatch",
+                    )
         conf = "high" if structured or structured_source else "medium"
         return EvidenceMatch(
             True,
@@ -1199,6 +1395,7 @@ def _verify_numeric(
         bound: list[EvidenceRef] = []
         last_reason = "formula_input_incomplete"
         input_ids: dict[str, str] = {}
+        input_periods: list[PeriodIdentity] = []
         search_space = list(candidates)
         if pool:
             for ref in pool:
@@ -1230,6 +1427,19 @@ def _verify_numeric(
                 return [], last_reason
             bound.append(hit)
             input_ids[str(input_name)] = hit.evidence_id
+            if hit.period:
+                input_periods.append(parse_period_identity(hit.period))
+            else:
+                local_ids = _extract_period_identities_from_text(hit.text or "")
+                input_periods.append(local_ids[0] if local_ids else PeriodIdentity("unknown"))
+        claim_id = parse_period_identity(claim.period) if claim.period else PeriodIdentity("unknown")
+        if claim_id.kind != "unknown":
+            for item in input_periods:
+                if item.kind == "unknown" or not _period_identities_compatible(claim_id, item):
+                    return [], "formula_input_period_mismatch"
+            for left, right in zip(input_periods, input_periods[1:]):
+                if not _period_identities_compatible(left, right):
+                    return [], "formula_input_period_mismatch"
         # Keep formula input map in verify_reason for auditability.
         claim.verify_reason = f"formula_inputs={input_ids}"
         return bound, "formula_inputs_bound"

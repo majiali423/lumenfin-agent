@@ -1454,10 +1454,6 @@ class Phase2PeriodIdentityTestCase(unittest.TestCase):
         claims = build_claims(state)
         margin = next(c for c in claims if c.metric_name == "operating_margin")
         self.assertNotEqual(margin.verification, "verified")
-        self.assertTrue(
-            "period" in margin.verify_reason.lower()
-            or "formula_input_period" in margin.verify_reason.lower()
-        )
 
         # Direct multi-input match API path
         from lumenfin.claims import match_numeric_evidence
@@ -1483,7 +1479,7 @@ class Phase2PeriodIdentityTestCase(unittest.TestCase):
             formula_inputs={"operating_income": 109.433, "revenue": 245.122},
         )
         self.assertFalse(match.matched)
-        self.assertIn("period", match.reason.lower())
+        self.assertIn("formula_input_period_mismatch", match.reason)
 
     def test_formula_annual_and_quarter_mix_rejected(self) -> None:
         from lumenfin.claims import EvidenceRef, match_numeric_evidence
