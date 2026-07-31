@@ -652,5 +652,279 @@ class AdversarialPeriodFactTestCase(unittest.TestCase):
         self.assertIsNone(period_end_for_company(state, "Microsoft"))
 
 
+class Phase21ProvenancePromotionTestCase(unittest.TestCase):
+    """Gaps that Phase 2.1 must close: provenance promotion and double-scale heuristics."""
+
+    def test_fractional_explicit_million_scales(self) -> None:
+        from lumenfin.documents import extract_metric_hint_meta, normalize_extracted_amount
+
+        meta = extract_metric_hint_meta("(In millions)\nRevenue 500.5", metric="revenue")
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta["raw_value"], 500.5)
+        self.assertEqual(meta["raw_scale"], "million")
+        self.assertAlmostEqual(float(meta["normalized_value"]), 0.5005, places=6)
+        self.assertEqual(meta["normalized_unit"], "billion_usd")
+        self.assertEqual(meta["confidence"], "high")
+
+        half = normalize_extracted_amount(
+            0.5, raw_scale="million", currency="USD", normalization_source="inline_unit"
+        )
+        self.assertAlmostEqual(float(half.normalized_value or 0), 0.0005, places=6)
+        thou = normalize_extracted_amount(
+            500.25, raw_scale="thousand", currency="USD", normalization_source="table_caption"
+        )
+        self.assertAlmostEqual(float(thou.normalized_value or 0), 0.00050025, places=8)
+
+    def test_double_scale_uses_metadata_not_fraction_shape(self) -> None:
+        from dataclasses import asdict
+
+        from lumenfin.documents import normalize_extracted_amount, normalize_metric_hints_to_billion_usd
+
+        raw = normalize_extracted_amount(
+            245.122, raw_scale="million", currency="USD", normalization_source="table_caption"
+        )
+        self.assertAlmostEqual(float(raw.normalized_value or 0), 0.245122, places=6)
+
+        meta = asdict(raw)
+        meta["normalized_value"] = 245.122
+        meta["normalized_unit"] = "billion_usd"
+        meta["is_normalized"] = True
+        again = normalize_metric_hints_to_billion_usd(
+            {"revenue": 245.122},
+            text="(In millions)",
+            hint_meta={"revenue": meta},
+        )
+        self.assertAlmostEqual(again["revenue"], 245.122, places=3)
+
+    def test_unitless_low_confidence_not_computable_fundamentals(self) -> None:
+        from lumenfin.documents import extract_metric_hint_meta
+        from lumenfin.tools import _payload_from_documents, has_computable_fundamentals
+
+        text = "Revenue 245122\nOperating income 109433\n"
+        meta = extract_metric_hint_meta(text, metric="revenue")
+        self.assertEqual(meta.get("confidence"), "low")
+        docs = [
+            {
+                "detected_companies": ["Microsoft"],
+                "filename": "unitless.pdf",
+                "text": text,
+                "excerpt": text,
+                "metric_hints": {"revenue": 245.122, "operating_income": 109.433},
+                "metric_hint_meta": {
+                    "revenue": meta,
+                    "operating_income": extract_metric_hint_meta(text, metric="operating_income"),
+                },
+            }
+        ]
+        payload = _payload_from_documents("Microsoft", docs, include_appendix=False)
+        self.assertFalse(has_computable_fundamentals(payload))
+        self.assertNotEqual(payload.get("structured_source"), "document_extracted")
+        self.assertFalse(
+            any(
+                c.verification == "verified" and c.claim_type == "numeric"
+                for c in build_claims(
+                    {
+                        "companies": ["Microsoft"],
+                        "financial_metrics": {"Microsoft": {"operating_margin": 0.4}},
+                        "retrieved_docs": {"Microsoft": payload},
+                        "rag_evidence": {},
+                        "risk_scores": {},
+                        "market_snapshots": {},
+                    }
+                )
+            )
+        )
+
+    def test_per_company_metric_hint_meta_retained(self) -> None:
+        from lumenfin.documents import merge_per_company_metric_hint_meta, parse_pdf_document
+
+        # Prefer explicit helper if available; otherwise parse_pdf contract.
+        try:
+            meta = merge_per_company_metric_hint_meta(
+                "(In millions)\nMicrosoft\nRevenue 245122\nApple\nRevenue 383285\n",
+                ["Microsoft", "Apple"],
+            )
+        except ImportError:
+            self.fail("merge_per_company_metric_hint_meta not implemented yet")
+        self.assertIn("Microsoft", meta)
+        self.assertIn("Apple", meta)
+        for company in ("Microsoft", "Apple"):
+            rev = meta[company]["revenue"]
+            for key in (
+                "raw_value",
+                "raw_scale",
+                "currency",
+                "normalized_value",
+                "normalized_unit",
+                "normalization_source",
+                "confidence",
+            ):
+                self.assertIn(key, rev)
+
+
+class Phase21StructuredBindingTestCase(unittest.TestCase):
+    def test_structured_field_collision_rejects_wrong_metric(self) -> None:
+        from lumenfin.claims import EvidenceRef, match_numeric_evidence
+
+        ref = EvidenceRef(
+            evidence_id="ev_fund_Microsoft_r_and_d_FY2024",
+            entity="Microsoft",
+            citation="lumenfin:sec_companyfacts:Microsoft:FY2024",
+            source_type="sec_companyfacts",
+            text="Microsoft revenue was 50.0 billion USD, R&D was 20.0 billion USD.",
+            period="FY2024",
+            metric_name="r_and_d",
+            value=20.0,
+            unit="billion_usd",
+            confidence="high",
+        )
+        match = match_numeric_evidence(
+            ref,
+            entity="Microsoft",
+            metric_name="r_and_d",
+            value=50.0,
+            unit="billion_usd",
+            period="FY2024",
+        )
+        self.assertFalse(match.matched)
+        self.assertIn("metric_value_mismatch", match.reason)
+
+    def test_structured_same_value_binds_distinct_fields(self) -> None:
+        from lumenfin.claims import EvidenceRef, match_numeric_evidence
+
+        rev = EvidenceRef(
+            evidence_id="ev_fund_Microsoft_revenue_FY2024",
+            entity="Microsoft",
+            citation="lumenfin:sec_companyfacts:Microsoft:FY2024",
+            source_type="sec_companyfacts",
+            text="Microsoft revenue was 50.0 billion USD and R&D was 50.0 billion USD.",
+            period="FY2024",
+            metric_name="revenue",
+            value=50.0,
+            unit="billion_usd",
+            confidence="high",
+        )
+        rd = EvidenceRef(
+            evidence_id="ev_fund_Microsoft_r_and_d_FY2024",
+            entity="Microsoft",
+            citation="lumenfin:sec_companyfacts:Microsoft:FY2024",
+            source_type="sec_companyfacts",
+            text=rev.text,
+            period="FY2024",
+            metric_name="r_and_d",
+            value=50.0,
+            unit="billion_usd",
+            confidence="high",
+        )
+        m_rev = match_numeric_evidence(
+            rev, entity="Microsoft", metric_name="revenue", value=50.0, unit="billion_usd", period="FY2024"
+        )
+        m_rd = match_numeric_evidence(
+            rd, entity="Microsoft", metric_name="r_and_d", value=50.0, unit="billion_usd", period="FY2024"
+        )
+        self.assertTrue(m_rev.matched)
+        self.assertTrue(m_rd.matched)
+        self.assertNotEqual(rev.evidence_id, rd.evidence_id)
+
+    def test_structured_fields_beat_display_text(self) -> None:
+        from lumenfin.claims import EvidenceRef, match_numeric_evidence
+
+        # Display text wrong, structured field correct → accept.
+        good_field = EvidenceRef(
+            evidence_id="ev_fund_Microsoft_revenue_FY2024",
+            entity="Microsoft",
+            citation="lumenfin:sec_companyfacts:Microsoft:FY2024",
+            source_type="sec_companyfacts",
+            text="Microsoft revenue was 999.0 billion USD.",
+            period="FY2024",
+            metric_name="revenue",
+            value=245.122,
+            unit="billion_usd",
+            confidence="high",
+        )
+        self.assertTrue(
+            match_numeric_evidence(
+                good_field,
+                entity="Microsoft",
+                metric_name="revenue",
+                value=245.122,
+                unit="billion_usd",
+                period="FY2024",
+            ).matched
+        )
+        # Display text correct, structured field wrong → reject.
+        bad_field = EvidenceRef(
+            evidence_id="ev_fund_Microsoft_revenue_FY2024",
+            entity="Microsoft",
+            citation="lumenfin:sec_companyfacts:Microsoft:FY2024",
+            source_type="sec_companyfacts",
+            text="Microsoft revenue was 245.122 billion USD.",
+            period="FY2024",
+            metric_name="revenue",
+            value=999.0,
+            unit="billion_usd",
+            confidence="high",
+        )
+        self.assertFalse(
+            match_numeric_evidence(
+                bad_field,
+                entity="Microsoft",
+                metric_name="revenue",
+                value=245.122,
+                unit="billion_usd",
+                period="FY2024",
+            ).matched
+        )
+
+    def test_period_specific_claim_rejects_unknown_period_rag_high_confidence(self) -> None:
+        from lumenfin.claims import EvidenceRef, match_numeric_evidence
+
+        rag = EvidenceRef(
+            evidence_id="ev_rag_1",
+            entity="Microsoft",
+            citation="m.pdf#p1",
+            source_type="rag",
+            text="Revenue was 245.122 billion USD.",
+            period=None,
+        )
+        match = match_numeric_evidence(
+            rag,
+            entity="Microsoft",
+            metric_name="revenue",
+            value=245.122,
+            unit="billion_usd",
+            period="FY2024",
+        )
+        self.assertFalse(match.matched and match.confidence == "high")
+        self.assertTrue(
+            (not match.matched)
+            or match.confidence in {"low", "medium", "none"}
+            or "period" in match.reason.lower()
+        )
+
+    def test_formula_inputs_require_units(self) -> None:
+        from lumenfin.claims import EvidenceRef, match_numeric_evidence
+
+        rag = EvidenceRef(
+            evidence_id="ev_rag_2",
+            entity="Microsoft",
+            citation="m.pdf#p2",
+            source_type="rag",
+            text="Operating income 109.433\nRevenue 245.122",
+            period="FY2024",
+        )
+        match = match_numeric_evidence(
+            rag,
+            entity="Microsoft",
+            metric_name="operating_margin",
+            value=0.446,
+            unit="ratio",
+            period="FY2024",
+            formula_inputs={"operating_income": 109.433, "revenue": 245.122},
+        )
+        self.assertFalse(match.matched)
+        self.assertIn("unit", match.reason.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
