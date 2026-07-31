@@ -126,8 +126,10 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
         self.assertEqual(meta.get("fiscal_year_source"), "upload_filename")
         self.assertEqual(meta.get("period_alignment"), "exact")
         self.assertEqual(meta.get("requested_fiscal_year"), 2024)
-        self.assertEqual(meta.get("period_end"), "2024-06-30")
-        self.assertEqual(meta.get("period_end_source"), "issuer_convention_hint")
+        self.assertNotEqual(meta.get("period_end"), "2024-06-30")
+        self.assertNotEqual(meta.get("period_end_source"), "issuer_convention_hint")
+        self.assertIn("June", str(meta.get("fiscal_calendar_hint") or ""))
+        self.assertEqual(meta.get("fiscal_calendar_hint_source"), "issuer_convention")
 
     def test_document_complete_assumes_fy_from_query_when_unlabeled(self) -> None:
         docs = [
