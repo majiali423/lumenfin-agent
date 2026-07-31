@@ -151,7 +151,15 @@ _PERIOD_TYPE_VALUES = frozenset({"annual", "quarter", "ttm", "latest"})
 
 
 def amount_to_meta(amount: ExtractedAmount) -> dict[str, Any]:
-    return asdict(amount)
+    payload = asdict(amount)
+    # period_hint carries annual/quarter semantics; keep concrete period separate.
+    hint = payload.get("period_hint")
+    if hint in _PERIOD_TYPE_VALUES and not payload.get("period_type"):
+        payload["period_type"] = hint
+    if payload.get("period") and str(payload["period"]).lower() in _PERIOD_TYPE_VALUES:
+        payload["period_type"] = payload.get("period_type") or str(payload["period"]).lower()
+        payload["period"] = None
+    return payload
 
 
 def is_trusted_ast_amount(meta: dict[str, Any] | ExtractedAmount | None) -> bool:
