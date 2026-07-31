@@ -434,6 +434,43 @@ def normalize_metric_hints_to_billion_usd(
     return out
 
 
+_NON_AMOUNT_CONTEXT_PATTERNS = (
+    re.compile(r"\bform\s+\d{1,2}-[kq](?:/[a-z])?\b", re.I),
+    re.compile(r"\b\d{1,2}-[kq](?:/[a-z])?\b", re.I),
+    re.compile(r"\bitem\s+\d+[a-z]?\b", re.I),
+    re.compile(r"\basc\s+\d+\b", re.I),
+    re.compile(r"\bsection\s+\d+\b", re.I),
+    re.compile(r"\bnote\s+\d+\b", re.I),
+    re.compile(r"\bpage\s+\d+\b", re.I),
+)
+
+
+def _is_non_amount_identifier(context: str, number_start: int, number_end: int) -> bool:
+    """True when a digit span is a filing/section identifier rather than an amount."""
+    window = (context or "")[max(0, number_start - 24) : number_end + 12]
+    return any(pattern.search(window) for pattern in _NON_AMOUNT_CONTEXT_PATTERNS)
+
+
+def _amount_context_support(
+    context: str,
+    number_start: int,
+    number_end: int,
+    *,
+    document_scale: str | None,
+) -> bool:
+    """Natural-language amount candidates need a unit/currency/table cue."""
+    if document_scale:
+        return True
+    nearby = (context or "")[max(0, number_start - 40) : number_end + 40].lower()
+    return bool(
+        re.search(
+            r"\b(?:million|billion|thousand|usd|u\.?s\.?\s*dollars?)\b|\$|"
+            r"in\s+millions|in\s+billions|in\s+thousands",
+            nearby,
+        )
+    )
+
+
 def _parse_raw_metric_number(
     context: str,
     *,
@@ -463,6 +500,8 @@ def _parse_raw_metric_number(
             continue
         if 2020 <= value <= 2035 and value == int(value):
             continue
+        if _is_non_amount_identifier(context, num_match.start(), num_match.end()):
+            continue
         after = context[num_match.end() : num_match.end() + 24].strip().lower()
         has_billion = any(token in after for token in ("billion", "亿", "万亿", "bn"))
         has_million = any(token in after for token in ("million", "万", "mm")) and not has_billion
@@ -478,6 +517,12 @@ def _parse_raw_metric_number(
         else:
             scale = None
             source = "unitless"
+        if source == "unitless" and not _amount_context_support(
+            context, num_match.start(), num_match.end(), document_scale=document_scale
+        ):
+            # Large unitless magnitudes may still project as inferred_million (low confidence).
+            if abs(value) < _UNITLESS_MILLION_FLOOR:
+                continue
         return normalize_extracted_amount(
             value,
             raw_scale=scale,
