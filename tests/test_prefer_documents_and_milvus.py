@@ -17,10 +17,25 @@ from lumenfin.tools import retrieve_company_payload
 
 class PreferDocumentMetricsTestCase(unittest.TestCase):
     def test_document_metrics_win_over_sample_db(self) -> None:
+        meta = {
+            "normalized_value": None,
+            "normalized_unit": "billion_usd",
+            "currency": "USD",
+            "confidence": "high",
+            "normalization_source": "table_caption",
+            "is_normalized": True,
+            "period": "FY2025",
+            "period_type": "annual",
+        }
         docs = [
             {
                 "detected_companies": ["NVIDIA"],
                 "metric_hints": {"revenue": 130.5, "ebitda": 111.0, "r_and_d": 22.0},
+                "metric_hint_meta": {
+                    "revenue": {**meta, "normalized_value": 130.5, "raw_value": 130.5},
+                    "ebitda": {**meta, "normalized_value": 111.0, "raw_value": 111.0},
+                    "r_and_d": {**meta, "normalized_value": 22.0, "raw_value": 22.0},
+                },
                 "excerpt": "NVIDIA FY2025 revenue was 130.5 billion USD.",
                 "text": "supply chain risk remains medium for packaging.",
             }

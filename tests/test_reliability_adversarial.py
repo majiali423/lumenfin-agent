@@ -104,8 +104,9 @@ class AdversarialUnitNormalizationTestCase(unittest.TestCase):
         for raw in (999.0, 1000.0, 1001.0):
             with self.subTest(raw=raw):
                 meta = extract_metric_hint_meta(f"Revenue {raw:g}", metric="revenue")
-                self.assertIsNotNone(meta)
-                self.assertNotEqual(meta.get("confidence"), "high")
+                # Bare unitless numbers without amount cues may be skipped entirely, or
+                # kept only as low-confidence inferred magnitudes — never high confidence.
+                self.assertTrue(meta is None or meta.get("confidence") != "high")
 
     def test_already_normalized_not_double_scaled(self) -> None:
         # Re-entry must use explicit normalization metadata, not fractional shape.
