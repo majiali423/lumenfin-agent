@@ -207,7 +207,7 @@ def trusted_provider_amount(meta: dict[str, Any] | ExtractedAmount | None) -> bo
         return False
     if str(payload.get("normalization_source") or "") != "provider_metadata":
         return False
-    return bool(payload.get("is_normalized", True))
+    return payload.get("is_normalized") is True
 
 
 def detect_statement_scale(text: str) -> str | None:
