@@ -47,7 +47,7 @@ from .skills import get_skill_specs
 from .state import FinanceState
 from .metrics_schema import get_fundamental, set_fundamental
 from .fundamentals import is_plausible_revenue_billion_usd
-from .documents import normalize_metric_hints_to_billion_usd
+from .documents import is_trusted_ast_amount, normalize_metric_hints_to_billion_usd
 from .tools import (
     analyze_sentiment_deep,
     build_chart_data,
@@ -479,35 +479,44 @@ class AgentRuntime:
             )
             hint_meta: dict[str, dict] = {}
             for doc in document_contexts:
-                if isinstance(doc, dict) and isinstance(doc.get("metric_hint_meta"), dict):
+                if not isinstance(doc, dict):
+                    continue
+                if isinstance(doc.get("metric_hint_meta"), dict):
                     hint_meta.update(doc["metric_hint_meta"])
+                per_co = (doc.get("per_company_metric_hint_meta") or {}).get(company)
+                if isinstance(per_co, dict):
+                    hint_meta.update(per_co)
             normalized_hints = normalize_metric_hints_to_billion_usd(
                 dict(document_summary["metric_hints"]),
                 text=doc_text,
                 hint_meta=hint_meta or None,
             )
-            def _hint_ok(metric: str) -> bool:
-                meta = hint_meta.get(metric) or {}
-                # Missing meta keeps legacy behavior; explicit low confidence cannot alone
-                # promote document_extracted verified absolutes.
-                return meta.get("confidence", "high") != "low"
-
+            payload.setdefault("document_observations", {})
+            payload["document_observations"]["metric_hints"] = dict(normalized_hints)
+            payload["document_observations"]["metric_hint_meta"] = dict(hint_meta)
+            payload.setdefault("fundamental_provenance", {})
             applied_abs = False
-            if (
-                normalized_hints.get("revenue") is not None
-                and is_plausible_revenue_billion_usd(normalized_hints["revenue"])
-                and _hint_ok("revenue")
-            ):
-                set_fundamental(payload["market_data"], "revenue", normalized_hints["revenue"])
+            for key in ("revenue", "ebitda", "r_and_d", "operating_income"):
+                meta = hint_meta.get(key) or {}
+                if not is_trusted_ast_amount(meta):
+                    continue
+                value = meta.get("normalized_value", normalized_hints.get(key))
+                if value is None:
+                    continue
+                if key == "revenue" and not is_plausible_revenue_billion_usd(float(value)):
+                    continue
+                set_fundamental(payload["market_data"], key, float(value))
+                payload["fundamental_provenance"][key] = {
+                    "source": "document_extracted",
+                    "confidence": meta.get("confidence"),
+                    "normalization_source": meta.get("normalization_source"),
+                    "period": meta.get("period_hint"),
+                }
                 applied_abs = True
-            for key in ("ebitda", "r_and_d", "operating_income"):
-                if normalized_hints.get(key) is not None and _hint_ok(key):
-                    set_fundamental(payload["market_data"], key, normalized_hints[key])
-                    applied_abs = True
             # Prefer document label only when upload alone provided the AST spine.
             # Issuer SEC/Yahoo gap-fill must keep sec_companyfacts / yahoo_fundamentals.
             if applied_abs and any(
-                normalized_hints.get(key) is not None
+                key in (payload.get("fundamental_provenance") or {})
                 for key in ("revenue", "ebitda", "r_and_d")
             ):
                 meta = payload.get("fundamentals_meta") or {}

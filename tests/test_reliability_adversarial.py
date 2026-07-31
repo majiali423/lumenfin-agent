@@ -108,12 +108,25 @@ class AdversarialUnitNormalizationTestCase(unittest.TestCase):
                 self.assertNotEqual(meta.get("confidence"), "high")
 
     def test_already_normalized_not_double_scaled(self) -> None:
-        # Simulate raw extractor already emitting billion-scale under million caption.
+        # Re-entry must use explicit normalization metadata, not fractional shape.
+        meta = {
+            "revenue": {
+                "raw_value": 245.122,
+                "raw_scale": None,
+                "currency": "USD",
+                "normalized_value": 245.122,
+                "normalized_unit": "billion_usd",
+                "normalization_source": "provider_metadata",
+                "confidence": "high",
+                "is_normalized": True,
+            }
+        }
         once = normalize_metric_hints_to_billion_usd(
             {"revenue": 245.122},
             text="(In millions)",
+            hint_meta=meta,
         )
-        twice = normalize_metric_hints_to_billion_usd(once, text="(In millions)")
+        twice = normalize_metric_hints_to_billion_usd(once, text="(In millions)", hint_meta=meta)
         self.assertAlmostEqual(twice["revenue"], 245.122, places=3)
 
     def test_eur_millions_not_billion_usd(self) -> None:

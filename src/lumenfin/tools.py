@@ -282,6 +282,36 @@ def retrieve_company_payload(
         if doc_md:
             merged_md, filled = _merge_document_market_data_with_live(doc_md, live_md)
             result["market_data"] = merged_md
+        provenance = dict(document_payload.get("fundamental_provenance") or {})
+        live_source = str(live.get("structured_source") or "sec_companyfacts")
+        live_period = None
+        live_meta = live.get("fundamentals_meta") or {}
+        if isinstance(live_meta, dict) and live_meta.get("fiscal_year") is not None:
+            live_period = f"FY{live_meta.get('fiscal_year')}"
+        for key in _AST_INPUT_KEYS:
+            if key in provenance:
+                continue
+            if get_fundamental(result.get("market_data") or {}, key) is None:
+                continue
+            if key in filled or not doc_md or get_fundamental(doc_md, key) is None:
+                provenance[key] = {
+                    "source": live_source,
+                    "confidence": "high",
+                    "period": live_period,
+                }
+        for key in _AST_INPUT_KEYS:
+            if key in provenance:
+                continue
+            if get_fundamental(doc_md, key) is not None:
+                provenance[key] = {
+                    "source": "document_extracted",
+                    "confidence": "high",
+                    "period": live_period,
+                }
+        if provenance:
+            result["fundamental_provenance"] = provenance
+        if document_payload.get("document_observations"):
+            result["document_observations"] = dict(document_payload["document_observations"])
         if document_payload.get("earnings_call_quotes"):
             result["earnings_call_quotes"] = list(document_payload["earnings_call_quotes"])
         if document_payload.get("supply_chain", {}).get("signals"):
@@ -379,9 +409,18 @@ def _payload_from_documents(
     *,
     include_appendix: bool,
 ) -> dict[str, Any]:
+    from .documents import (
+        extract_metric_amounts_for_company,
+        extract_metric_hint_meta,
+        is_trusted_ast_amount,
+        normalize_metric_hints_to_billion_usd,
+    )
+
     market_data: dict[str, float] = {}
     supply_chain_signals: list[str] = []
-    earnings_quotes: list[str] = []
+    earnings_quotes_list: list[str] = []
+    document_observations: dict[str, Any] = {"metric_hints": {}, "metric_hint_meta": {}}
+    fundamental_provenance: dict[str, dict[str, Any]] = {}
 
     for doc in doc_contexts:
         if not _document_applies_to_company(doc, company):
@@ -391,41 +430,78 @@ def _payload_from_documents(
         excerpt = doc.get("excerpt", "")[:3000]
 
         scoped = (doc.get("per_company_metric_hints") or {}).get(company) or {}
+        scoped_meta = (doc.get("per_company_metric_hint_meta") or {}).get(company) or {}
+        if not scoped_meta and text:
+            amounts = extract_metric_amounts_for_company(text, company)
+            from .documents import amount_to_meta
+
+            scoped_meta = {key: amount_to_meta(amount) for key, amount in amounts.items()} if amounts else {}
+            if amounts and not scoped:
+                from .documents import _compatibility_hints
+
+                scoped = _compatibility_hints(amounts)
         if not scoped and text:
             from .documents import extract_metric_hints_for_company
 
             scoped = extract_metric_hints_for_company(text, company)
-        # Prefer company-scoped hints so multi-issuer PDFs do not assign one firm's
-        # first revenue hit to every detected peer.
         hint_source = scoped or (
             doc.get("metric_hints", {}) if len(detected) <= 1 else {}
         )
-        hint_source = normalize_metric_hints_to_billion_usd(dict(hint_source), text=text)
-        for key, value in hint_source.items():
-            if key in {"revenue", "ebitda", "r_and_d", "operating_income"}:
-                if key == "revenue" and not is_plausible_revenue_billion_usd(value):
-                    continue
-                set_fundamental(market_data, key, value)
-            elif key.endswith("_2025") and key.replace("_2025", "") in {
-                "revenue",
-                "ebitda",
-                "r_and_d",
-                "operating_income",
-            }:
-                base = key.replace("_2025", "")
-                if base == "revenue" and not is_plausible_revenue_billion_usd(value):
-                    continue
-                set_fundamental(market_data, key, value)
+        hint_meta = scoped_meta or (
+            doc.get("metric_hint_meta", {}) if len(detected) <= 1 else {}
+        )
+        # Keep low-confidence projections observable without promoting into AST.
+        projected = normalize_metric_hints_to_billion_usd(
+            dict(hint_source), text=text, hint_meta=hint_meta or None
+        )
+        document_observations["metric_hints"].update(projected)
+        document_observations["metric_hint_meta"].update(hint_meta or {})
+
+        for key, value in projected.items():
+            if key not in {"revenue", "ebitda", "r_and_d", "operating_income"} and not (
+                key.endswith("_2025")
+                and key.replace("_2025", "") in {"revenue", "ebitda", "r_and_d", "operating_income"}
+            ):
+                continue
+            base = key.replace("_2025", "") if key.endswith("_2025") else key
+            meta = (hint_meta or {}).get(key) or (hint_meta or {}).get(base)
+            if not meta and key in (hint_source or {}):
+                # Caller-supplied float hints are treated as already-normalized provider values.
+                # Prefer these over opportunistic text re-extraction (e.g. "10-K" → 10).
+                meta = {
+                    "raw_value": float(value),
+                    "raw_scale": None,
+                    "currency": "USD",
+                    "normalized_value": float(value),
+                    "normalized_unit": "billion_usd",
+                    "normalization_source": "provider_metadata",
+                    "confidence": "high",
+                    "period_hint": None,
+                    "is_normalized": True,
+                }
+                document_observations["metric_hint_meta"][key] = meta
+            elif not meta and text:
+                extracted = extract_metric_hint_meta(text, metric=base)
+                if extracted:
+                    meta = extracted
+            if not is_trusted_ast_amount(meta):
+                continue
+            if base == "revenue" and not is_plausible_revenue_billion_usd(value):
+                continue
+            set_fundamental(market_data, key, float(meta.get("normalized_value", value)))
+            fundamental_provenance[base] = {
+                "source": "document_extracted",
+                "confidence": meta.get("confidence"),
+                "normalization_source": meta.get("normalization_source"),
+                "period": meta.get("period_hint"),
+            }
 
         if excerpt:
-            earnings_quotes.append(excerpt[:500])
+            earnings_quotes_list.append(excerpt[:500])
 
         lowered_text = text.lower()
         if has_supply_chain_signal(lowered_text):
             supply_chain_signals.append("PDF 文档中包含供应链相关讨论。")
-
-    # Do not invent operating_income from EBITDA — that would pollute AST margins.
-    # estimated_* ratios may still be derived later and stay explicitly prefixed.
 
     return {
         "market_data": market_data,
@@ -433,10 +509,11 @@ def _payload_from_documents(
             "risk_level": "medium" if supply_chain_signals else "unknown",
             "signals": supply_chain_signals or (["PDF 文档中未检测到明确供应链信号。"] if doc_contexts else []),
         },
-        # No placeholder "earnings call" text — empty means unknown tone upstream.
-        "earnings_call_quotes": earnings_quotes,
-        # Narrative excerpts alone are not structured fundamentals.
+        "earnings_call_quotes": earnings_quotes_list,
         "structured_source": "document_extracted" if market_data else "none",
+        "document_observations": document_observations,
+        "fundamental_provenance": fundamental_provenance,
+        "metric_hint_meta": document_observations.get("metric_hint_meta") or {},
         **({"appendix": {}} if include_appendix else {}),
     }
 

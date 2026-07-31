@@ -92,8 +92,11 @@ def parse_pdf_document(file_path: Path) -> dict[str, Any]:
     metric_hint_meta = {key: amount_to_meta(amount) for key, amount in extracted.items()}
     hint_scope = detected_companies or mentioned
     per_company_hints = merge_per_company_metric_hints(full_text, hint_scope)
+    per_company_meta = merge_per_company_metric_hint_meta(full_text, hint_scope)
     if len(detected_companies) == 1 and detected_companies[0] in per_company_hints:
         metric_hints = {**metric_hints, **per_company_hints[detected_companies[0]]}
+        if detected_companies[0] in per_company_meta:
+            metric_hint_meta = {**metric_hint_meta, **per_company_meta[detected_companies[0]]}
     return {
         "document_id": file_path.stem,
         "filename": file_path.name,
@@ -109,6 +112,7 @@ def parse_pdf_document(file_path: Path) -> dict[str, Any]:
         "metric_hints": metric_hints,
         "metric_hint_meta": metric_hint_meta,
         "per_company_metric_hints": per_company_hints,
+        "per_company_metric_hint_meta": per_company_meta,
         "source_type": "pdf",
     }
 
@@ -136,10 +140,36 @@ class ExtractedAmount:
     normalization_source: str
     confidence: str
     period_hint: str | None = None
+    is_normalized: bool = False
+
+
+_TRUSTED_NORM_SOURCES = frozenset(
+    {"table_caption", "inline_unit", "structured_table", "provider_metadata"}
+)
 
 
 def amount_to_meta(amount: ExtractedAmount) -> dict[str, Any]:
     return asdict(amount)
+
+
+def is_trusted_ast_amount(meta: dict[str, Any] | ExtractedAmount | None) -> bool:
+    """Whether an extracted amount may enter AST/market_data fundamentals."""
+    if meta is None:
+        return False
+    payload = asdict(meta) if isinstance(meta, ExtractedAmount) else dict(meta)
+    if payload.get("confidence") != "high":
+        return False
+    if payload.get("normalized_value") is None:
+        return False
+    if payload.get("normalized_unit") != "billion_usd":
+        return False
+    currency = payload.get("currency")
+    if currency not in (None, "USD"):
+        return False
+    if payload.get("period_hint") == "quarter":
+        return False
+    source = str(payload.get("normalization_source") or "")
+    return source in _TRUSTED_NORM_SOURCES
 
 
 def detect_statement_scale(text: str) -> str | None:
@@ -204,15 +234,9 @@ def detect_period_hint(text: str) -> str | None:
 
 
 def _looks_already_normalized(value: float, scale: str | None) -> bool:
-    """Avoid double-scaling values already projected onto billion scale."""
-    if scale not in {"million", "thousand"}:
-        return False
-    magnitude = abs(float(value))
-    if magnitude >= _UNITLESS_MILLION_FLOOR:
-        return False
-    # Fractional magnitudes under a statement caption are usually already projected
-    # (e.g. re-running normalize on 245.122). Integer table cells like 500 still scale.
-    return abs(magnitude - round(magnitude, 0)) > 1e-9 and magnitude > 0.05
+    """Deprecated: do not use shape heuristics for normalization state."""
+    del value, scale
+    return False
 
 
 def normalize_extracted_amount(
@@ -222,8 +246,13 @@ def normalize_extracted_amount(
     currency: str | None,
     normalization_source: str,
     period_hint: str | None = None,
+    already_normalized: bool = False,
 ) -> ExtractedAmount:
-    """Project one raw statement amount exactly once."""
+    """Project one raw statement amount exactly once.
+
+    Explicit statement scales always convert unless ``already_normalized`` is set via
+    metadata. Never infer normalization state from integer/fractional shape.
+    """
     value = float(raw_value)
     scale = raw_scale
     confidence = "high"
@@ -241,22 +270,34 @@ def normalize_extracted_amount(
             normalization_source=source or "non_usd",
             confidence="low",
             period_hint=period_hint,
+            is_normalized=False,
+        )
+
+    if already_normalized and scale in {"million", "thousand", "billion", None}:
+        return ExtractedAmount(
+            raw_value=value,
+            raw_scale=scale,
+            currency=currency or "USD",
+            normalized_value=round(value, 8),
+            normalized_unit="billion_usd",
+            normalization_source=source or "pre_normalized",
+            confidence="high" if source in _TRUSTED_NORM_SOURCES else "low",
+            period_hint=period_hint,
+            is_normalized=True,
         )
 
     if scale == "million":
-        if not _looks_already_normalized(value, scale):
-            normalized = value / 1000.0
+        normalized = value / 1000.0
         unit = "billion_usd"
-        confidence = "high" if source in {"table_caption", "inline_unit"} else confidence
+        confidence = "high" if source in _TRUSTED_NORM_SOURCES else "low"
     elif scale == "thousand":
-        if not _looks_already_normalized(value, scale):
-            normalized = value / 1_000_000.0
+        normalized = value / 1_000_000.0
         unit = "billion_usd"
-        confidence = "high"
+        confidence = "high" if source in _TRUSTED_NORM_SOURCES else "low"
     elif scale == "billion":
         normalized = value
         unit = "billion_usd"
-        confidence = "high"
+        confidence = "high" if source in _TRUSTED_NORM_SOURCES else "low"
     elif abs(value) >= _UNITLESS_MILLION_FLOOR:
         normalized = value / 1000.0
         scale = "million"
@@ -272,7 +313,8 @@ def normalize_extracted_amount(
         confidence = "low"
 
     if normalized is not None:
-        normalized = round(float(normalized), 4)
+        # Keep enough precision for thousand-scale fractions (e.g. 500.25 / 1e6).
+        normalized = round(float(normalized), 8)
     return ExtractedAmount(
         raw_value=value,
         raw_scale=scale,
@@ -282,6 +324,7 @@ def normalize_extracted_amount(
         normalization_source=source,
         confidence=confidence,
         period_hint=period_hint,
+        is_normalized=True,
     )
 
 
@@ -295,7 +338,8 @@ def normalize_metric_hints_to_billion_usd(
 
     Scaling happens once per value. Unitless large magnitudes may still be projected for
     compatibility, but accompanying ``hint_meta`` (when built via ``extract_metric_amounts``)
-    marks them ``confidence=low``.
+    marks them ``confidence=low``. Pre-normalized metadata (``is_normalized`` /
+    ``normalized_unit=billion_usd``) is never re-scaled by caption heuristics.
     """
     if not hints:
         return {}
@@ -314,16 +358,28 @@ def normalize_metric_hints_to_billion_usd(
         if base_key not in _ABS_BILLION_METRICS:
             out[key] = value
             continue
-        meta = (hint_meta or {}).get(key) or (hint_meta or {}).get(base_key)
-        if meta and meta.get("normalized_value") is not None and meta.get("normalized_unit") == "billion_usd":
-            out[key] = float(meta["normalized_value"])
+        meta = (hint_meta or {}).get(key) or (hint_meta or {}).get(base_key) or {}
+        if meta.get("is_normalized") or (
+            meta.get("normalized_value") is not None
+            and meta.get("normalized_unit") == "billion_usd"
+            and meta.get("confidence") == "high"
+            and str(meta.get("normalization_source") or "") in _TRUSTED_NORM_SOURCES
+            and abs(float(meta["normalized_value"]) - value) <= max(0.01, abs(value) * 0.001)
+        ):
+            out[key] = float(meta.get("normalized_value", value))
             continue
+        if meta.get("normalized_value") is not None and meta.get("normalized_unit") == "billion_usd":
+            # Prefer explicit metadata projection even when low-confidence (compat float only).
+            if meta.get("is_normalized"):
+                out[key] = float(meta["normalized_value"])
+                continue
         amount = normalize_extracted_amount(
             value,
-            raw_scale=scale,
-            currency=currency,
-            normalization_source="table_caption" if scale else "unitless",
-            period_hint=period_hint,
+            raw_scale=str(meta.get("raw_scale") or scale) if meta.get("raw_scale") or scale else scale,
+            currency=meta.get("currency") or currency,
+            normalization_source=str(meta.get("normalization_source") or ("table_caption" if scale else "unitless")),
+            period_hint=meta.get("period_hint") or period_hint,
+            already_normalized=bool(meta.get("is_normalized")),
         )
         if amount.normalized_unit == "billion_usd" and amount.normalized_value is not None:
             out[key] = float(amount.normalized_value)
@@ -662,6 +718,52 @@ def merge_per_company_metric_hints(
         slot = merged.setdefault(company, {})
         slot.update(hints)
     return {c: h for c, h in merged.items() if h}
+
+
+def extract_metric_amounts_for_company(text: str, company: str) -> dict[str, ExtractedAmount]:
+    """Company-scoped structured amounts (mirrors extract_metric_hints_for_company)."""
+    aliases = {company.lower()}
+    for key, canonical in COMPANY_HINTS.items():
+        if canonical == company:
+            aliases.add(key.lower())
+    lowered = text.lower()
+    doc_scale = detect_statement_scale(text)
+    windows: list[str] = []
+    for alias in sorted(aliases, key=len, reverse=True):
+        start = 0
+        while True:
+            idx = lowered.find(alias, start)
+            if idx < 0:
+                break
+            windows.append(lowered[idx : idx + 360])
+            start = idx + max(len(alias), 1)
+    if not windows:
+        return {}
+    sentence_hits: dict[str, ExtractedAmount] = {}
+    loose_hits: dict[str, ExtractedAmount] = {}
+    for window in windows:
+        amounts = _extract_metric_amounts_raw(window, document_scale=doc_scale)
+        bucket = sentence_hits if _window_looks_sentence_metric(window) else loose_hits
+        for metric, amount in amounts.items():
+            bucket.setdefault(metric, amount)
+    return {**loose_hits, **sentence_hits}
+
+
+def merge_per_company_metric_hint_meta(
+    text: str,
+    companies: list[str],
+    *,
+    base: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Per-company ExtractedAmount metadata companion to float hint dicts."""
+    merged: dict[str, dict[str, dict[str, Any]]] = {
+        company: dict((base or {}).get(company) or {}) for company in companies
+    }
+    for company in companies:
+        if not merged.get(company):
+            amounts = extract_metric_amounts_for_company(text, company)
+            merged[company] = {key: amount_to_meta(amount) for key, amount in amounts.items()}
+    return {c: m for c, m in merged.items() if m}
 
 
 def _first_metric_number(
