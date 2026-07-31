@@ -465,9 +465,22 @@ def _payload_from_documents(
                 continue
             base = key.replace("_2025", "") if key.endswith("_2025") else key
             meta = (hint_meta or {}).get(key) or (hint_meta or {}).get(base)
-            if not meta and key in (hint_source or {}):
-                # Caller-supplied float hints are treated as already-normalized provider values.
-                # Prefer these over opportunistic text re-extraction (e.g. "10-K" → 10).
+            provided_hints = doc.get("metric_hints") or {}
+            caller_supplied = key in provided_hints or base in provided_hints
+            explicit_meta = (doc.get("metric_hint_meta") or {}).get(key) or (
+                doc.get("metric_hint_meta") or {}
+            ).get(base)
+            if not explicit_meta:
+                per_co = (doc.get("per_company_metric_hint_meta") or {}).get(company) or {}
+                explicit_meta = per_co.get(key) or per_co.get(base)
+            if (
+                caller_supplied
+                and not explicit_meta
+                and not is_trusted_ast_amount(meta)
+            ):
+                # Explicit caller floats without extraction metadata are already on the
+                # shared billion scale. Do not let opportunistic unitless text parses
+                # (e.g. "10-K", bare "400") block promotion of those provided hints.
                 meta = {
                     "raw_value": float(value),
                     "raw_scale": None,
