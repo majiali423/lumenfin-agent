@@ -54,6 +54,7 @@ class ClaimBindingTests(unittest.TestCase):
                         "citation": "nvda_fy2025_10k_sec.pdf#p12",
                         "text": "NVIDIA revenue was 100.0 billion USD and EBITDA was 50.0 billion.",
                         "source_type": "rag",
+                        "period": "FY2025",
                     }
                 ]
             },

@@ -75,6 +75,7 @@ class EvidenceRef:
     text: str
     page: int | None = None
     period: str | None = None
+    period_type: str | None = None
     metric_name: str | None = None
     value: float | None = None
     unit: str | None = None
@@ -151,6 +152,7 @@ def claims_from_state(state: dict[str, Any]) -> list[Claim]:
                         "text",
                         "page",
                         "period",
+                        "period_type",
                         "metric_name",
                         "value",
                         "unit",
@@ -302,34 +304,91 @@ class EvidenceMatch:
     reason: str
 
 
+@dataclass(frozen=True)
+class PeriodMatch:
+    status: str
+    matched: bool
+    source: str | None = None
+
+
+_PERIOD_TYPE_TOKENS = frozenset({"annual", "quarter", "ttm", "latest", "model"})
+_ACCEPTABLE_PERIOD_STATUS = frozenset({"exact", "text_match", "not_required"})
+
+
 def _periods_compatible(claim_period: str | None, evidence_period: str | None, text: str) -> bool:
-    status = _period_status(claim_period, evidence_period, text)
-    return status != "mismatch"
+    return match_period(claim_period, evidence_period, text).matched
 
 
 def _period_status(claim_period: str | None, evidence_period: str | None, text: str) -> str:
-    """Return ok | mismatch | unknown for claim/evidence period alignment."""
+    """Compatibility wrapper: exact/text_match/not_required → ok; else status name."""
+    result = match_period(claim_period, evidence_period, text)
+    if result.status in _ACCEPTABLE_PERIOD_STATUS:
+        return "ok"
+    return result.status
+
+
+def match_period(
+    claim_period: str | None,
+    evidence_period: str | None,
+    text: str = "",
+    *,
+    period_type: str | None = None,
+) -> PeriodMatch:
+    """Compare claim period identity against evidence period / local text."""
+    del period_type  # period_type never proves a concrete FY/Q identity.
     if not claim_period:
-        return "ok"
-    claim = str(claim_period).upper()
-    claim_years = set(re.findall(r"20\d{2}", claim))
-    candidates = " ".join(
-        part for part in (evidence_period or "", text[:500]) if part
-    ).upper()
-    evidence_years = set(re.findall(r"20\d{2}", candidates))
-    if not claim_years:
-        return "ok"
-    if evidence_years:
-        return "ok" if claim_years & evidence_years else "mismatch"
-    if evidence_period:
-        # Explicit non-year period label without conflicting FY tags.
-        return "ok" if not re.search(r"\bFY\s*20\d{2}\b", candidates) else "mismatch"
-    if re.search(r"\bFY\s*20\d{2}\b", candidates):
-        return "mismatch"
-    return "unknown"
+        return PeriodMatch("not_required", True, None)
+
+    claim = str(claim_period).strip()
+    claim_upper = claim.upper()
+    claim_years = set(re.findall(r"20\d{2}", claim_upper))
+    if not claim_years and not re.search(r"\bQ[1-4]\b", claim_upper):
+        return PeriodMatch("not_required", True, None)
+
+    specific = str(evidence_period or "").strip()
+    if specific.lower() in _PERIOD_TYPE_TOKENS:
+        specific = ""
+
+    if specific:
+        specific_upper = specific.upper()
+        evidence_years = set(re.findall(r"20\d{2}", specific_upper))
+        if claim_years and evidence_years:
+            if claim_years & evidence_years:
+                return PeriodMatch("exact", True, "evidence.period")
+            return PeriodMatch("mismatch", False, "evidence.period")
+        if claim_upper == specific_upper or claim_upper in specific_upper or specific_upper in claim_upper:
+            return PeriodMatch("exact", True, "evidence.period")
+        if evidence_years or re.search(r"\b(?:FY|Q[1-4])\b", specific_upper):
+            return PeriodMatch("mismatch", False, "evidence.period")
+
+    window = (text or "")[:500]
+    window_upper = window.upper()
+    text_years = set(re.findall(r"20\d{2}", window_upper))
+    if claim_years and text_years:
+        if claim_years & text_years:
+            # Prefer an explicit FY/Q token near the year when present.
+            if re.search(rf"\bFY\s*{next(iter(claim_years))}\b", window_upper) or re.search(
+                rf"\b{re.escape(claim_upper)}\b", window_upper
+            ):
+                return PeriodMatch("text_match", True, "text")
+            return PeriodMatch("text_match", True, "text")
+        return PeriodMatch("mismatch", False, "text")
+    if re.search(r"\bFY\s*20\d{2}\b|\bQ[1-4]\s*20\d{2}\b", window_upper):
+        return PeriodMatch("mismatch", False, "text")
+    return PeriodMatch("unknown", False, None)
 
 
 def _values_close(left: float, right: float, *, tol: float = 0.02) -> bool:
+    return _text_values_close(left, right, tol=tol)
+
+
+def _structured_values_close(left: float, right: float) -> bool:
+    a = float(left)
+    b = float(right)
+    return abs(a - b) <= max(1e-6, abs(b) * 1e-4)
+
+
+def _text_values_close(left: float, right: float, *, tol: float = 0.02) -> bool:
     a = float(left)
     b = float(right)
     return abs(a - b) <= max(1e-9, abs(b) * tol, 0.05 if abs(b) >= 1 else 1e-6)
@@ -513,12 +572,18 @@ def match_numeric_evidence(
         )
 
     text = evidence.text or ""
-    period_state = _period_status(period, evidence.period, text)
-    if period_state == "mismatch":
+    period_type = getattr(evidence, "period_type", None)
+    period_result = match_period(period, evidence.period, text, period_type=period_type)
+    if period_result.status == "mismatch":
         return EvidenceMatch(
             False, None, False, False, False, None, None, "none", "period_mismatch"
         )
-    period_ok = period_state == "ok"
+    if period_result.status == "unknown":
+        return EvidenceMatch(
+            False, None, False, False, False, None, None, "none", "period_unknown"
+        )
+    period_ok = period_result.matched
+    period_state = "ok" if period_ok else period_result.status
 
     # Structured field path: display text is not the source of truth.
     if evidence.has_structured_fields and not formula_inputs:
@@ -534,7 +599,7 @@ def match_numeric_evidence(
                 "none",
                 "metric_name_mismatch",
             )
-        if not _values_close(float(evidence.value), float(value)):
+        if not _structured_values_close(float(evidence.value), float(value)):
             return EvidenceMatch(
                 False,
                 float(evidence.value),
@@ -567,7 +632,7 @@ def match_numeric_evidence(
                 True,
                 None,
                 None,
-                "low",
+                "none",
                 "period_unknown",
             )
         if (evidence.confidence or "high") != "high":
@@ -629,13 +694,10 @@ def match_numeric_evidence(
                 "none",
                 "formula_input_incomplete",
             )
-        if period_state == "unknown":
-            # Period-specific claims may still bind RAG text at reduced confidence.
-            pass
         for input_name, input_value in formula_inputs.items():
             if evidence.has_structured_fields:
                 # Single structured metric record cannot alone bind a multi-input formula.
-                if str(evidence.metric_name) != str(input_name) or not _values_close(
+                if str(evidence.metric_name) != str(input_name) or not _structured_values_close(
                     float(evidence.value), float(input_value)
                 ):
                     return EvidenceMatch(
@@ -666,6 +728,24 @@ def match_numeric_evidence(
                     "formula_input_incomplete",
                 )
             idx, _, conversion, span = hit
+            local_text = text[max(0, idx - 80) : idx + 80]
+            local_period = match_period(period, evidence.period, local_text, period_type=period_type)
+            if local_period.status == "unknown":
+                return EvidenceMatch(
+                    False,
+                    None,
+                    False,
+                    False,
+                    False,
+                    None,
+                    span,
+                    "none",
+                    "formula_input_period_unknown",
+                )
+            if local_period.status == "mismatch":
+                return EvidenceMatch(
+                    False, None, False, False, False, None, span, "none", "period_mismatch"
+                )
             if not _metric_alias_near(text, input_name, idx):
                 return EvidenceMatch(
                     False,
@@ -696,20 +776,16 @@ def match_numeric_evidence(
                     "unit_ambiguous",
                 )
         conf = "high" if structured or structured_source else "medium"
-        reason = "formula_inputs_bound"
-        if period_state == "unknown":
-            conf = "medium"
-            reason = "period_unknown"
         return EvidenceMatch(
             True,
             float(value),
             True,
-            period_state == "ok",
+            True,
             True,
             None,
             None,
             conf,
-            reason,
+            "formula_inputs_bound",
         )
 
     hit = _find_number_span(text, float(value), unit=unit, metric_name=metric_name)
@@ -730,32 +806,6 @@ def match_numeric_evidence(
             span,
             "none",
             "metric_label_mismatch",
-        )
-
-    if period_state == "unknown":
-        unit_declared = bool(conversion) or _unit_declared_near(text, idx)
-        if not unit_declared and unit == "billion_usd" and abs(float(value)) > 1.5:
-            return EvidenceMatch(
-                False,
-                found,
-                True,
-                False,
-                False,
-                conversion,
-                span,
-                "low",
-                "unit_ambiguous",
-            )
-        return EvidenceMatch(
-            True if unit_declared or unit in {None, "ratio", "multiple"} else False,
-            found,
-            True,
-            False,
-            unit_declared or unit in {None, "ratio", "multiple"},
-            conversion,
-            span,
-            "medium" if unit_declared or unit in {None, "ratio", "multiple"} else "low",
-            "period_unknown",
         )
 
     unit_ok = True
@@ -823,6 +873,7 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
         source_type: str,
         text: str,
         period: str | None = None,
+        period_type: str | None = None,
         metric_name: str | None = None,
         value: float | None = None,
         unit: str | None = None,
@@ -831,6 +882,11 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
         if not citation or evidence_id in seen:
             return
         seen.add(evidence_id)
+        specific = period
+        ptype = period_type
+        if specific and str(specific).lower() in _PERIOD_TYPE_TOKENS:
+            ptype = ptype or str(specific).lower()
+            specific = None
         pool.append(
             EvidenceRef(
                 evidence_id=evidence_id,
@@ -839,7 +895,8 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
                 source_type=source_type,
                 text=text or "",
                 page=_page_from_citation(citation),
-                period=period,
+                period=specific,
+                period_type=ptype,
                 metric_name=metric_name,
                 value=value,
                 unit=unit,
@@ -876,7 +933,15 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
             field_prov = provenance.get(key) if isinstance(provenance, dict) else None
             if not isinstance(field_prov, dict):
                 field_prov = {}
-            field_period = str(field_prov.get("period") or period or "") or None
+            field_period = str(field_prov.get("period") or "") or None
+            field_period_type = str(field_prov.get("period_type") or "") or None
+            if field_period and field_period.lower() in _PERIOD_TYPE_TOKENS:
+                field_period_type = field_period_type or field_period.lower()
+                field_period = None
+            fallback_period = period
+            if fallback_period and str(fallback_period).lower() in _PERIOD_TYPE_TOKENS:
+                fallback_period = None
+            field_period = field_period or fallback_period
             field_source = str(field_prov.get("source") or structured or "fundamentals")
             field_conf = str(field_prov.get("confidence") or "high")
             source_type = field_source if field_source != "none" else "fundamentals"
@@ -887,6 +952,7 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
                 source_type=source_type,
                 text=display,
                 period=field_period,
+                period_type=field_period_type,
                 metric_name=key,
                 value=float(raw),
                 unit="billion_usd",
@@ -1149,7 +1215,7 @@ def _verify_numeric(
                     unit="billion_usd",
                     period=claim.period,
                 )
-                if result.matched and (
+                if result.matched and result.matched_period and (
                     result.confidence == "high"
                     or (
                         not ref.has_structured_fields
@@ -1183,7 +1249,11 @@ def _verify_numeric(
                     unit=claim.unit,
                     period=claim.period,
                 )
-                if result.matched and result.confidence in {"high", "medium"}:
+                if (
+                    result.matched
+                    and result.matched_period
+                    and result.confidence in {"high", "medium"}
+                ):
                     # Verified numeric facts require high confidence when structured fields exist.
                     if ref.has_structured_fields and result.confidence != "high":
                         last_reason = result.reason
