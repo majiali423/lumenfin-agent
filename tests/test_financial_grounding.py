@@ -19,6 +19,24 @@ from lumenfin.tools import (
 )
 
 
+def _doc_meta(value: float, *, period: str | None = None) -> dict:
+    """Trusted document-extracted amount metadata (not auto-forged provider_metadata)."""
+    meta = {
+        "raw_value": value,
+        "raw_scale": None,
+        "currency": "USD",
+        "normalized_value": value,
+        "normalized_unit": "billion_usd",
+        "normalization_source": "table_caption",
+        "confidence": "high",
+        "is_normalized": True,
+        "period_type": "annual",
+    }
+    if period:
+        meta["period"] = period
+    return meta
+
+
 class FinancialGroundingMergeTests(unittest.TestCase):
     def test_document_wins_overlap_live_fills_gaps(self) -> None:
         merged, filled = _merge_document_market_data_with_live(
@@ -38,6 +56,7 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
             {
                 "detected_companies": ["NVIDIA"],
                 "metric_hints": {"revenue": 10.0},  # incomplete AST set
+                "metric_hint_meta": {"revenue": _doc_meta(10.0, period="FY2025")},
                 "excerpt": "NVIDIA filing excerpt.",
                 "text": "NVIDIA Form 10-K narrative.",
             }
@@ -81,6 +100,11 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
             {
                 "detected_companies": ["NVIDIA"],
                 "metric_hints": {"revenue": 130.5, "ebitda": 111.0, "r_and_d": 22.0},
+                "metric_hint_meta": {
+                    "revenue": _doc_meta(130.5, period="FY2025"),
+                    "ebitda": _doc_meta(111.0, period="FY2025"),
+                    "r_and_d": _doc_meta(22.0, period="FY2025"),
+                },
                 "excerpt": "full",
                 "text": "full",
             }
@@ -109,6 +133,11 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
                     "revenue": 245.1,
                     "operating_income": 109.4,
                     "r_and_d": 29.5,
+                },
+                "metric_hint_meta": {
+                    "revenue": _doc_meta(245.1, period="FY2024"),
+                    "operating_income": _doc_meta(109.4, period="FY2024"),
+                    "r_and_d": _doc_meta(29.5, period="FY2024"),
                 },
                 "excerpt": "Microsoft revenue",
                 "text": "Microsoft revenue operating income r_and_d",
@@ -141,6 +170,11 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
                     "operating_income": 109.4,
                     "r_and_d": 29.5,
                 },
+                "metric_hint_meta": {
+                    "revenue": _doc_meta(245.1),
+                    "operating_income": _doc_meta(109.4),
+                    "r_and_d": _doc_meta(29.5),
+                },
                 "excerpt": "tables",
                 "text": "tables",
             }
@@ -152,9 +186,11 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
             prefer_fiscal_year=2024,
         )
         meta = payload["fundamentals_meta"]
+        self.assertEqual(meta.get("grounding_layer"), "document_ast_complete")
         self.assertEqual(meta.get("fiscal_year"), 2024)
         self.assertEqual(meta.get("fiscal_year_source"), "query")
         self.assertEqual(meta.get("period_alignment"), "assumed_from_query")
+        self.assertNotEqual(meta.get("period_end"), "2024-06-30")
 
     def test_prefer_uploaded_only_blocks_partial_gap_fill(self) -> None:
         docs = [

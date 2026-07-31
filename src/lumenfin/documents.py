@@ -147,6 +147,8 @@ _TRUSTED_NORM_SOURCES = frozenset(
     {"table_caption", "inline_unit", "structured_table", "provider_metadata"}
 )
 
+_PERIOD_TYPE_VALUES = frozenset({"annual", "quarter", "ttm", "latest"})
+
 
 def amount_to_meta(amount: ExtractedAmount) -> dict[str, Any]:
     return asdict(amount)
@@ -164,12 +166,40 @@ def is_trusted_ast_amount(meta: dict[str, Any] | ExtractedAmount | None) -> bool
     if payload.get("normalized_unit") != "billion_usd":
         return False
     currency = payload.get("currency")
-    if currency not in (None, "USD"):
+    if currency != "USD":
         return False
-    if payload.get("period_hint") == "quarter":
+    period_type = payload.get("period_type") or payload.get("period_hint")
+    if period_type == "quarter":
         return False
     source = str(payload.get("normalization_source") or "")
-    return source in _TRUSTED_NORM_SOURCES
+    if source not in _TRUSTED_NORM_SOURCES:
+        return False
+    if source == "provider_metadata":
+        return trusted_provider_amount(payload)
+    return True
+
+
+def trusted_provider_amount(meta: dict[str, Any] | ExtractedAmount | None) -> bool:
+    """Provider-supplied normalized amounts require explicit provenance fields."""
+    if meta is None:
+        return False
+    payload = asdict(meta) if isinstance(meta, ExtractedAmount) else dict(meta)
+    if payload.get("confidence") != "high":
+        return False
+    if payload.get("normalized_value") is None:
+        return False
+    if payload.get("normalized_unit") != "billion_usd":
+        return False
+    if payload.get("currency") != "USD":
+        return False
+    if not str(payload.get("provider") or "").strip():
+        return False
+    period = str(payload.get("period") or "").strip()
+    if not period or period.lower() in _PERIOD_TYPE_VALUES:
+        return False
+    if str(payload.get("normalization_source") or "") != "provider_metadata":
+        return False
+    return bool(payload.get("is_normalized", True))
 
 
 def detect_statement_scale(text: str) -> str | None:

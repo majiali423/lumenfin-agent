@@ -447,15 +447,48 @@ def _payload_from_documents(
         hint_source = scoped or (
             doc.get("metric_hints", {}) if len(detected) <= 1 else {}
         )
-        hint_meta = scoped_meta or (
-            doc.get("metric_hint_meta", {}) if len(detected) <= 1 else {}
-        )
+        # Prefer caller/document metadata over opportunistic re-extraction.
+        doc_meta = doc.get("metric_hint_meta", {}) if len(detected) <= 1 else {}
+        per_meta = (doc.get("per_company_metric_hint_meta") or {}).get(company) or {}
+        hint_meta = per_meta or doc_meta or scoped_meta or {}
         # Keep low-confidence projections observable without promoting into AST.
         projected = normalize_metric_hints_to_billion_usd(
             dict(hint_source), text=text, hint_meta=hint_meta or None
         )
         document_observations["metric_hints"].update(projected)
         document_observations["metric_hint_meta"].update(hint_meta or {})
+
+        provided_hints = doc.get("metric_hints") or {}
+        for key, value in list(projected.items()):
+            if key not in provided_hints and not (
+                key.endswith("_2025") and key.replace("_2025", "") in provided_hints
+            ):
+                continue
+            base = key.replace("_2025", "") if key.endswith("_2025") else key
+            explicit_meta = (doc.get("metric_hint_meta") or {}).get(key) or (
+                doc.get("metric_hint_meta") or {}
+            ).get(base)
+            if not explicit_meta:
+                per_co = (doc.get("per_company_metric_hint_meta") or {}).get(company) or {}
+                explicit_meta = per_co.get(key) or per_co.get(base)
+            if explicit_meta:
+                continue
+            # Bare caller floats without provenance stay observational only.
+            legacy_meta = {
+                "raw_value": float(value),
+                "raw_scale": None,
+                "currency": None,
+                "normalized_value": float(value),
+                "normalized_unit": "billion_usd",
+                "normalization_source": "legacy_unverified",
+                "confidence": "low",
+                "period_hint": None,
+                "period_type": None,
+                "period": None,
+                "is_normalized": False,
+            }
+            document_observations["metric_hint_meta"][key] = legacy_meta
+            document_observations.setdefault("legacy_metric_hints", {})[key] = float(value)
 
         for key, value in projected.items():
             if key not in {"revenue", "ebitda", "r_and_d", "operating_income"} and not (
@@ -465,48 +498,42 @@ def _payload_from_documents(
                 continue
             base = key.replace("_2025", "") if key.endswith("_2025") else key
             meta = (hint_meta or {}).get(key) or (hint_meta or {}).get(base)
-            provided_hints = doc.get("metric_hints") or {}
-            caller_supplied = key in provided_hints or base in provided_hints
-            explicit_meta = (doc.get("metric_hint_meta") or {}).get(key) or (
-                doc.get("metric_hint_meta") or {}
-            ).get(base)
-            if not explicit_meta:
-                per_co = (doc.get("per_company_metric_hint_meta") or {}).get(company) or {}
-                explicit_meta = per_co.get(key) or per_co.get(base)
-            if (
-                caller_supplied
-                and not explicit_meta
-                and not is_trusted_ast_amount(meta)
-            ):
-                # Explicit caller floats without extraction metadata are already on the
-                # shared billion scale. Do not let opportunistic unitless text parses
-                # (e.g. "10-K", bare "400") block promotion of those provided hints.
-                meta = {
-                    "raw_value": float(value),
-                    "raw_scale": None,
-                    "currency": "USD",
-                    "normalized_value": float(value),
-                    "normalized_unit": "billion_usd",
-                    "normalization_source": "provider_metadata",
-                    "confidence": "high",
-                    "period_hint": None,
-                    "is_normalized": True,
-                }
-                document_observations["metric_hint_meta"][key] = meta
-            elif not meta and text:
+            if not meta:
+                meta = (document_observations.get("metric_hint_meta") or {}).get(key)
+            if not meta and text:
                 extracted = extract_metric_hint_meta(text, metric=base)
                 if extracted:
                     meta = extracted
             if not is_trusted_ast_amount(meta):
                 continue
-            if base == "revenue" and not is_plausible_revenue_billion_usd(value):
+            if base == "revenue" and not is_plausible_revenue_billion_usd(
+                float(meta.get("normalized_value", value))
+            ):
                 continue
             set_fundamental(market_data, key, float(meta.get("normalized_value", value)))
+            period_value = meta.get("period")
+            period_type = meta.get("period_type") or meta.get("period_hint")
+            if isinstance(period_value, str) and period_value.lower() in {
+                "annual",
+                "quarter",
+                "ttm",
+                "latest",
+            }:
+                period_type = period_value.lower()
+                period_value = None
             fundamental_provenance[base] = {
-                "source": "document_extracted",
+                "source": (
+                    "provider_metadata"
+                    if meta.get("normalization_source") == "provider_metadata"
+                    else "document_extracted"
+                ),
                 "confidence": meta.get("confidence"),
                 "normalization_source": meta.get("normalization_source"),
-                "period": meta.get("period_hint"),
+                "provider": meta.get("provider"),
+                "period": period_value,
+                "period_type": period_type,
+                "period_end": meta.get("period_end"),
+                "period_source": meta.get("period_source") or meta.get("provider"),
             }
 
         if excerpt:

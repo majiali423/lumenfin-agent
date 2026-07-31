@@ -47,6 +47,24 @@ class ToolsHonestyTestCase(unittest.TestCase):
             {
                 "detected_companies": ["Apple"],
                 "metric_hints": {"revenue": 400.0, "ebitda": 120.0},
+                "metric_hint_meta": {
+                    "revenue": {
+                        "normalized_value": 400.0,
+                        "normalized_unit": "billion_usd",
+                        "currency": "USD",
+                        "confidence": "high",
+                        "normalization_source": "table_caption",
+                        "is_normalized": True,
+                    },
+                    "ebitda": {
+                        "normalized_value": 120.0,
+                        "normalized_unit": "billion_usd",
+                        "currency": "USD",
+                        "confidence": "high",
+                        "normalization_source": "table_caption",
+                        "is_normalized": True,
+                    },
+                },
                 "excerpt": "Apple revenue 400 EBITDA 120.",
                 "text": "Apple revenue 400 EBITDA 120.",
             }
