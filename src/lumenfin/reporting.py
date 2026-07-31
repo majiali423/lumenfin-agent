@@ -9,7 +9,7 @@ from typing import Any
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
 from .evaluation import evaluate_run_state
 
-_PAGE_CITATION_RE = re.compile(r"#p\d+", re.IGNORECASE)
+_PAGE_CITATION_RE = re.compile(r"(?:#p\d+|\bp\.\d+\b)", re.IGNORECASE)
 
 REPORT_OUTPUT_FORMATS = frozenset({"research_report", "executive_summary", "table_summary"})
 DEFAULT_REPORT_OUTPUT_FORMAT = "research_report"
@@ -116,6 +116,137 @@ def parse_requested_fiscal_year(*texts: Any) -> int | None:
     return None
 
 
+def infer_fiscal_year_from_documents(
+    document_contexts: list[dict[str, Any]] | None,
+    *,
+    company: str | None = None,
+) -> tuple[int | None, str | None]:
+    """Infer FY from upload filenames / filing text (not from query alone).
+
+    Returns ``(year, source_tag)`` where source_tag is ``upload_filename`` or
+    ``upload_text`` when a year is found.
+    """
+    docs = document_contexts or []
+    # Filename is the strongest clerk-facing signal for derived fixtures
+    # (e.g. msft_fy2024_10k_long_excerpt.pdf).
+    for doc in docs:
+        for key in ("filename", "source", "path", "citation"):
+            raw = str(doc.get(key) or "")
+            if not raw:
+                continue
+            name = Path(raw).name if ("/" in raw or "\\" in raw) else raw
+            year = parse_requested_fiscal_year(name)
+            if year is not None:
+                return year, "upload_filename"
+    # Filing body / excerpt (FY2024, fiscal year ended ..., etc.)
+    for doc in docs:
+        detected = doc.get("detected_companies") or []
+        if company and detected and company not in detected:
+            continue
+        blob = " ".join(
+            str(doc.get(k) or "") for k in ("filename", "excerpt", "text")
+        )[:8000]
+        year = parse_requested_fiscal_year(blob)
+        if year is not None:
+            return year, "upload_text"
+    return None, None
+
+
+# Typical fiscal year-end month/day for common issuers when filing extract has no period_end.
+# These are convention hints for clerk disclosure — not a substitute for filing metadata.
+_ISSUER_FY_END_HINTS: dict[str, tuple[int, int]] = {
+    "Apple": (9, 30),
+    "Microsoft": (6, 30),
+    "NVIDIA": (1, 26),  # late January fiscal year end (approx)
+    "AMD": (12, 28),
+    "Tesla": (12, 31),
+    "Amazon": (12, 31),
+    "Alphabet": (12, 31),
+    "Meta": (12, 31),
+}
+
+
+def suggest_period_end_hint(company: str | None, fiscal_year: int | None) -> tuple[str | None, str | None]:
+    """Return (YYYY-MM-DD, source_tag) from issuer convention when FY is known."""
+    if not company or fiscal_year is None:
+        return None, None
+    tip = _ISSUER_FY_END_HINTS.get(str(company))
+    if not tip:
+        return None, None
+    month, day = tip
+    try:
+        return f"{int(fiscal_year):04d}-{month:02d}-{day:02d}", "issuer_convention_hint"
+    except (TypeError, ValueError):
+        return None, None
+
+
+def annotate_upload_period_meta(
+    meta: dict[str, Any] | None,
+    *,
+    document_contexts: list[dict[str, Any]] | None = None,
+    company: str | None = None,
+    prefer_fiscal_year: int | None = None,
+) -> dict[str, Any]:
+    """Fill fiscal_year / period_alignment for document_extracted payloads.
+
+    Priority: existing meta fiscal_year → filename/text inference → query FY
+    (tagged ``assumed_from_query`` so clerks know it was not filing-labeled).
+    When period_end is missing, may attach an issuer-convention hint date.
+    """
+    out = dict(meta or {})
+    if prefer_fiscal_year is not None:
+        out.setdefault("requested_fiscal_year", int(prefer_fiscal_year))
+
+    def _finalize(used: int | None) -> dict[str, Any]:
+        if used is not None and not str(out.get("period_end") or "").strip():
+            hint, src = suggest_period_end_hint(company, used)
+            if hint:
+                out["period_end"] = hint
+                out["period_end_source"] = src
+        return out
+
+    existing = out.get("fiscal_year")
+    if existing not in (None, ""):
+        try:
+            used = int(existing)
+        except (TypeError, ValueError):
+            used = None
+        if used is not None:
+            out["fiscal_year"] = used
+            if prefer_fiscal_year is not None:
+                out.setdefault(
+                    "period_alignment",
+                    "exact" if used == int(prefer_fiscal_year) else "fallback_latest",
+                )
+            else:
+                out.setdefault("period_alignment", "upload_labeled")
+            return _finalize(used)
+
+    inferred, source = infer_fiscal_year_from_documents(
+        document_contexts, company=company
+    )
+    if inferred is not None:
+        out["fiscal_year"] = int(inferred)
+        out["fiscal_year_source"] = source
+        if prefer_fiscal_year is not None and int(inferred) == int(prefer_fiscal_year):
+            out["period_alignment"] = "exact"
+        elif prefer_fiscal_year is not None:
+            out["period_alignment"] = "fallback_latest"
+        else:
+            out["period_alignment"] = source or "upload_labeled"
+        return _finalize(int(inferred))
+
+    if prefer_fiscal_year is not None:
+        # Upload has computable metrics but no FY tag — use query FY with an honest label.
+        out["fiscal_year"] = int(prefer_fiscal_year)
+        out["fiscal_year_source"] = "query"
+        out["period_alignment"] = "assumed_from_query"
+        return _finalize(int(prefer_fiscal_year))
+
+    out.setdefault("period_alignment", "unspecified")
+    return _finalize(None)
+
+
 def requested_fiscal_year_from_state(state: dict[str, Any] | None) -> int | None:
     state = state or {}
     plan = state.get("query_plan") or {}
@@ -147,6 +278,54 @@ def used_fiscal_year_for_company(state: dict[str, Any] | None, company: str) -> 
     return None
 
 
+def period_end_for_company(state: dict[str, Any] | None, company: str) -> str | None:
+    """Return a clerk-facing period-end date string (YYYY-MM-DD) when metadata has one."""
+    payload = ((state or {}).get("retrieved_docs") or {}).get(company) or {}
+    meta = payload.get("fundamentals_meta") or {}
+    for key in ("period_end", "period"):
+        raw = str(meta.get(key) or "").strip()
+        if not raw:
+            continue
+        match = re.search(r"(20\d{2}-\d{2}-\d{2})", raw)
+        if match:
+            return match.group(1)
+        # Yahoo sometimes stores column labels like 2024-06-30 00:00:00
+        match = re.search(r"(20\d{2}-\d{2}-\d{2})", raw.replace("/", "-"))
+        if match:
+            return match.group(1)
+    return None
+
+
+def _parse_iso_date(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = re.match(r"(20\d{2})-(\d{2})-(\d{2})", text)
+    if not match:
+        return None
+    try:
+        return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+# Peer FY labels can match while fiscal calendars differ (e.g. AAPL Sep vs MSFT Jun).
+_PEER_PERIOD_END_MISMATCH_DAYS = 90
+
+
+def peer_period_end_span_days(state: dict[str, Any] | None) -> int | None:
+    """Max absolute day gap among known peer period_end dates, or None if <2 dates."""
+    companies = [str(c) for c in ((state or {}).get("companies") or [])]
+    dates = []
+    for company in companies:
+        parsed = _parse_iso_date(period_end_for_company(state, company))
+        if parsed is not None:
+            dates.append(parsed)
+    if len(dates) < 2:
+        return None
+    return max(abs((a - b).days) for a in dates for b in dates)
+
+
 def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
     """Disclose requested vs used fiscal periods (never silent FY swap)."""
     state = state or {}
@@ -155,26 +334,51 @@ def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
     if not companies:
         return []
 
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str]] = []
     any_mismatch = False
+    any_assumed = False
+    used_years: list[int] = []
     for company in companies:
         used = used_fiscal_year_for_company(state, company)
+        if used is not None:
+            used_years.append(int(used))
         payload = (state.get("retrieved_docs") or {}).get(company) or {}
         meta = payload.get("fundamentals_meta") or {}
         alignment = str(meta.get("period_alignment") or "")
+        fy_source = str(meta.get("fiscal_year_source") or "")
+        period_end = period_end_for_company(state, company) or "n/a"
+        pe_source = str(meta.get("period_end_source") or "")
+        if period_end != "n/a" and pe_source == "issuer_convention_hint":
+            period_end = f"{period_end} (issuer convention hint)"
         used_label = f"FY{used}" if used is not None else "n/a"
         if requested is None:
             status = alignment or "no FY requested"
         elif used is None:
             status = "requested FY not found in structured fundamentals"
             any_mismatch = True
+        elif alignment == "assumed_from_query":
+            status = "upload extract; FY assumed from query (filing not year-tagged)"
+            any_assumed = True
         elif int(used) == int(requested):
-            status = "exact match"
+            if pe_source == "issuer_convention_hint" and fy_source in {
+                "upload_filename",
+                "upload_text",
+                "query",
+            }:
+                status = f"FY label match ({fy_source or alignment}); period-end is convention hint"
+            elif fy_source in {"upload_filename", "upload_text"} or alignment in {
+                "upload_filename",
+                "upload_text",
+                "upload_labeled",
+            }:
+                status = f"exact match ({fy_source or alignment})"
+            else:
+                status = "exact match"
         else:
             status = f"FALLBACK — requested FY{requested}, using {used_label}"
             any_mismatch = True
         req_label = f"FY{requested}" if requested is not None else "—"
-        rows.append((company, req_label, f"{used_label} ({status})"))
+        rows.append((company, req_label, f"{used_label} ({status})", period_end))
 
     if requested is None and not any(
         ((state.get("retrieved_docs") or {}).get(c) or {}).get("fundamentals_meta")
@@ -185,11 +389,11 @@ def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
     lines = [
         "## Period Alignment",
         "",
-        "| Company | Requested | Used (status) |",
-        "|---------|-----------|---------------|",
+        "| Company | Requested | Used (status) | Period end |",
+        "|---------|-----------|---------------|------------|",
     ]
-    for company, req, used in rows:
-        lines.append(f"| {company} | {req} | {used} |")
+    for company, req, used, period_end in rows:
+        lines.append(f"| {company} | {req} | {used} | {period_end} |")
     lines.append("")
     if any_mismatch:
         lines.append(
@@ -198,9 +402,39 @@ def format_period_alignment_notice(state: dict[str, Any] | None) -> list[str]:
             "the requested FY is available or the query is restated."
         )
         lines.append("")
+    elif any_assumed:
+        lines.append(
+            "**Period notice:** Upload extract supplied the numbers; fiscal year was taken from the "
+            "query because the filing extract did not carry an explicit FY tag in structured metadata."
+        )
+        lines.append("")
     elif requested is not None:
         lines.append(f"**Period notice:** Structured fundamentals match requested FY{requested}.")
         lines.append("")
+
+    # Multi-issuer: same FY label ≠ same fiscal calendar.
+    if len(companies) >= 2:
+        span = peer_period_end_span_days(state)
+        label_aligned = (
+            len(used_years) >= 2
+            and len(set(used_years)) == 1
+            and (requested is None or all(y == int(requested) for y in used_years))
+        )
+        if span is not None and span >= _PEER_PERIOD_END_MISMATCH_DAYS:
+            lines.append(
+                "**Calendar note:** Peer `period_end` dates differ by "
+                f"{_PEER_PERIOD_END_MISMATCH_DAYS}+ days (span={span}d). Side-by-side ratios are "
+                "**FY-label-aligned research comps**, not a claim that fiscal calendars match "
+                "the same natural-year window."
+            )
+            lines.append("")
+        elif label_aligned or (requested is not None and not any_mismatch):
+            lines.append(
+                "**Calendar note:** Matching FY labels (e.g. Apple FY2024 vs Microsoft FY2024) do not "
+                "imply identical fiscal year-end dates. Treat the peer matrix as same-label research "
+                "comparison unless period-end dates above are close."
+            )
+            lines.append("")
     return lines
 
 
@@ -221,6 +455,9 @@ def format_peer_metric_matrix(state: dict[str, Any] | None) -> list[str]:
     metrics_by_company = state.get("financial_metrics") or {}
     lines = [
         "### Peer Metric Matrix (comparable columns; gaps are explicit)",
+        "",
+        "*FY-label research comps — not a claim that peer fiscal calendars share the same natural-year window. "
+        "See Period Alignment for period-end dates.*",
         "",
         "| Metric | " + " | ".join(companies) + " | Notes |",
         "|--------|" + "|".join(["------"] * len(companies)) + "|-------|",
@@ -353,19 +590,15 @@ def build_clerk_executive_summary(
     # Multi-company: capsule alone is the clerk conclusion (no claim dump).
     if capsule:
         parts.extend(line for line in capsule if line.strip())
-        parts.append(
-            "Assertions above are limited to verified claim objects / AST metrics with bound evidence."
-        )
         return "\n".join(parts)
 
-    claims = filter_claims_for_brief(verified_claims) if brief else list(verified_claims)
-    if brief:
-        claims = [
-            c
-            for c in claims
-            if (getattr(c, "claim_type", None) or (c.get("claim_type") if isinstance(c, dict) else None))
-            == "numeric"
-        ]
+    # Clerk summary: numeric highlights only (risk/thesis live in dedicated sections).
+    claims = [
+        c
+        for c in (filter_claims_for_brief(verified_claims) if brief else list(verified_claims))
+        if (getattr(c, "claim_type", None) or (c.get("claim_type") if isinstance(c, dict) else None))
+        == "numeric"
+    ]
 
     if not companies:
         return (
@@ -390,8 +623,8 @@ def build_clerk_executive_summary(
             "operating_margin",
             "ebitda_margin",
             "r_and_d_intensity",
-            "pe_ratio",
             "revenue",
+            "pe_ratio",
         )
         picked: list[Any] = []
         remaining = list(company_claims)
@@ -404,30 +637,20 @@ def build_clerk_executive_summary(
                     picked.append(claim)
                     remaining.remove(claim)
                     break
-            if len(picked) >= (2 if brief else 3):
+            if len(picked) >= 3:
                 break
-        if len(picked) < (2 if brief else 3):
-            for claim in remaining:
-                if claim in picked:
-                    continue
-                picked.append(claim)
-                if len(picked) >= (2 if brief else 3):
-                    break
         if not picked:
             continue
-        rendered = []
+        bullets = []
         for claim in picked:
             if hasattr(claim, "render_with_citation"):
-                rendered.append(claim.render_with_citation())
+                bullets.append(f"- {claim.render_with_citation(humanize=True)}")
             else:
-                rendered.append(str(claim.get("statement") or ""))
-        per_company.append(f"{company}: " + " ".join(rendered))
+                bullets.append(f"- {claim.get('statement') or ''}")
+        per_company.append(f"**{company}**\n" + "\n".join(bullets))
 
     if per_company:
-        parts.append(" ".join(per_company))
-    parts.append(
-        "Assertions above are limited to verified claim objects / AST metrics with bound evidence."
-    )
+        parts.append("\n\n".join(per_company))
     return "\n".join(p for p in parts if p)
 
 
@@ -490,11 +713,36 @@ def write_metrics_csv(path: Path, result: dict[str, Any] | None) -> Path:
     return path
 
 
+def humanize_citation(citation: str) -> str:
+    """Turn internal citation URIs into clerk-readable source labels."""
+    cite = (citation or "").strip()
+    if not cite:
+        return ""
+    m = re.match(r"^(?P<file>.+\.pdf)#p(?P<page>\d+)$", cite, flags=re.I)
+    if m:
+        return f"{m.group('file')} p.{m.group('page')}"
+    patterns = (
+        (r"^lumenfin:sec_companyfacts:([^:]+):(.+)$", "SEC companyfacts ({0}, {1})"),
+        (r"^lumenfin:yahoo_fundamentals:([^:]+):(.+)$", "Yahoo fundamentals ({0}, {1})"),
+        (r"^lumenfin:document_extracted:([^:]+):(.+)$", "Uploaded filing extract ({0}, {1})"),
+        (r"^lumenfin:market_snapshot:([^:]+):", "Live market snapshot ({0})"),
+        (r"^lumenfin:risk_model:([^:]+)", "Risk screening model ({0})"),
+        (r"^lumenfin:supply_chain:([^:]+):(.+)$", "Supply-chain screen ({0}, {1})"),
+        (r"^lumenfin:sample_db:([^:]+):(.+)$", "Demo sample fundamentals ({0}, {1})"),
+    )
+    for pattern, template in patterns:
+        match = re.match(pattern, cite)
+        if match:
+            return template.format(*match.groups())
+    return cite
+
+
 def format_rag_citation_section(
     rag_evidence: dict[str, Any] | None,
     *,
     max_excerpt: int = 180,
     heading: str = "### Retrieved Document Citations (page-level)",
+    max_rows_per_company: int = 3,
 ) -> list[str]:
     """Build a deterministic markdown block of RAG page citations for final_report.
 
@@ -503,14 +751,19 @@ def format_rag_citation_section(
     """
     evidence = rag_evidence or {}
     rows: list[tuple[str, str, str, str]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
     for company_key in sorted(evidence.keys(), key=lambda c: str(c)):
         company = str(company_key)
         hits = evidence.get(company_key) or []
         if not isinstance(hits, list):
             continue
-        for hit in hits:
-            if not isinstance(hit, dict):
-                continue
+        scored_hits = [h for h in hits if isinstance(h, dict)]
+        scored_hits.sort(
+            key=lambda h: float(h.get("score") or h.get("rerank_score") or 0.0),
+            reverse=True,
+        )
+        kept_for_company = 0
+        for hit in scored_hits:
             citation = str(hit.get("citation") or "").strip()
             if not citation:
                 filename = (
@@ -524,23 +777,32 @@ def format_rag_citation_section(
                 or "hybrid"
             )
             text = str(hit.get("text") or hit.get("excerpt") or "").replace("\n", " ").strip()
+            # Dedupe identical excerpt pairs that repeat across near-duplicate pages.
+            file_key = re.sub(r"#p\d+$", "", citation, flags=re.I).lower()
+            dedupe_key = (company, file_key, text[:120].lower())
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
             if len(text) > max_excerpt:
                 text = text[: max_excerpt - 1].rstrip() + "…"
             rows.append((company, citation, method, text or "—"))
+            kept_for_company += 1
+            if kept_for_company >= max_rows_per_company:
+                break
     if not rows:
         return []
     lines = [
         heading,
         "",
-        "These anchors come from hybrid RAG hits and are written deterministically "
-        "(not paraphrased by the LLM). Use `filename#pN` to locate the source page.",
+        "Page anchors from retrieval (deduplicated; top hits per company). Open the cited PDF page to verify.",
         "",
         "| Company | Citation | Method | Excerpt |",
         "|---------|----------|--------|---------|",
     ]
     for company, citation, method, text in rows:
         safe_text = text.replace("|", "\\|")
-        lines.append(f"| {company} | `{citation}` | {method} | {safe_text} |")
+        label = humanize_citation(citation)
+        lines.append(f"| {company} | {label} | {method} | {safe_text} |")
     lines.append("")
     return lines
 

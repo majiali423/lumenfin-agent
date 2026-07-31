@@ -80,7 +80,7 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
         docs = [
             {
                 "detected_companies": ["NVIDIA"],
-                "metric_hints": {"revenue": 999.0, "ebitda": 111.0, "r_and_d": 22.0},
+                "metric_hints": {"revenue": 130.5, "ebitda": 111.0, "r_and_d": 22.0},
                 "excerpt": "full",
                 "text": "full",
             }
@@ -98,6 +98,61 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
         mock_sec.assert_not_called()
         self.assertEqual(payload["structured_source"], "document_extracted")
         self.assertEqual(payload["fundamentals_meta"].get("grounding_layer"), "document_ast_complete")
+        self.assertEqual(payload["market_data"]["revenue"], 130.5)
+
+    def test_document_complete_tags_fiscal_year_from_filename(self) -> None:
+        docs = [
+            {
+                "detected_companies": ["Microsoft"],
+                "filename": "msft_fy2024_10k_long_excerpt.pdf",
+                "metric_hints": {
+                    "revenue": 245.1,
+                    "operating_income": 109.4,
+                    "r_and_d": 29.5,
+                },
+                "excerpt": "Microsoft revenue",
+                "text": "Microsoft revenue operating income r_and_d",
+            }
+        ]
+        payload = retrieve_company_payload(
+            "Microsoft",
+            document_contexts=docs,
+            allow_sample_data=False,
+            prefer_fiscal_year=2024,
+        )
+        meta = payload["fundamentals_meta"]
+        self.assertEqual(meta.get("grounding_layer"), "document_ast_complete")
+        self.assertEqual(meta.get("fiscal_year"), 2024)
+        self.assertEqual(meta.get("fiscal_year_source"), "upload_filename")
+        self.assertEqual(meta.get("period_alignment"), "exact")
+        self.assertEqual(meta.get("requested_fiscal_year"), 2024)
+        self.assertEqual(meta.get("period_end"), "2024-06-30")
+        self.assertEqual(meta.get("period_end_source"), "issuer_convention_hint")
+
+    def test_document_complete_assumes_fy_from_query_when_unlabeled(self) -> None:
+        docs = [
+            {
+                "detected_companies": ["Microsoft"],
+                "filename": "msft_upload.pdf",
+                "metric_hints": {
+                    "revenue": 245.1,
+                    "operating_income": 109.4,
+                    "r_and_d": 29.5,
+                },
+                "excerpt": "tables",
+                "text": "tables",
+            }
+        ]
+        payload = retrieve_company_payload(
+            "Microsoft",
+            document_contexts=docs,
+            allow_sample_data=False,
+            prefer_fiscal_year=2024,
+        )
+        meta = payload["fundamentals_meta"]
+        self.assertEqual(meta.get("fiscal_year"), 2024)
+        self.assertEqual(meta.get("fiscal_year_source"), "query")
+        self.assertEqual(meta.get("period_alignment"), "assumed_from_query")
 
     def test_prefer_uploaded_only_blocks_partial_gap_fill(self) -> None:
         docs = [

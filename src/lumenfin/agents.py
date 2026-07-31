@@ -26,10 +26,12 @@ from .reporting import (
     build_clerk_executive_summary,
     effective_report_output_format,
     filter_claims_for_brief,
+    format_comparison_capsule,
     format_next_actions,
     format_peer_metric_matrix,
     format_period_alignment_notice,
     format_rag_citation_section,
+    humanize_citation,
     is_low_signal_claim,
     requested_fiscal_year_from_state,
 )
@@ -44,6 +46,8 @@ from .claims import (
 from .skills import get_skill_specs
 from .state import FinanceState
 from .metrics_schema import get_fundamental, set_fundamental
+from .fundamentals import is_plausible_revenue_billion_usd
+from .documents import normalize_metric_hints_to_billion_usd
 from .tools import (
     analyze_sentiment_deep,
     build_chart_data,
@@ -95,8 +99,29 @@ def _peer_comparison_is_safe(text: str) -> bool:
 def _peer_comparison_fallback(companies: list[str]) -> str:
     names = ", ".join(companies)
     return (
-        f"Structured peer metrics are available for {names}, but no reliable "
-        "narrative ranking was generated for this run."
+        f"Structured peer metrics are available for {names}. "
+        "See the Executive Summary comparison capsule and Peer Metric Matrix for verified ratios; "
+        "no free-form peer narrative is invented beyond those figures."
+    )
+
+
+def _deterministic_peer_comparison(comparable_metrics: dict[str, dict[str, Any]]) -> str:
+    """Rule-based peer blurb from AST metrics only (no LLM; no invented margins/returns)."""
+    companies = list(comparable_metrics.keys())
+    if len(companies) < 2:
+        return _single_company_peer_summary(companies[0]) if companies else (
+            "No quantitative metrics were available for peer comparison."
+        )
+    capsule = format_comparison_capsule(
+        {"companies": companies, "financial_metrics": comparable_metrics}
+    )
+    bullets = [line for line in capsule if line.startswith("- ")]
+    if not bullets:
+        return _peer_comparison_fallback(companies)
+    return (
+        "Peer comparison is limited to verified structured ratios "
+        "(see Executive Summary capsule and Peer Metric Matrix):\n"
+        + "\n".join(bullets)
     )
 
 
@@ -447,16 +472,29 @@ class AgentRuntime:
         payload["live_market"] = live_market
         payload["source_documents"] = document_summary["source_documents"]
         if document_summary["metric_hints"]:
-            if document_summary["metric_hints"].get("revenue") is not None:
-                set_fundamental(payload["market_data"], "revenue", document_summary["metric_hints"]["revenue"])
-            if document_summary["metric_hints"].get("ebitda") is not None:
-                set_fundamental(payload["market_data"], "ebitda", document_summary["metric_hints"]["ebitda"])
-            if document_summary["metric_hints"].get("r_and_d") is not None:
-                set_fundamental(payload["market_data"], "r_and_d", document_summary["metric_hints"]["r_and_d"])
+            doc_text = "\n".join(
+                str(doc.get("text") or doc.get("excerpt") or "")
+                for doc in document_contexts
+                if isinstance(doc, dict)
+            )
+            normalized_hints = normalize_metric_hints_to_billion_usd(
+                dict(document_summary["metric_hints"]),
+                text=doc_text,
+            )
+            applied_abs = False
+            if normalized_hints.get("revenue") is not None and is_plausible_revenue_billion_usd(
+                normalized_hints["revenue"]
+            ):
+                set_fundamental(payload["market_data"], "revenue", normalized_hints["revenue"])
+                applied_abs = True
+            for key in ("ebitda", "r_and_d", "operating_income"):
+                if normalized_hints.get(key) is not None:
+                    set_fundamental(payload["market_data"], key, normalized_hints[key])
+                    applied_abs = True
             # Prefer document label only when upload alone provided the AST spine.
             # Issuer SEC/Yahoo gap-fill must keep sec_companyfacts / yahoo_fundamentals.
-            if any(
-                document_summary["metric_hints"].get(key) is not None
+            if applied_abs and any(
+                normalized_hints.get(key) is not None
                 for key in ("revenue", "ebitda", "r_and_d")
             ):
                 meta = payload.get("fundamentals_meta") or {}
@@ -986,34 +1024,10 @@ class AgentRuntime:
                     next(iter(comparable_metrics))
                 )
             elif comparable_metrics:
-                try:
-                    metrics_summary = json.dumps(comparable_metrics, ensure_ascii=False)
-                    skip_note = ""
-                    if skipped:
-                        skip_note = (
-                            f" Non-comparable peers omitted from ratio comparison: {', '.join(skipped)} "
-                            "(no AST-verifiable structured fundamentals)."
-                        )
-                    peer_comparison_text = self.llm_client.chat(
-                        system_prompt=(
-                            "You are a senior quantitative analyst. Based on the provided metrics, "
-                            "write a 2-3 sentence peer comparison in English. Structure: "
-                            "(1) Which company leads on profitability and why, "
-                            "(2) Which leads on innovation efficiency, "
-                            "(3) Key competitive dynamics revealed by the data. "
-                            "If only one company has ratio metrics, state that peer ratio comparison is partial."
-                        ),
-                        user_prompt=f"Company metrics: {metrics_summary}{skip_note}",
-                        temperature=0.2,
-                        max_tokens=220,
-                    )
-                    if not _peer_comparison_is_safe(peer_comparison_text):
-                        peer_comparison_text = _peer_comparison_fallback(
-                            list(comparable_metrics)
-                        )
-                except Exception:
-                    peer_comparison_text = _peer_comparison_fallback(
-                        list(comparable_metrics)
+                peer_comparison_text = _deterministic_peer_comparison(comparable_metrics)
+                if skipped:
+                    peer_comparison_text += (
+                        f" Non-comparable peers omitted: {', '.join(skipped)}."
                     )
             elif financial_metrics:
                 peer_comparison_text = (
@@ -1290,21 +1304,21 @@ class AgentRuntime:
                 "No ratios, SWOT, or investment positioning were invented."
             )
             S("")
-            S("## 4. Financial Performance Analysis")
+            S("## 3. Financial Performance Analysis")
             S("")
             S(
                 "Not available — fail-closed. Structured fundamentals were missing or non-computable "
                 f"for: {companies}."
             )
             S("")
-            S("## 7. Risk Architecture")
+            S("## 4. Risk")
             S("")
             S(
                 "**Data limitation risk (high):** Without extractable FY metrics, quantitative risk scoring "
                 "and peer margin comparison are withheld rather than estimated."
             )
             S("")
-            S("## 10. Compliance Review & Data Integrity")
+            S("## 6. Compliance Review & Data Integrity")
             S("")
             S(
                 "Fail-closed compliance path: the synthesizer refused to fabricate checkable metrics. "
@@ -1321,7 +1335,7 @@ class AgentRuntime:
                     f"by_class={provider_summary.get('by_class', {})}."
                 )
             S("")
-            S("## 11. Methodology, Data Sources & Disclaimer")
+            S("## Appendix B. Methodology, Data Sources & Disclaimer")
             S("")
             if self.data_mode == "demo":
                 S(
@@ -1454,14 +1468,16 @@ class AgentRuntime:
         # Brief/table: keep source, summary/ledger (except pure table), metrics, gaps, compliance, disclaimer.
         include_narrative_sections = is_full
         include_summary_and_ledger = not is_table
-        include_section4_extras = is_full  # sentiment / risk matrices under §4
         ledger_claims = filter_claims_for_brief(verified_claims) if not is_full else verified_claims
 
-        # ── Report Construction ──
-        S("# LumenFin Intelligence Report")
+        # ── Report Construction (clerk-first; audit details in appendices) ──
+        S("# LumenFin Diligence Report")
         S("")
         if is_full:
-            S("**Report Type:** Investment-Grade Research | **Classification:** AI-Generated, For Reference Only")
+            S(
+                "**Report Type:** Diligence Screening Report (AI-assisted) | "
+                "**Classification:** For internal research reference only"
+            )
         elif is_table:
             S("**Report Type:** Table Summary | **Classification:** AI-Generated, For Reference Only")
             S("")
@@ -1471,51 +1487,17 @@ class AgentRuntime:
             S("")
             S(f"**Report Mode:** `{output_format}` (explicit UI/API selection; keywords do not auto-trim).")
         S("")
-        for line in format_period_alignment_notice(state):
-            S(line)
-        source_resolution = state.get("source_resolution") or {}
-        company_resolutions = source_resolution.get("companies") or {}
-        fallback_rows = [
-            (company, info)
-            for company, info in company_resolutions.items()
-            if info.get("live_fallback_used")
-        ]
-        if source_resolution.get("prefer_uploaded_only") or fallback_rows or state.get("document_contexts"):
-            mode = str(source_resolution.get("mode") or "hybrid")
-            S("## 0. Source Resolution")
-            S("")
-            if source_resolution.get("prefer_uploaded_only"):
-                S(
-                    "**Mode: uploaded materials only.** Structured fundamentals were not backfilled "
-                    "from SEC/Yahoo/sample even if the upload lacked computable metrics."
-                )
-            elif fallback_rows:
-                S(
-                    "**Mode: hybrid.** Uploads are preferred; when they lack AST-computable "
-                    "revenue/EBITDA/R&D, live providers may fill the gap — and that fill-in is listed below."
-                )
-            else:
-                S(
-                    f"**Mode: {mode}.** Per-company structured source is listed so document narrative "
-                    "is not confused with SEC/Yahoo numbers."
-                )
-            S("")
-            S("| Company | Structured fundamentals source | Upload had computable metrics? | Notes |")
-            S("|---------|--------------------------------|--------------------------------|-------|")
-            for company in state.get("companies") or []:
-                info = company_resolutions.get(company) or {}
-                source = str(info.get("structured_source") or (state.get("retrieved_docs") or {}).get(company, {}).get("structured_source") or "none")
-                had_metrics = "yes" if info.get("upload_had_computable_metrics") else ("n/a" if not state.get("document_contexts") else "no")
-                note = str(info.get("fallback_reason") or "")
-                if not note and source == "document_extracted":
-                    note = "Numbers taken from uploaded materials."
-                elif not note and info.get("live_fallback_used"):
-                    note = f"Upload lacked metrics; used {source}."
-                S(f"| {company} | `{source}` | {had_metrics} | {note or '—'} |")
-            S("")
         if include_summary_and_ledger:
-            S(f"## 1. Executive Summary")
-            S(f"{llm_summary}")
+            S("## 1. Executive Summary")
+            S("")
+            S(llm_summary)
+            S("")
+            S(
+                "**Evidence Boundary:** Material numeric and investment assertions are limited to "
+                "verified claims with bound sources. Incomplete or unbound inputs are treated as "
+                "data limitations (including Computed/unverified ratios). Risk-model scores remain "
+                "screening indicators even when bound to risk-model evidence."
+            )
             S("")
         if state.get("partial_data_gap"):
             coverage = state.get("coverage_matrix") or {}
@@ -1532,354 +1514,358 @@ class AgentRuntime:
             )
             S(
                 f"- Non-comparable peers: {', '.join(skipped) if skipped else '(none)'} "
-                "(structured_source missing AST-verifiable revenue/EBITDA/R&D inputs)."
-            )
-            S(
-                "- Margin/intensity peer comparison uses only the comparable set. "
-                "Non-comparable peers may still appear with narrative, market-only, or risk-screening context."
+                "(missing extractable revenue/EBITDA/R&D inputs)."
             )
             S("")
         for line in format_next_actions(state):
             S(line)
-        if include_summary_and_ledger:
-            S("**Evidence Boundary:** Material numeric, growth, risk, and investment assertions in this report are limited to **verified claims** produced by the Claim → Evidence binder. Unverified or rejected claims are omitted. Risk-model scores remain screening indicators even when bound to `lumenfin:risk_model:*` evidence.")
-            S("")
-            for line in format_verified_claims_ledger(ledger_claims):
-                S(line)
-            binding = state.get("claim_binding") or binding_summary(all_claims)
-            S(
-                f"**Claim binding:** verified={binding.get('verified_claims', 0)}/"
-                f"{binding.get('total_claims', 0)} "
-                f"(bind_rate={binding.get('bind_rate', 0)}, "
-                f"page_anchored={binding.get('page_anchored_verified', 0)}"
-                f"{'; brief_ledger=' + str(len(ledger_claims)) if not is_full else ''})."
-            )
-            S("")
-        if include_narrative_sections:
-            S(f"## 2. Analytical Framework & Methodology")
-            S("")
-            S("This report employs a **six-layer analytical architecture** powered by a LangGraph-based multi-agent system:")
-            S("")
-            S("| Layer | Agent | Methodology | Output |")
-            S("|-------|-------|-------------|--------|")
-            S("| L1 | Supervisor | Strategic task decomposition, dimension identification | Analysis blueprint |")
-            S("| L2 | Retrieval | Hybrid Milvus RAG (vector + keyword RRF) + SEC/Yahoo/document fundamentals + market snapshots | Enriched evidence payloads |")
-            S("| L3 | Quantitative Analyst | AST-safe expression engine + derived ratio computation | Five-dimension metrics |")
-            S("| L4 | Psychologist | NLP deep sentiment analysis with confidence scoring | Tone intelligence |")
-            S("| L5 | Critic | Multi-factor risk scoring + compliance validation | Risk architecture with model-derived basis labels |")
-            S("| L6 | Synthesizer | Structured reasoning, scenario modeling, evidence mapping | Research report with source boundaries |")
-            S("")
 
-            if has_uploaded_docs:
-                S(f"## 3. Company Profiles & Business Overview")
-                for company in state["companies"]:
-                    S(f"### {company}")
-                    profile = ensure_sentence_complete(
-                        state.get("company_profiles", {}).get(company, "Profile not available.")
-                    )
-                    S(f"{profile}")
-                    S("")
-
-        S(f"## 4. Financial Performance Analysis")
+        # Period + source alignment (merged)
+        S("## 2. Period & Source Alignment")
         S("")
-        S("*The following metrics were computed using an AST-safe expression evaluator with industry benchmarking.*")
+        for line in format_period_alignment_notice(state):
+            # Downgrade nested "## Period Alignment" to a plain label inside §2.
+            if line.startswith("## Period Alignment"):
+                S("### Period Alignment")
+                continue
+            S(line)
+        source_resolution = state.get("source_resolution") or {}
+        company_resolutions = source_resolution.get("companies") or {}
+        fallback_rows = [
+            (company, info)
+            for company, info in company_resolutions.items()
+            if info.get("live_fallback_used")
+        ]
+        if source_resolution.get("prefer_uploaded_only") or fallback_rows or state.get("document_contexts"):
+            mode = str(source_resolution.get("mode") or "hybrid")
+            S("### Source Resolution")
+            S("")
+            if source_resolution.get("prefer_uploaded_only"):
+                S(
+                    "**Mode: uploaded materials only.** Structured fundamentals were not backfilled "
+                    "from SEC/Yahoo/sample even if the upload lacked computable metrics."
+                )
+            elif fallback_rows:
+                S(
+                    "**Mode: hybrid.** Uploads are preferred; when they lack extractable "
+                    "revenue/EBITDA/R&D, live providers may fill the gap — listed below."
+                )
+            else:
+                S(
+                    f"**Mode: {mode}.** Per-company structured source is listed so document narrative "
+                    "is not confused with SEC/Yahoo numbers."
+                )
+            S("")
+            S("| Company | Fundamentals source | Upload had metrics? | Notes |")
+            S("|---------|---------------------|---------------------|-------|")
+            for company in state.get("companies") or []:
+                info = company_resolutions.get(company) or {}
+                source = str(
+                    info.get("structured_source")
+                    or (state.get("retrieved_docs") or {}).get(company, {}).get("structured_source")
+                    or "none"
+                )
+                had_metrics = (
+                    "yes"
+                    if info.get("upload_had_computable_metrics")
+                    else ("n/a" if not state.get("document_contexts") else "no")
+                )
+                note = str(info.get("fallback_reason") or "")
+                if not note and source == "document_extracted":
+                    note = "Numbers taken from uploaded materials."
+                elif not note and info.get("live_fallback_used"):
+                    note = f"Upload lacked metrics; used {source}."
+                S(f"| {company} | {source} | {had_metrics} | {note or '—'} |")
+            S("")
+
+        # Profiles are LLM narrative noise in production; keep only in demo for orientation.
+        if include_narrative_sections and has_uploaded_docs and self.data_mode == "demo":
+            shown_profile = False
+            for company in state["companies"]:
+                profile = ensure_sentence_complete(
+                    state.get("company_profiles", {}).get(company, "")
+                )
+                if not profile or "not available" in profile.lower() or "pending" in profile.lower():
+                    continue
+                if len(profile) > 420:
+                    profile = profile[:419].rstrip() + "…"
+                if not shown_profile:
+                    S("## Company Profiles *(LLM profile — unverified)*")
+                    S("")
+                    shown_profile = True
+                S(f"### {company}")
+                S(profile)
+                S("")
+
+        S("## 3. Financial Performance Analysis")
+        S("")
+        S("*Ratios below are computed from structured fundamentals. Prefer verified rows for decision use.*")
         S("")
         for line in format_peer_metric_matrix(state):
             S(line)
         for company in state["companies"]:
             metrics = state.get("financial_metrics", {}).get(company, {})
-            sentiment = state.get("sentiment_analysis", {}).get(company, {})
-            risk_level = (
-                ((state.get("retrieved_docs") or {}).get(company) or {})
-                .get("supply_chain", {})
-                .get("risk_level", "unknown")
-            )
-            risk_data = state.get("risk_scores", {}).get(company, {})
-            live_market = state.get("market_snapshots", {}).get(company, {})
-            _ = (risk_level, live_market)  # retained for optional extensions
 
             S(f"### {company}")
             S("")
 
             if metrics:
-                S(f"**Key Financial Indicators**")
+                S("**Key Financial Indicators**")
                 S("")
-                S("| Metric | Value | Benchmark | Assessment | Data Quality | Confidence | Basis | Citation | Rationale |")
-                S("|--------|-------|-----------|------------|--------------|------------|-------|----------|-----------|")
+                S(
+                    "*Internal screen thresholds are LumenFin heuristics (not industry peer medians). "
+                    "P/E is TTM live and may not match the FY window of the statement ratios.*"
+                )
+                S("")
+                S("| Metric | Value | Internal screen | Vs screen | Status | Source |")
+                S("|--------|-------|-----------------|-----------|--------|--------|")
 
                 metric_conf = state.get("metric_confidence", {}).get(company, {})
 
                 def assess_metric(metric_key: str, value: float) -> tuple[str, str]:
                     if metric_key == "ebitda_margin":
                         if value >= 0.25:
-                            return "Strong", "EBITDA margin is well above the >25% benchmark"
+                            return "Above", "internal screen >25%"
                         if value >= 0.15:
-                            return "Adequate", "EBITDA margin is positive but below top-tier threshold"
-                        return "Weak", "EBITDA margin is below a robust profitability level"
+                            return "Near", "internal screen >25%"
+                        return "Below", "internal screen >25%"
                     if metric_key == "operating_margin":
                         if value >= 0.20:
-                            return "Strong", "Operating margin exceeds the >20% benchmark"
+                            return "Above", "internal screen >20%"
                         if value >= 0.12:
-                            return "Adequate", "Operating margin is moderate versus benchmark"
-                        return "Weak", "Operating margin is below the desired benchmark"
+                            return "Near", "internal screen >20%"
+                        return "Below", "internal screen >20%"
                     if metric_key == "estimated_net_margin":
                         if value >= 0.15:
-                            return "Strong", "Estimated net margin exceeds the >15% benchmark"
+                            return "Above", "internal screen >15%"
                         if value >= 0.08:
-                            return "Adequate", "Estimated net margin is moderate versus benchmark"
-                        return "Weak", "Estimated net margin is below the desired benchmark"
+                            return "Near", "internal screen >15%"
+                        return "Below", "internal screen >15%"
                     if metric_key == "estimated_fcf_margin":
                         if value >= 0.10:
-                            return "Strong", "Estimated FCF yield exceeds the >10% benchmark"
+                            return "Above", "internal screen >10%"
                         if value >= 0.05:
-                            return "Adequate", "Estimated FCF yield is positive but below benchmark"
-                        return "Weak", "Estimated FCF yield is weak versus benchmark"
+                            return "Near", "internal screen >10%"
+                        return "Below", "internal screen >10%"
                     if metric_key == "r_and_d_intensity":
                         if 0.05 <= value <= 0.15:
-                            return "Strong", "R&D intensity is in the target 5-15% range"
+                            return "In range", "internal screen 5-15%"
                         if 0.03 <= value < 0.05 or 0.15 < value <= 0.20:
-                            return "Adequate", "R&D intensity is outside ideal range but still serviceable"
-                        return "Weak", "R&D intensity is materially outside the target range"
-                    return "—", "No benchmark-based assessment"
+                            return "Near", "internal screen 5-15%"
+                        return "Outside", "internal screen 5-15%"
+                    return "—", "—"
 
-                def add_row(metric_key, label, benchmark, value=None):
+                def _status_label(basis: str) -> str:
+                    b = (basis or "").lower()
+                    if "verified" in b or b == "ast":
+                        return "Verified"
+                    if "live" in b:
+                        return "Live market"
+                    if "unverified" in b or "computed" in b:
+                        return "Computed (unverified)"
+                    return basis or "—"
+
+                def add_row(metric_key, label, screen, value=None):
                     v = value if value is not None else metrics.get(metric_key)
                     if v is None:
                         return
-                    # Estimated / unbound metrics require a verified claim; else omit as fact.
                     verified_hit = verified_by_entity(
                         verified_claims, company, metric_name=metric_key
                     )
+                    allow_computed = metric_key in (
+                        "ebitda_margin",
+                        "operating_margin",
+                        "r_and_d_intensity",
+                    )
                     if metric_key in ("ebitda_margin", "operating_margin", "r_and_d_intensity", "pe_ratio"):
-                        if not verified_hit:
+                        if not verified_hit and not (allow_computed and isinstance(v, (int, float))):
                             return
                     conf = metric_conf.get(metric_key, {})
-                    conf_level = conf.get("level", "N/A")
-                    conf_score = conf.get("score")
-                    conf_display = f"{conf_score:.2f}" if isinstance(conf_score, (float, int)) else "N/A"
-                    basis = str(conf.get("basis", "N/A"))
-                    citation = verified_hit[0].primary_citation if verified_hit else "unverified"
-                    if metric_key in ("ebitda_margin", "r_and_d_intensity", "operating_margin", "estimated_net_margin", "estimated_fcf_margin"):
+                    if verified_hit:
+                        raw_basis = str(conf.get("basis", "Verified"))
+                        citation = humanize_citation(verified_hit[0].primary_citation)
+                    else:
+                        raw_basis = "Computed (unverified)"
+                        citation = "structured fundamentals (claim not bound)"
+                    status = _status_label(raw_basis)
+                    if metric_key in (
+                        "ebitda_margin",
+                        "r_and_d_intensity",
+                        "operating_margin",
+                        "estimated_net_margin",
+                        "estimated_fcf_margin",
+                    ):
                         if metric_key.startswith("estimated_") and not verified_hit:
                             return
-                        grade, rationale = assess_metric(metric_key, float(v))
-                        S(f"| {label} | {v:.2%} | {benchmark} | {grade} | {conf_level} | {conf_display} | {basis} | `{citation}` | {rationale} |")
+                        vs_screen, _ = assess_metric(metric_key, float(v))
+                        S(
+                            f"| {label} | {v:.2%} | {screen} | {vs_screen} | {status} | {citation} |"
+                        )
                     elif metric_key == "pe_ratio":
-                        S(f"| {label} | {v:.2f}x | {benchmark} | — | {conf_level} | {conf_display} | {basis} | `{citation}` | Market-implied valuation multiple |")
-                    elif metric_key == "monthly_return":
                         if not verified_hit:
                             return
-                        direction = "Upward momentum" if v > 0 else "Downward pressure"
-                        S(f"| {label} | {v:.2%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | `{citation}` | {direction} |")
-                    elif metric_key == "range_position":
-                        if not verified_hit:
-                            return
-                        position = "Near highs" if v > 0.7 else ("Near lows" if v < 0.3 else "Mid-range")
-                        S(f"| {label} | {v:.1%} | {benchmark} | — | {conf_level} | {conf_display} | {basis} | `{citation}` | 52-week {position} |")
+                        S(
+                            f"| {label} | {v:.2f}x | {screen} | — | {status} | {citation} |"
+                        )
 
                 add_row("ebitda_margin", "EBITDA Margin", ">25%")
                 add_row("operating_margin", "Operating Margin", ">20%")
                 add_row("r_and_d_intensity", "R&D Intensity", "5-15%")
-                add_row("pe_ratio", "P/E (TTM)", "Industry avg")
-                S("")
-
-                if include_summary_and_ledger:
-                    # Reasoning chain from verified claims only
-                    S(f"**Analytical Reasoning Chain**")
-                    S("")
-                    reasoning_lines = []
-                    for idx, claim in enumerate(
-                        verified_by_entity(verified_claims, company, claim_type="numeric")[:3],
-                        start=1,
-                    ):
-                        reasoning_lines.append(f"{idx}. {claim.render_with_citation()}")
-                    for claim in verified_by_entity(verified_claims, company, claim_type="risk_conclusion")[:1]:
-                        if not is_full and is_low_signal_claim(claim):
-                            continue
-                        reasoning_lines.append(f"{len(reasoning_lines)+1}. {claim.render_with_citation()}")
-                    for claim in verified_by_entity(verified_claims, company, claim_type="growth"):
-                        reasoning_lines.append(f"{len(reasoning_lines)+1}. {claim.render_with_citation()}")
-                    rejected_growth = [
-                        c
-                        for c in all_claims
-                        if c.entity == company and c.claim_type == "growth" and c.verification == "rejected"
-                    ]
-                    if rejected_growth:
-                        reasoning_lines.append(
-                            f"{len(reasoning_lines)+1}. Growth claim withheld: {rejected_growth[0].verify_reason}"
+                add_row("pe_ratio", "P/E (TTM, live)", "—")
+                # Absolute fundamentals (once) for clerk context
+                market = ((state.get("retrieved_docs") or {}).get(company) or {}).get("market_data") or {}
+                abs_bits = []
+                for key, label in (
+                    ("revenue", "Revenue"),
+                    ("operating_income", "Operating income"),
+                    ("r_and_d", "R&D"),
+                ):
+                    hits = verified_by_entity(verified_claims, company, metric_name=key)
+                    if hits:
+                        abs_bits.append(hits[0].render_with_citation(humanize=True))
+                        continue
+                    raw_abs = get_fundamental(market, key)
+                    if isinstance(raw_abs, (int, float)):
+                        abs_bits.append(
+                            f"{company} {label} is {float(raw_abs):.2f} billion USD "
+                            f"(structured fundamentals; claim not bound)."
                         )
-                    if not reasoning_lines:
-                        reasoning_lines.append("No verified numeric/risk claims available for reasoning.")
-                    S("\n".join(reasoning_lines))
+                if abs_bits:
                     S("")
+                    S("**Key absolute figures**")
+                    for bit in abs_bits[:3]:
+                        S(f"- {bit}")
+                S("")
             else:
-                S("*[Partial Coverage] Insufficient structured data for AST ratio comparison. Narrative, market-only indicators, or risk-screening context may still be shown below.*")
+                S(
+                    "*[Partial Coverage] Insufficient structured data for ratio comparison. "
+                    "Market-only or risk-screening context may still appear below.*"
+                )
                 if company in (state.get("non_comparable_companies") or []):
                     source = state.get("retrieved_docs", {}).get(company, {}).get("structured_source", "none")
-                    S(f"*Structured source for {company}: `{source}`. Peer margin comparison intentionally skipped.*")
+                    S(f"*Structured source for {company}: {source}. Peer margin comparison skipped.*")
                 S("")
 
-            if include_section4_extras:
-                # Sentiment (non-claim heuristic — labeled as unbound screening)
-                S(f"**Management Sentiment Profile** *(screening signal; not a verified financial claim)*")
-                S(f"- Overall Tone: **{sentiment.get('label', 'N/A').capitalize()}**")
-                if sentiment.get("confidence_score"):
-                    S(f"- Conviction Level: {sentiment['confidence_score']}/10")
-                if sentiment.get("key_themes"):
-                    S(f"- Strategic Themes: {' | '.join(sentiment['key_themes'])}")
-                if sentiment.get("strategic_priority"):
-                    S(f"- Forward Priority: {sentiment['strategic_priority']}")
-                if sentiment.get("risk_flags"):
-                    S(f"- Flagged Risks: {' | '.join(sentiment['risk_flags'])}")
-                S("")
-
-                # Risk — verified risk claims only for conclusions
-                risk_claims = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
-                if risk_claims or risk_data:
-                    S(f"**Risk Exposure Matrix**")
-                    S("")
-                    S("*Rows below are emitted only when a verified risk claim exists; otherwise the dimension is omitted.*")
-                    S("")
-                    S("| Dimension | Score (1-10) | Level | Citation | Basis |")
-                    S("|-----------|-------------|-------|----------|-------|")
-                    dim_labels = {
-                        "financial_risk": "Financial",
-                        "operational_risk": "Operational",
-                        "market_risk": "Market",
-                        "regulatory_risk": "Regulatory",
-                        "supply_chain_risk": "Supply Chain",
-                    }
-                    for dim, label in dim_labels.items():
-                        hits = verified_by_entity(verified_claims, company, metric_name=dim)
-                        if dim == "supply_chain_risk" and not hits:
-                            hits = [
-                                c
-                                for c in risk_claims
-                                if c.metric_name == "supply_chain_risk"
-                            ]
-                        if not hits:
-                            continue
-                        claim = hits[0]
-                        score = risk_data.get(dim, claim.value if isinstance(claim.value, (int, float)) else 5.0)
-                        if not isinstance(score, (int, float)):
-                            score = 5.0
-                        level = "Low Risk" if score < 3.5 else ("Moderate" if score < 6.5 else "Elevated")
-                        S(
-                            f"| {label} | {score:.1f} | {level} | `{claim.primary_citation}` | "
-                            f"{claim.verify_reason} |"
-                        )
-                    S("")
-                    S("**Verified Risk Conclusions**")
-                    S("")
-                    for claim in risk_claims:
-                        S(f"- {claim.render_with_citation()}")
-                    S("")
-
+        # ── Risk (dedicated section; screening scores labeled honestly) ──
         swot: dict[str, dict[str, str]] = {}
         investment_thesis: dict[str, dict[str, str]] = {}
-
-        if include_narrative_sections:
-            # ── Industry & Macro Context ──
-            S("## 5. Industry Dynamics & Macroeconomic Context")
+        any_risk = False
+        for company in state["companies"]:
+            if verified_by_entity(verified_claims, company, claim_type="risk_conclusion") or state.get(
+                "risk_scores", {}
+            ).get(company):
+                any_risk = True
+                break
+        if any_risk:
+            S("## 4. Risk")
             S("")
-            S("*Limited to verified numeric/risk claims. Broader sector narratives are excluded without evidence.*")
-            S("")
-            for company in state["companies"]:
-                S(f"### {company} — Operating Environment")
-                S("")
-                nums = verified_by_entity(verified_claims, company, claim_type="numeric")
-                risks = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
-                if not nums and not risks:
-                    S("- No verified claims available for operating-environment assertions.")
-                for claim in nums[:3]:
-                    S(f"- {claim.render_with_citation()}")
-                for claim in risks[:2]:
-                    S(f"- {claim.render_with_citation()}")
-                S("")
-
-            # ── SWOT from verified claims only ---
-            S("## 6. Strategic Analysis (SWOT)")
-            S("")
-            S("*SWOT entries are composed only from verified claims; empty quadrants mean no verified support.*")
+            S(
+                "*Screening scores (model-derived; not a 10-K Item 1A extract). "
+                "Use as diligence flags, not as independently audited risk conclusions.*"
+            )
             S("")
             for company in state["companies"]:
-                nums = verified_by_entity(verified_claims, company, claim_type="numeric")
-                risks = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
-                strengths = []
-                weaknesses = []
-                opportunities = []
-                threats = []
-                for claim in nums:
-                    if claim.metric_name == "ebitda_margin" and isinstance(claim.value, (int, float)):
-                        if float(claim.value) >= 0.20:
-                            strengths.append(claim.render_with_citation())
-                        else:
-                            weaknesses.append(claim.render_with_citation())
-                    if claim.metric_name == "r_and_d_intensity" and isinstance(claim.value, (int, float)):
-                        if 0.05 <= float(claim.value) <= 0.20:
-                            opportunities.append(claim.render_with_citation())
-                for claim in risks:
-                    threats.append(claim.render_with_citation())
-                swot[company] = {
-                    "strengths": "; ".join(strengths) if strengths else "No verified strength claims.",
-                    "weaknesses": "; ".join(weaknesses) if weaknesses else "No verified weakness claims.",
-                    "opportunities": "; ".join(opportunities) if opportunities else "No verified opportunity claims.",
-                    "threats": "; ".join(threats) if threats else "No verified threat claims.",
+                risk_claims = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
+                risk_data = state.get("risk_scores", {}).get(company, {}) or {}
+                if not risk_claims and not risk_data:
+                    continue
+                S(f"### {company} — Risk Screening Matrix")
+                S("")
+                S("| Dimension | Screening score (1-10) | Level | Source |")
+                S("|-----------|------------------------|-------|--------|")
+                dim_labels = {
+                    "financial_risk": "Financial",
+                    "operational_risk": "Operational",
+                    "market_risk": "Market",
+                    "regulatory_risk": "Regulatory",
+                    "supply_chain_risk": "Supply Chain",
                 }
-                S(f"### {company}")
+                unknown_supply = False
+                for dim, label in dim_labels.items():
+                    hits = verified_by_entity(verified_claims, company, metric_name=dim)
+                    if dim == "supply_chain_risk" and not hits:
+                        hits = [c for c in risk_claims if c.metric_name == "supply_chain_risk"]
+                    if not hits:
+                        continue
+                    claim = hits[0]
+                    if dim == "supply_chain_risk" and str(claim.value).lower() in {
+                        "unknown",
+                        "n/a",
+                        "none",
+                    }:
+                        unknown_supply = True
+                        continue
+                    score = risk_data.get(dim, claim.value if isinstance(claim.value, (int, float)) else 5.0)
+                    if not isinstance(score, (int, float)):
+                        score = 5.0
+                    level = "Low" if score < 3.5 else ("Moderate" if score < 6.5 else "Elevated")
+                    S(
+                        f"| {label} | {score:.1f} | {level} | "
+                        f"{humanize_citation(claim.primary_citation)} |"
+                    )
                 S("")
-                S("| Quadrant | Assessment |")
-                S("|----------|------------|")
-                S(f"| Strengths | {swot[company]['strengths']} |")
-                S(f"| Weaknesses | {swot[company]['weaknesses']} |")
-                S(f"| Opportunities | {swot[company]['opportunities']} |")
-                S(f"| Threats | {swot[company]['threats']} |")
-                S("")
+                if unknown_supply:
+                    S(
+                        "*Supply-chain screen: no clear filing signal in this run "
+                        "(not shown as a Moderate/Elevated score).*"
+                    )
+                    S("")
+                material_risk = [
+                    c
+                    for c in risk_claims
+                    if not (
+                        c.metric_name == "supply_chain_risk"
+                        and str(c.value).lower() in {"unknown", "n/a", "none"}
+                    )
+                ]
+                if material_risk:
+                    S("**Screening conclusions**")
+                    S("")
+                    for claim in material_risk:
+                        if not is_full and is_low_signal_claim(claim):
+                            continue
+                        S(f"- {claim.render_with_citation(humanize=True)}")
+                    S("")
 
-            # ── Scenario Analysis ──
-            S("## 7. Scenario Analysis & Forward Projections")
+        # ── Research thesis (verified investment claims only) ──
+        if include_narrative_sections:
+            S("## 5. Research Thesis & Positioning")
             S("")
-            S("*No heuristic revenue-growth forecasts are emitted. Only verified growth claims appear; otherwise growth is withheld.*")
-            S("")
-            for company in state["companies"]:
-                S(f"### {company}")
-                S("")
-                growth = verified_by_entity(verified_claims, company, claim_type="growth")
-                if growth:
-                    for claim in growth:
-                        S(f"- {claim.render_with_citation()}")
-                else:
-                    rejected = [
-                        c
-                        for c in all_claims
-                        if c.entity == company and c.claim_type == "growth" and c.verification == "rejected"
-                    ]
-                    reason = rejected[0].verify_reason if rejected else "multi-period fundamentals unavailable"
-                    S(f"- Revenue growth claim withheld ({reason}).")
-                for claim in verified_by_entity(verified_claims, company, claim_type="numeric")[:2]:
-                    S(f"- Sensitivity input: {claim.render_with_citation()}")
-                S("")
-
-            # ── Investment Thesis from verified investment claims only ---
-            S("## 8. Research Thesis & Positioning")
-            S("")
-            S("*Investment conclusions are emitted only from verified `investment_conclusion` claims composed from verified numeric+risk evidence. This is not a buy/sell recommendation.*")
+            S(
+                "*Not a buy/sell recommendation. Emitted only from verified investment conclusions "
+                "backed by verified numeric + risk evidence.*"
+            )
             S("")
             for company in state["companies"]:
                 inv = verified_by_entity(verified_claims, company, claim_type="investment_conclusion")
                 S(f"### {company}")
                 if inv:
-                    bull = inv[0].render_with_citation()
+                    bull = inv[0].render_with_citation(humanize=True)
+                    risk_lines = [
+                        c
+                        for c in verified_by_entity(
+                            verified_claims, company, claim_type="risk_conclusion"
+                        )
+                        if not (
+                            c.metric_name == "supply_chain_risk"
+                            and str(c.value).lower() in {"unknown", "n/a", "none"}
+                        )
+                    ]
+                    # Prefer scored dimensions for the bear line over supply-chain noise.
+                    scored = [
+                        c
+                        for c in risk_lines
+                        if c.metric_name in {"financial_risk", "operational_risk", "market_risk"}
+                    ]
+                    bear_claim = scored[0] if scored else (risk_lines[0] if risk_lines else None)
                     bear = (
-                        "Risk considerations remain those listed in verified risk claims; "
-                        "no separate unverified bear narrative is invented."
+                        bear_claim.render_with_citation(humanize=True)
+                        if bear_claim
+                        else "See Risk screening section; no separate unverified bear narrative is invented."
                     )
-                    risk_lines = verified_by_entity(verified_claims, company, claim_type="risk_conclusion")
-                    if risk_lines:
-                        bear = risk_lines[0].render_with_citation()
                     investment_thesis[company] = {"bull_case": bull, "bear_case": bear}
-                    S(f"- **Research Rationale (Bull Case):** {bull}")
-                    S(f"- **Risk Considerations (Bear Case):** {bear}")
+                    S(f"- **Bull case (screening):** {bull}")
+                    S(f"- **Bear / risk case (screening):** {bear}")
                 else:
                     rejected = [
                         c
@@ -1895,17 +1881,8 @@ class AgentRuntime:
                     S(f"- {msg}")
                 S("")
 
-            # ── Peer Comparison ──
-            if state.get("peer_comparison", {}).get("summary"):
-                S("## 9. Competitive Landscape & Peer Benchmarking")
-                S("")
-                S(state["peer_comparison"]["summary"])
-                if not has_uploaded_docs and not market_ok:
-                    S(unverified_note)
-                S("")
-
         # ── Compliance ──
-        S("## 10. Compliance Review & Data Integrity")
+        S("## 6. Compliance Review & Data Integrity")
         S("")
         if state.get("compliance_summary") and state.get("compliance_findings"):
             compliance_summary = str(state["compliance_summary"]).strip()
@@ -1923,13 +1900,31 @@ class AgentRuntime:
                     "report generated with acknowledged compliance gaps.*"
                 )
         else:
-            S("Core rule-based compliance checks passed. Material assertions are limited to verified claims with bound evidence.")
+            S(
+                "Core compliance checks passed. Material assertions are limited to verified claims "
+                "with bound evidence."
+            )
         S("")
 
-        # ── Methodology & Disclaimer ──
-        S("## 11. Methodology, Data Sources & Disclaimer")
+        # ── Appendices ──
+        if include_summary_and_ledger:
+            for line in format_verified_claims_ledger(ledger_claims):
+                S(line)
+            binding = state.get("claim_binding") or binding_summary(all_claims)
+            S(
+                f"*Binding stats: verified={binding.get('verified_claims', 0)}/"
+                f"{binding.get('total_claims', 0)} "
+                f"(bind_rate={binding.get('bind_rate', 0)}, "
+                f"page_anchored={binding.get('page_anchored_verified', 0)}).*"
+            )
+            S("")
+
+        S("## Appendix B. Methodology, Data Sources & Disclaimer")
         S("")
-        S("**Analytical Methods:** AST-safe expression evaluator for numerical computation; Claim→Evidence binder for citation-backed assertions; LLM-based sentiment screening; multi-factor risk scoring; LangGraph multi-agent orchestration.")
+        S(
+            "**Methods:** Deterministic ratio engine on structured fundamentals; claim→evidence binder; "
+            "optional LLM screening for sentiment/profile; multi-factor risk screening scores."
+        )
         S("")
         document_contexts = state.get("document_contexts", [])
         market_snapshots = state.get("market_snapshots", {})
@@ -2020,7 +2015,7 @@ class AgentRuntime:
                 source_parts.append(
                     "Live/sample backfill after sparse upload for: "
                     + ", ".join(fallback_companies)
-                    + " (see §0 Source Resolution)."
+                    + " (see Period & Source Alignment)."
                 )
 
         source_parts.append("Narrative analysis: generated by the configured LLM using retrieved evidence and computed metrics.")
@@ -2046,7 +2041,12 @@ class AgentRuntime:
                     err = snap.get("error") or "no live price returned"
                     S(f"- {company} ({symbol}): status=failed, error={err}.")
             S("")
-        S("**Source Attribution by Output Type:** Quant tables use deterministic AST calculations on structured inputs. Market rows use live snapshot fields when available. Company profiles, industry context, SWOT opportunities/threats, scenario narratives, and research thesis language are LLM-assisted hypotheses unless a row explicitly cites retrieved evidence or metric-derived basis. Risk matrix values are model-derived screening indicators and should not be treated as independently cited facts.")
+        S(
+            "**Source Attribution:** Quant tables use deterministic calculations on structured inputs. "
+            "Market rows use live snapshots when available. Company profiles and thesis language are "
+            "LLM-assisted unless a row cites bound evidence. Risk matrix values are model-derived "
+            "screening indicators and should not be treated as independently audited facts."
+        )
         S("")
         if self.data_mode == "demo" or sample_companies:
             S(

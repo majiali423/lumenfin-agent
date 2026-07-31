@@ -12,6 +12,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.claims import (
+    _number_variants,
+    _text_contains_number,
     binding_summary,
     build_claims,
     filter_verified,
@@ -115,6 +117,77 @@ class ClaimBindingTests(unittest.TestCase):
         self.assertFalse(any(c.claim_type == "numeric" and c.verification == "verified" for c in claims))
         self.assertTrue(any(c.claim_type == "risk_conclusion" and c.verification == "verified" for c in verified))
         self.assertTrue(any(c.claim_type == "investment_conclusion" and c.verification == "rejected" for c in claims))
+
+    def test_ratio_variants_do_not_include_bare_zero(self) -> None:
+        tokens = _number_variants(0.4463)
+        self.assertNotIn("0", tokens)
+        self.assertNotIn("1", tokens)
+        # Year noise must not count as a hit for a ratio value.
+        self.assertFalse(
+            _text_contains_number("Microsoft r_and_d FY2024: 29510 (filing fact).", 0.4463)
+        )
+
+    def test_million_scale_rag_matches_billion_fundamentals(self) -> None:
+        self.assertTrue(
+            _text_contains_number("Microsoft r_and_d FY2024: 29510 (filing fact).", 29.5)
+        )
+        self.assertTrue(
+            _text_contains_number("Revenue 245122 (in millions).", 245.1)
+        )
+
+    def test_pdf_ratio_falls_back_to_fundamentals_when_rag_lacks_inputs(self) -> None:
+        """MSFT-shaped case: RAG only has filing millions; fund text has billion inputs."""
+        state = {
+            "companies": ["Microsoft"],
+            "financial_metrics": {
+                "Microsoft": {
+                    "operating_margin": 0.4463,
+                    "r_and_d_intensity": 0.1204,
+                }
+            },
+            "retrieved_docs": {
+                "Microsoft": {
+                    "structured_source": "document_extracted",
+                    "market_data": {
+                        "revenue": 245.1,
+                        "operating_income": 109.4,
+                        "r_and_d": 29.5,
+                    },
+                    "fundamentals_meta": {"upload_present": True},
+                    "supply_chain": {"risk_level": "low", "signals": []},
+                    "source_documents": [],
+                }
+            },
+            "rag_evidence": {
+                "Microsoft": [
+                    {
+                        "citation": "msft_fy2024_10k_long_excerpt.pdf#p3",
+                        "text": "Microsoft r_and_d FY2024: 29510 (filing fact; income_statement).",
+                        "source_type": "rag",
+                    }
+                ]
+            },
+            "risk_scores": {
+                "Microsoft": {
+                    "financial_risk": 6.8,
+                    "operational_risk": 3.7,
+                    "market_risk": 5.0,
+                    "supply_chain_risk": 2.0,
+                }
+            },
+            "market_snapshots": {},
+        }
+        claims = build_claims(state)
+        by_metric = {
+            c.metric_name: c
+            for c in claims
+            if c.claim_type == "numeric" and c.metric_name in {"operating_margin", "r_and_d_intensity"}
+        }
+        self.assertEqual(by_metric["operating_margin"].verification, "verified")
+        self.assertIn("document_extracted", by_metric["operating_margin"].primary_citation)
+        self.assertEqual(by_metric["r_and_d_intensity"].verification, "verified")
+        inv = [c for c in claims if c.claim_type == "investment_conclusion"]
+        self.assertEqual(inv[0].verification, "verified")
 
 
 if __name__ == "__main__":

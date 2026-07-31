@@ -20,14 +20,14 @@ class PreferDocumentMetricsTestCase(unittest.TestCase):
         docs = [
             {
                 "detected_companies": ["NVIDIA"],
-                "metric_hints": {"revenue": 999.0, "ebitda": 111.0, "r_and_d": 22.0},
-                "excerpt": "NVIDIA FY2025 revenue was 999 billion USD.",
+                "metric_hints": {"revenue": 130.5, "ebitda": 111.0, "r_and_d": 22.0},
+                "excerpt": "NVIDIA FY2025 revenue was 130.5 billion USD.",
                 "text": "supply chain risk remains medium for packaging.",
             }
         ]
         payload = retrieve_company_payload("NVIDIA", document_contexts=docs, allow_sample_data=True)
         self.assertEqual(payload["structured_source"], "document_extracted")
-        self.assertEqual(payload["market_data"]["revenue"], 999.0)
+        self.assertEqual(payload["market_data"]["revenue"], 130.5)
 
     def test_sample_used_when_documents_lack_metrics(self) -> None:
         docs = [

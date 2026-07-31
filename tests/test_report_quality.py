@@ -44,6 +44,57 @@ class ReportQualityHelpersTestCase(unittest.TestCase):
         self.assertIn("FALLBACK", text)
         self.assertIn("FY2024", text)
 
+    def test_period_alignment_assumed_from_query_is_honest(self) -> None:
+        state = {
+            "query": "Microsoft FY2024 10-K excerpt",
+            "query_plan": {"time_range": "FY2024"},
+            "companies": ["Microsoft"],
+            "retrieved_docs": {
+                "Microsoft": {
+                    "fundamentals_meta": {
+                        "fiscal_year": 2024,
+                        "period_alignment": "assumed_from_query",
+                        "fiscal_year_source": "query",
+                    }
+                }
+            },
+        }
+        text = "\n".join(format_period_alignment_notice(state))
+        self.assertIn("FY2024", text)
+        self.assertIn("assumed from query", text)
+        self.assertIn("filing extract did not carry an explicit FY tag", text)
+        self.assertNotIn("requested FY not found", text)
+
+    def test_period_alignment_shows_period_end_and_calendar_note(self) -> None:
+        state = {
+            "query": "Compare Apple and Microsoft FY2024 profitability",
+            "query_plan": {"time_range": "FY2024"},
+            "companies": ["Apple", "Microsoft"],
+            "retrieved_docs": {
+                "Apple": {
+                    "fundamentals_meta": {
+                        "fiscal_year": 2024,
+                        "period_end": "2024-09-28",
+                        "period_alignment": "exact",
+                    }
+                },
+                "Microsoft": {
+                    "fundamentals_meta": {
+                        "fiscal_year": 2024,
+                        "period_end": "2024-06-30",
+                        "period_alignment": "exact",
+                    }
+                },
+            },
+        }
+        text = "\n".join(format_period_alignment_notice(state))
+        self.assertIn("Period end", text)
+        self.assertIn("2024-09-28", text)
+        self.assertIn("2024-06-30", text)
+        self.assertIn("Calendar note", text)
+        self.assertIn("FY-label-aligned research comps", text)
+        self.assertIn("exact match", text)
+
     def test_peer_matrix_marks_asymmetric_na(self) -> None:
         state = {
             "companies": ["Apple", "Microsoft"],
@@ -56,6 +107,7 @@ class ReportQualityHelpersTestCase(unittest.TestCase):
         self.assertIn("Peer Metric Matrix", text)
         self.assertIn("n/a", text)
         self.assertIn("asymmetric", text)
+        self.assertIn("FY-label research comps", text)
         summary = build_clerk_executive_summary(state, [], brief=True)
         self.assertIn("Comparison capsule", summary)
         self.assertIn("Operating Margin", summary)
@@ -103,7 +155,7 @@ class ReportQualityEndToEndTestCase(unittest.TestCase):
         self.assertNotIn("Company Profiles & Business Overview", report)
         self.assertNotIn("No uploaded company profile document was provided", report)
         # Brief should not lead with unknown supply-chain / thesis filler in summary area.
-        summary_block = report.split("## 1. Executive Summary", 1)[-1].split("## 4.", 1)[0]
+        summary_block = report.split("## 1. Executive Summary", 1)[-1].split("## 3. Financial", 1)[0]
         self.assertNotIn("supply-chain risk signal is 'unknown'", summary_block)
         self.assertNotIn("quality-screening research thesis", summary_block)
         self.assertEqual(requested_fiscal_year_from_state(result), 2024)

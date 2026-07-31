@@ -13,6 +13,7 @@ from lumenfin.reporting import (
     build_data_sources,
     build_run_manifest,
     format_rag_citation_section,
+    humanize_citation,
     report_contains_page_citations,
 )
 
@@ -102,6 +103,11 @@ class ReportingDataSourcesTestCase(unittest.TestCase):
         self.assertIn("data_sources", manifest)
         self.assertEqual(manifest["data_sources"]["structured"], "sample_db")
 
+    def test_humanize_citation_clerk_labels(self) -> None:
+        self.assertEqual(humanize_citation("msft_10k.pdf#p12"), "msft_10k.pdf p.12")
+        self.assertIn("SEC companyfacts", humanize_citation("lumenfin:sec_companyfacts:Apple:fy2024"))
+        self.assertIn("Risk screening", humanize_citation("lumenfin:risk_model:Apple"))
+
     def test_format_rag_citation_section_emits_page_anchors(self) -> None:
         lines = format_rag_citation_section(
             {
@@ -124,10 +130,37 @@ class ReportingDataSourcesTestCase(unittest.TestCase):
         )
         report = "\n".join(lines)
         self.assertIn("Retrieved Document Citations", report)
-        self.assertIn("apple_msft_fy2025_table.pdf#p1", report)
+        self.assertIn("apple_msft_fy2025_table.pdf p.1", report)
         self.assertTrue(report_contains_page_citations(report))
         self.assertEqual(format_rag_citation_section({}), [])
         self.assertFalse(report_contains_page_citations("no citations here"))
+
+        # Dedupes near-identical excerpts; prefers higher-score hits.
+        deduped = format_rag_citation_section(
+            {
+                "Apple": [
+                    {
+                        "citation": "a.pdf#p1",
+                        "score": 0.2,
+                        "text": "Same revenue excerpt for Apple filing table",
+                    },
+                    {
+                        "citation": "a.pdf#p2",
+                        "score": 0.9,
+                        "text": "Same revenue excerpt for Apple filing table",
+                    },
+                    {
+                        "citation": "a.pdf#p3",
+                        "score": 0.8,
+                        "text": "Distinct R&D intensity note for Apple",
+                    },
+                ]
+            },
+            max_rows_per_company=2,
+        )
+        dedupe_report = "\n".join(deduped)
+        self.assertEqual(dedupe_report.count("| Apple |"), 2)
+        self.assertIn("Distinct R&D", dedupe_report)
 
 
 if __name__ == "__main__":

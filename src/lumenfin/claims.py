@@ -76,8 +76,12 @@ class Claim:
             return ""
         return self.evidence_refs[0].citation
 
-    def render_with_citation(self) -> str:
+    def render_with_citation(self, *, humanize: bool = False) -> str:
         cite = self.primary_citation
+        if cite and humanize:
+            from .reporting import humanize_citation
+
+            cite = humanize_citation(cite)
         if cite:
             return f"{self.statement} [{cite}]"
         return self.statement
@@ -153,6 +157,20 @@ def _fmt_num(value: float) -> str:
     return f"{value:.4g}"
 
 
+def _is_usable_number_token(token: str, value: float) -> bool:
+    """Drop ambiguous tokens that create false substring hits (e.g. '0' inside '2024')."""
+    t = (token or "").replace(",", "").strip()
+    if not t or t in {".", "-", "+", "0", "1", "-1"}:
+        return False
+    # Bare 1–2 digit tokens are too collision-prone as substrings.
+    digits = re.sub(r"[^\d]", "", t)
+    if len(digits) <= 1:
+        return False
+    if len(digits) <= 2 and abs(float(value)) < 2.0:
+        return False
+    return True
+
+
 def _number_variants(value: float) -> list[str]:
     variants = {
         _fmt_num(value),
@@ -161,23 +179,36 @@ def _number_variants(value: float) -> list[str]:
         f"{value:.0f}",
         f"{value:,.0f}",
         f"{value:,.1f}",
-        f"{value * 1000:.0f}",  # billion → million
-        f"{value * 1_000_000_000:.0f}",  # billion → raw USD
     }
+    # Absolute amounts (internal billion_usd): also match filing million / raw USD forms.
+    if abs(value) > 1.5:
+        variants.add(f"{value * 1000:.0f}")  # billion → million
+        variants.add(f"{value * 1_000_000_000:.0f}")  # billion → raw USD
     # Compact without commas for PDF text matches.
     variants |= {v.replace(",", "") for v in list(variants)}
-    return [v for v in variants if v and v not in {".", "-"}]
+    return [v for v in variants if _is_usable_number_token(v, value)]
+
+
+def _token_in_text(text: str, token: str) -> bool:
+    """Substring match; short tokens require digit-boundary isolation."""
+    t = token.replace(",", "")
+    if not t:
+        return False
+    if len(re.sub(r"[^\d]", "", t)) <= 2:
+        return bool(re.search(rf"(?<![\d.]){re.escape(t)}(?![\d.])", text))
+    return t in text
 
 
 def _text_contains_number(text: str, value: float | None, *, tol: float = 0.02) -> bool:
     if value is None or not text:
         return False
     lowered = text.lower().replace(",", "")
-    for token in _number_variants(float(value)):
-        if token.replace(",", "") in lowered:
+    target = float(value)
+    for token in _number_variants(target):
+        if _token_in_text(lowered, token):
             return True
     # Relative match for percentages already formatted in text like 34.8%
-    pct = float(value) * 100.0 if abs(float(value)) <= 1.5 else float(value)
+    pct = target * 100.0 if abs(target) <= 1.5 else target
     for match in re.finditer(r"(-?\d+(?:\.\d+)?)\s*%", text):
         try:
             found = float(match.group(1))
@@ -185,6 +216,19 @@ def _text_contains_number(text: str, value: float | None, *, tol: float = 0.02) 
             continue
         if abs(found - pct) <= max(0.15, abs(pct) * tol):
             return True
+    # Scale-tolerant absolute match: internal billion vs filing millions (e.g. 29.5 ↔ 29510).
+    if abs(target) > 1.5:
+        million_target = target * 1000.0
+        for match in re.finditer(r"-?\d{3,}(?:\.\d+)?", lowered):
+            try:
+                found = float(match.group(0))
+            except ValueError:
+                continue
+            if abs(found - million_target) <= max(50.0, abs(million_target) * tol):
+                return True
+            raw_target = target * 1_000_000_000.0
+            if abs(found - raw_target) <= max(1_000_000.0, abs(raw_target) * tol):
+                return True
     return False
 
 
@@ -315,59 +359,101 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
     return pool
 
 
-def _prefer_refs_for_values(
+def _fund_refs_for_values(
     pool: list[EvidenceRef],
     values: list[float | None],
 ) -> list[EvidenceRef]:
-    """Prefer page-anchored RAG hits that contain the values; else fundamentals text."""
-    matched: list[EvidenceRef] = []
-    for ref in pool:
-        if ref.source_type not in {"rag", "document"} and "#p" not in (ref.citation or "").lower():
-            continue
-        if any(_text_contains_number(ref.text, v) for v in values if v is not None):
-            matched.append(ref)
-    if matched:
-        # Prefer real page anchors.
-        matched.sort(key=lambda r: (0 if r.page is not None else 1, r.evidence_id))
-        return matched[:2]
-
-    fund = [r for r in pool if r.source_type in {"sec_companyfacts", "yahoo_fundamentals", "document_extracted", "sample_db", "fundamentals"} or r.citation.startswith("lumenfin:")]
-    fund = [
-        r
-        for r in fund
-        if "sample_financial_data" in r.citation
-        or "sec_companyfacts" in r.citation
-        or "yahoo_fundamentals" in r.citation
-        or "document_extracted" in r.citation
-        or r.source_type in {"sec_companyfacts", "yahoo_fundamentals", "document_extracted", "fundamentals", "sample_db"}
-    ]
-    # Narrow to fundamentals citation specifically.
+    """Return fundamentals evidence that actually contains the requested numbers."""
+    needed = [v for v in values if v is not None]
     fund_refs = [
         r
         for r in pool
         if r.evidence_id.startswith("ev_fund_")
-        and any(_text_contains_number(r.text, v) for v in values if v is not None)
+        and (
+            not needed
+            or any(_text_contains_number(r.text, v) for v in needed)
+        )
     ]
     if fund_refs:
         return fund_refs[:1]
-    if fund:
-        return fund[:1]
+    # Broader structured-source citations as last resort.
+    for r in pool:
+        cite = r.citation or ""
+        if not any(
+            key in cite
+            for key in (
+                "sample_financial_data",
+                "sec_companyfacts",
+                "yahoo_fundamentals",
+                "document_extracted",
+            )
+        ) and r.source_type not in {
+            "sec_companyfacts",
+            "yahoo_fundamentals",
+            "document_extracted",
+            "fundamentals",
+            "sample_db",
+        }:
+            continue
+        if needed and not any(_text_contains_number(r.text, v) for v in needed):
+            continue
+        return [r]
     return []
 
 
-def _verify_numeric(claim: Claim, refs: list[EvidenceRef], input_values: list[float | None]) -> Claim:
-    if not refs:
+def _prefer_refs_for_values(
+    pool: list[EvidenceRef],
+    values: list[float | None],
+    *,
+    require_values: list[float | None] | None = None,
+) -> list[EvidenceRef]:
+    """Prefer page-anchored RAG that contains required inputs; else fundamentals text.
+
+    ``require_values`` (typically formula inputs) gates page preference so a ratio like
+    0.4463 cannot promote a RAG hit that only false-matches noise.
+    """
+    gate = [v for v in (require_values if require_values is not None else values) if v is not None]
+    scan = [v for v in values if v is not None]
+    matched: list[EvidenceRef] = []
+    for ref in pool:
+        if ref.source_type not in {"rag", "document"} and "#p" not in (ref.citation or "").lower():
+            continue
+        # Page hits must contain at least one gated input (or scan values when ungated).
+        probe = gate or scan
+        if probe and any(_text_contains_number(ref.text, v) for v in probe):
+            matched.append(ref)
+    if matched:
+        matched.sort(key=lambda r: (0 if r.page is not None else 1, r.evidence_id))
+        return matched[:2]
+
+    return _fund_refs_for_values(pool, gate or scan)
+
+
+def _verify_numeric(
+    claim: Claim,
+    refs: list[EvidenceRef],
+    input_values: list[float | None],
+    *,
+    pool: list[EvidenceRef] | None = None,
+) -> Claim:
+    needed = [v for v in input_values if v is not None]
+
+    def _usable_from(candidates: list[EvidenceRef]) -> list[EvidenceRef]:
+        usable: list[EvidenceRef] = []
+        for ref in candidates:
+            if needed and any(_text_contains_number(ref.text, v) for v in needed):
+                usable.append(ref)
+        return usable
+
+    usable = _usable_from(refs)
+    # If preferred (often RAG) candidates lack formula inputs, fall back to fundamentals.
+    if not usable and pool is not None:
+        usable = _usable_from(_fund_refs_for_values(pool, input_values))
+    if not refs and not usable:
         claim.verification = "rejected"
         claim.verify_reason = "No evidence text contains the metric inputs."
         claim.evidence_refs = []
         return claim
-    # Require at least one ref whose text contains an input OR is page-anchored RAG with overlap.
-    usable = []
-    for ref in refs:
-        if any(_text_contains_number(ref.text, v) for v in input_values if v is not None):
-            usable.append(ref)
-        elif ref.page is not None and any(_text_contains_number(ref.text, v) for v in input_values if v is not None):
-            usable.append(ref)
     if not usable:
         claim.verification = "rejected"
         claim.verify_reason = "Candidate evidence did not contain metric input numbers."
@@ -417,8 +503,12 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                     period=period,
                     metric_name=metric_name,
                 )
-                refs = _prefer_refs_for_values(pool, input_vals + [float(value)])
-                claims.append(_verify_numeric(claim, refs, input_vals))
+                refs = _prefer_refs_for_values(
+                    pool,
+                    input_vals + [float(value)],
+                    require_values=input_vals,
+                )
+                claims.append(_verify_numeric(claim, refs, input_vals, pool=pool))
 
             # Absolute fundamentals as numeric claims (for ledger + consistency)
             for key, label in (
@@ -441,8 +531,8 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                     period=period,
                     metric_name=key,
                 )
-                refs = _prefer_refs_for_values(pool, [float(raw)])
-                claims.append(_verify_numeric(claim, refs, [float(raw)]))
+                refs = _prefer_refs_for_values(pool, [float(raw)], require_values=[float(raw)])
+                claims.append(_verify_numeric(claim, refs, [float(raw)], pool=pool))
 
             # Market snapshot numerics only when structured fundamentals exist.
             snapshot = (state.get("market_snapshots") or {}).get(company) or {}
@@ -555,6 +645,13 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                 ]
                 claim.verification = "verified"
                 claim.verify_reason = "Fail-closed data-limitation risk bound to structured_source=none provenance."
+            elif risk_level.lower() in {"unknown", "n/a", "none"} and not block_numeric:
+                # Do not promote an "unknown" supply-chain placeholder into material risk/thesis.
+                claim.verification = "rejected"
+                claim.verify_reason = (
+                    "Supply-chain signal is unknown; withheld from material risk conclusions."
+                )
+                claim.evidence_refs = []
             elif refs:
                 claim.evidence_refs = refs[:2]
                 claim.verification = "verified"
@@ -606,7 +703,10 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
         block_numeric = fatal_gap or structured == "none" or not has_computable_fundamentals(payload)
         num = verified_by_entity(verified_so_far, company, claim_type="numeric")
         risk = verified_by_entity(verified_so_far, company, claim_type="risk_conclusion")
-        ebitda_claims = [c for c in num if c.metric_name == "ebitda_margin"]
+        # Prefer EBITDA margin; fall back to operating margin for PDF extracts lacking EBITDA.
+        profit_claims = [c for c in num if c.metric_name == "ebitda_margin"] or [
+            c for c in num if c.metric_name == "operating_margin"
+        ]
         claim = Claim(
             claim_id=f"cl_inv_{company}_thesis",
             entity=company,
@@ -614,7 +714,7 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
             statement="",
             metric_name="research_thesis",
         )
-        if block_numeric or not ebitda_claims or not risk:
+        if block_numeric or not profit_claims or not risk:
             claim.verification = "rejected"
             claim.verify_reason = (
                 "Investment conclusion omitted: requires verified numeric profitability "
@@ -626,20 +726,53 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
             )
             claims.append(claim)
             continue
-        ebitda = ebitda_claims[0]
-        risk_c = risk[0]
-        ebitda_v = float(ebitda.value) if isinstance(ebitda.value, (int, float)) else 0.0
-        if ebitda_v >= 0.25:
+        profit = profit_claims[0]
+        # Prefer scored screening dimensions; never anchor thesis on unknown supply-chain.
+        usable_risk = [
+            c
+            for c in risk
+            if not (
+                c.metric_name == "supply_chain_risk"
+                and str(c.value).lower() in {"unknown", "n/a", "none"}
+            )
+        ]
+        scored_risk = [
+            c
+            for c in usable_risk
+            if c.metric_name in {"financial_risk", "operational_risk", "market_risk", "data_limitation_risk"}
+        ]
+        risk_c = scored_risk[0] if scored_risk else (usable_risk[0] if usable_risk else None)
+        if risk_c is None:
+            claim.verification = "rejected"
+            claim.verify_reason = (
+                "Investment conclusion omitted: no material verified risk conclusion "
+                "(unknown supply-chain alone is insufficient)."
+            )
+            claim.statement = (
+                f"{company}: no evidence-backed investment conclusion — missing material "
+                "verified risk claims."
+            )
+            claims.append(claim)
+            continue
+        profit_v = float(profit.value) if isinstance(profit.value, (int, float)) else 0.0
+        # Operating-margin thresholds are slightly lower than EBITDA-margin screens.
+        strong, adequate = (0.25, 0.15) if profit.metric_name == "ebitda_margin" else (0.20, 0.12)
+        if profit_v >= strong:
             stance = "quality-screening research thesis (not a recommendation)"
-        elif ebitda_v >= 0.15:
+        elif profit_v >= adequate:
             stance = "neutral quality-compounder research screen (not a recommendation)"
         else:
             stance = "defensive research posture pending operational evidence (not a recommendation)"
-        claim.statement = (
-            f"{company} supports a {stance} based on verified {ebitda.metric_name} "
-            f"({_fmt_pct(ebitda_v)}) and verified risk signal ({risk_c.value})."
+        risk_label = (
+            f"{risk_c.metric_name}={risk_c.value}"
+            if isinstance(risk_c.value, (int, float))
+            else str(risk_c.value)
         )
-        claim.evidence_refs = list(ebitda.evidence_refs[:1]) + list(risk_c.evidence_refs[:1])
+        claim.statement = (
+            f"{company} supports a {stance} based on verified {profit.metric_name} "
+            f"({_fmt_pct(profit_v)}) and verified risk screen ({risk_label})."
+        )
+        claim.evidence_refs = list(profit.evidence_refs[:1]) + list(risk_c.evidence_refs[:1])
         claim.verification = "verified"
         claim.verify_reason = "Composed only from verified numeric + risk claims."
         claim.value = stance
@@ -731,25 +864,27 @@ def binding_summary(claims: list[Claim]) -> dict[str, Any]:
 
 
 def format_verified_claims_ledger(claims: list[Claim]) -> list[str]:
+    from .reporting import humanize_citation
+
     verified = filter_verified(claims)
     lines = [
-        "## 0. Verified Claims Ledger",
+        "## Appendix A. Verified Claims Ledger",
         "",
-        "*Only structurally verified claims are eligible for material assertions in this report. "
-        "Unverified or rejected claims are omitted from the ledger.*",
+        "*Audit appendix: only structurally verified claims may back material assertions. "
+        "Internal claim IDs are retained here for traceability.*",
         "",
     ]
     if not verified:
         lines.append("- (none — report will withhold evidence-backed financial assertions)")
         lines.append("")
         return lines
-    lines.append("| ID | Entity | Type | Statement | Citation |")
-    lines.append("|----|--------|------|-----------|----------|")
+    lines.append("| Entity | Type | Statement | Source |")
+    lines.append("|--------|------|-----------|--------|")
     for claim in verified:
-        cite = claim.primary_citation.replace("|", "/")
+        cite = humanize_citation(claim.primary_citation).replace("|", "/")
         stmt = claim.statement.replace("|", "/")
         lines.append(
-            f"| `{claim.claim_id}` | {claim.entity} | {claim.claim_type} | {stmt} | `{cite}` |"
+            f"| {claim.entity} | {claim.claim_type} | {stmt} | {cite} |"
         )
     lines.append("")
     return lines

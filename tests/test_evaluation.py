@@ -57,13 +57,13 @@ class AgentEvaluationTestCase(unittest.TestCase):
                 "## 1. Executive Summary",
                 "No computable fundamentals.",
                 "**Evidence Boundary:** withheld invented metrics.",
-                "## 4. Financial Performance Analysis",
+                "## 3. Financial Performance Analysis",
                 "Not available.",
-                "## 7. Risk Architecture",
+                "## 4. Risk",
                 "Data limitation risk.",
-                "## 10. Compliance Review & Data Integrity",
+                "## 6. Compliance Review & Data Integrity",
                 "Fail-closed.",
-                "## 11. Methodology, Data Sources & Disclaimer",
+                "## Appendix B. Methodology, Data Sources & Disclaimer",
                 "**Disclaimer:** research only. Not investment advice. " + ("detail " * 20),
             ]
         )

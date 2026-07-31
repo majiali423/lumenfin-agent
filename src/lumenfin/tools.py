@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
+from .documents import normalize_metric_hints_to_billion_usd
 from .market_data import DEFAULT_TICKER_MAP
 from .metrics_schema import get_fundamental, normalize_market_data, set_fundamental
+from .fundamentals import is_plausible_revenue_billion_usd
+from .reporting import annotate_upload_period_meta
 
 
 class SafeExpressionEvaluator(ast.NodeVisitor):
@@ -204,6 +207,12 @@ def retrieve_company_payload(
                 "grounding_layer": "document_ast_complete",
             }
         )
+        meta = annotate_upload_period_meta(
+            meta,
+            document_contexts=doc_contexts,
+            company=company,
+            prefer_fiscal_year=prefer_fiscal_year,
+        )
         result["fundamentals_meta"] = meta
         return _finalize_company_payload(result)
 
@@ -391,8 +400,11 @@ def _payload_from_documents(
         hint_source = scoped or (
             doc.get("metric_hints", {}) if len(detected) <= 1 else {}
         )
+        hint_source = normalize_metric_hints_to_billion_usd(dict(hint_source), text=text)
         for key, value in hint_source.items():
             if key in {"revenue", "ebitda", "r_and_d", "operating_income"}:
+                if key == "revenue" and not is_plausible_revenue_billion_usd(value):
+                    continue
                 set_fundamental(market_data, key, value)
             elif key.endswith("_2025") and key.replace("_2025", "") in {
                 "revenue",
@@ -400,6 +412,9 @@ def _payload_from_documents(
                 "r_and_d",
                 "operating_income",
             }:
+                base = key.replace("_2025", "")
+                if base == "revenue" and not is_plausible_revenue_billion_usd(value):
+                    continue
                 set_fundamental(market_data, key, value)
 
         if excerpt:
@@ -696,6 +711,7 @@ def derive_target_symbols(companies: list[str], query: str) -> dict[str, str]:
 def summarize_document_context(document_contexts: list[dict[str, Any]], company: str) -> dict[str, Any]:
     related_docs = []
     metric_hints: dict[str, float] = {}
+    joined_text_parts: list[str] = []
     for doc in document_contexts:
         if not _document_applies_to_company(doc, company):
             continue
@@ -707,10 +723,15 @@ def summarize_document_context(document_contexts: list[dict[str, Any]], company:
                 "excerpt": doc.get("excerpt", "")[:1200],
             }
         )
+        joined_text_parts.append(str(doc.get("text") or doc.get("excerpt") or ""))
         scoped = (doc.get("per_company_metric_hints") or {}).get(company) or {}
         hint_source = scoped or (doc.get("metric_hints", {}) if len(detected) <= 1 else {})
         for metric_name, value in hint_source.items():
             metric_hints.setdefault(metric_name, value)
+    metric_hints = normalize_metric_hints_to_billion_usd(
+        metric_hints,
+        text="\n".join(joined_text_parts),
+    )
     return {"source_documents": related_docs, "metric_hints": metric_hints}
 
 
