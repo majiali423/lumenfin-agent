@@ -75,9 +75,17 @@ class EvidenceRef:
     text: str
     page: int | None = None
     period: str | None = None
+    metric_name: str | None = None
+    value: float | None = None
+    unit: str | None = None
+    confidence: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @property
+    def has_structured_fields(self) -> bool:
+        return self.metric_name is not None and self.value is not None
 
 
 @dataclass
@@ -128,10 +136,31 @@ def claims_from_state(state: dict[str, Any]) -> list[Claim]:
             continue
         if not isinstance(item, dict):
             continue
-        refs = [
-            EvidenceRef(**ref) if isinstance(ref, dict) else ref
-            for ref in (item.get("evidence_refs") or [])
-        ]
+        refs = []
+        for ref in (item.get("evidence_refs") or []):
+            if isinstance(ref, EvidenceRef):
+                refs.append(ref)
+            elif isinstance(ref, dict):
+                allowed = {
+                    key: ref[key]
+                    for key in (
+                        "evidence_id",
+                        "entity",
+                        "citation",
+                        "source_type",
+                        "text",
+                        "page",
+                        "period",
+                        "metric_name",
+                        "value",
+                        "unit",
+                        "confidence",
+                    )
+                    if key in ref
+                }
+                refs.append(EvidenceRef(**allowed))
+            else:
+                refs.append(ref)
         out.append(
             Claim(
                 claim_id=str(item.get("claim_id") or ""),
@@ -274,8 +303,14 @@ class EvidenceMatch:
 
 
 def _periods_compatible(claim_period: str | None, evidence_period: str | None, text: str) -> bool:
+    status = _period_status(claim_period, evidence_period, text)
+    return status != "mismatch"
+
+
+def _period_status(claim_period: str | None, evidence_period: str | None, text: str) -> str:
+    """Return ok | mismatch | unknown for claim/evidence period alignment."""
     if not claim_period:
-        return True
+        return "ok"
     claim = str(claim_period).upper()
     claim_years = set(re.findall(r"20\d{2}", claim))
     candidates = " ".join(
@@ -283,12 +318,32 @@ def _periods_compatible(claim_period: str | None, evidence_period: str | None, t
     ).upper()
     evidence_years = set(re.findall(r"20\d{2}", candidates))
     if not claim_years:
-        return True
-    if not evidence_years:
-        # Structured fund sentences often omit an alternate year; allow when evidence
-        # period label is empty/unknown, but reject explicit other FY tags in text.
-        return not re.search(r"\bFY\s*20\d{2}\b", candidates)
-    return bool(claim_years & evidence_years)
+        return "ok"
+    if evidence_years:
+        return "ok" if claim_years & evidence_years else "mismatch"
+    if evidence_period:
+        # Explicit non-year period label without conflicting FY tags.
+        return "ok" if not re.search(r"\bFY\s*20\d{2}\b", candidates) else "mismatch"
+    if re.search(r"\bFY\s*20\d{2}\b", candidates):
+        return "mismatch"
+    return "unknown"
+
+
+def _values_close(left: float, right: float, *, tol: float = 0.02) -> bool:
+    a = float(left)
+    b = float(right)
+    return abs(a - b) <= max(1e-9, abs(b) * tol, 0.05 if abs(b) >= 1 else 1e-6)
+
+
+def _unit_declared_near(text: str, idx: int, *, window: int = 60) -> bool:
+    snippet = (text or "")[max(0, idx - window) : idx + window].lower()
+    return bool(
+        re.search(
+            r"\b(?:billion|million|thousand|usd|u\.?s\.?\s*dollars?)\b|"
+            r"\$|in\s+millions|in\s+billions|in\s+thousands",
+            snippet,
+        )
+    )
 
 
 def _metric_alias_near(text: str, metric_name: str, center: int, *, window: int = 80) -> bool:
@@ -458,17 +513,107 @@ def match_numeric_evidence(
         )
 
     text = evidence.text or ""
-    period_ok = _periods_compatible(period, evidence.period, text)
-    if not period_ok:
+    period_state = _period_status(period, evidence.period, text)
+    if period_state == "mismatch":
         return EvidenceMatch(
             False, None, False, False, False, None, None, "none", "period_mismatch"
         )
+    period_ok = period_state == "ok"
 
-    structured = (
+    # Structured field path: display text is not the source of truth.
+    if evidence.has_structured_fields and not formula_inputs:
+        if str(evidence.metric_name) != str(metric_name):
+            return EvidenceMatch(
+                False,
+                float(evidence.value) if evidence.value is not None else None,
+                False,
+                period_ok,
+                False,
+                None,
+                None,
+                "none",
+                "metric_name_mismatch",
+            )
+        if not _values_close(float(evidence.value), float(value)):
+            return EvidenceMatch(
+                False,
+                float(evidence.value),
+                True,
+                period_ok,
+                True,
+                None,
+                None,
+                "none",
+                "metric_value_mismatch",
+            )
+        if evidence.unit and unit and str(evidence.unit) != str(unit):
+            return EvidenceMatch(
+                False,
+                float(evidence.value),
+                True,
+                period_ok,
+                False,
+                None,
+                None,
+                "none",
+                "unit_mismatch",
+            )
+        if period_state == "unknown":
+            return EvidenceMatch(
+                False,
+                float(evidence.value),
+                True,
+                False,
+                True,
+                None,
+                None,
+                "low",
+                "period_unknown",
+            )
+        if (evidence.confidence or "high") != "high":
+            return EvidenceMatch(
+                False,
+                float(evidence.value),
+                True,
+                period_ok,
+                True,
+                None,
+                None,
+                "low",
+                "low_confidence_evidence",
+            )
+        if not (evidence.citation or "").strip():
+            return EvidenceMatch(
+                False,
+                float(evidence.value),
+                True,
+                period_ok,
+                True,
+                None,
+                None,
+                "none",
+                "citation_missing",
+            )
+        return EvidenceMatch(
+            True,
+            float(evidence.value),
+            True,
+            True,
+            True,
+            None,
+            None,
+            "high",
+            "structured_field_bound",
+        )
+
+    structured_source = (
         evidence.source_type in _STRUCTURED_SOURCES
         or any(key in (evidence.citation or "") for key in _STRUCTURED_SOURCES)
         or evidence.evidence_id.startswith("ev_fund_")
     )
+    # Never treat source_type=structured as a free pass when structured fields are absent
+    # and the claim has metric context — fall through to text rules without skipping checks.
+    structured = structured_source and evidence.has_structured_fields
 
     if formula_inputs:
         missing = [name for name, amount in formula_inputs.items() if amount is None]
@@ -484,9 +629,30 @@ def match_numeric_evidence(
                 "none",
                 "formula_input_incomplete",
             )
-        # Ratio claims require formula inputs in evidence, not only the final percent.
+        if period_state == "unknown":
+            # Period-specific claims may still bind RAG text at reduced confidence.
+            pass
         for input_name, input_value in formula_inputs.items():
-            hit = _find_number_span(text, float(input_value), unit="billion_usd", metric_name=input_name)
+            if evidence.has_structured_fields:
+                # Single structured metric record cannot alone bind a multi-input formula.
+                if str(evidence.metric_name) != str(input_name) or not _values_close(
+                    float(evidence.value), float(input_value)
+                ):
+                    return EvidenceMatch(
+                        False,
+                        None,
+                        False,
+                        period_ok,
+                        False,
+                        None,
+                        None,
+                        "none",
+                        "formula_input_incomplete",
+                    )
+                continue
+            hit = _find_number_span(
+                text, float(input_value), unit="billion_usd", metric_name=input_name
+            )
             if hit is None:
                 return EvidenceMatch(
                     False,
@@ -500,7 +666,7 @@ def match_numeric_evidence(
                     "formula_input_incomplete",
                 )
             idx, _, conversion, span = hit
-            if not structured and not _metric_alias_near(text, input_name, idx):
+            if not _metric_alias_near(text, input_name, idx):
                 return EvidenceMatch(
                     False,
                     None,
@@ -512,22 +678,38 @@ def match_numeric_evidence(
                     "none",
                     "metric_label_mismatch",
                 )
-            # Reject when formula inputs are tagged with conflicting fiscal years.
             years_in_text = set(re.findall(r"FY\s*(20\d{2})", text, flags=re.I))
             if len(years_in_text) > 1:
                 return EvidenceMatch(
                     False, None, False, False, False, None, None, "none", "period_mismatch"
                 )
+            if not conversion and not _unit_declared_near(text, idx):
+                return EvidenceMatch(
+                    False,
+                    None,
+                    False,
+                    period_ok,
+                    False,
+                    None,
+                    span,
+                    "low",
+                    "unit_ambiguous",
+                )
+        conf = "high" if structured or structured_source else "medium"
+        reason = "formula_inputs_bound"
+        if period_state == "unknown":
+            conf = "medium"
+            reason = "period_unknown"
         return EvidenceMatch(
             True,
             float(value),
             True,
-            True,
+            period_state == "ok",
             True,
             None,
             None,
-            "high" if structured else "medium",
-            "formula_inputs_bound",
+            conf,
+            reason,
         )
 
     hit = _find_number_span(text, float(value), unit=unit, metric_name=metric_name)
@@ -536,7 +718,7 @@ def match_numeric_evidence(
             False, None, False, period_ok, False, None, None, "none", "number_not_found"
         )
     idx, found, conversion, span = hit
-    metric_ok = structured or _metric_alias_near(text, metric_name, idx)
+    metric_ok = _metric_alias_near(text, metric_name, idx)
     if not metric_ok:
         return EvidenceMatch(
             False,
@@ -550,21 +732,46 @@ def match_numeric_evidence(
             "metric_label_mismatch",
         )
 
+    if period_state == "unknown":
+        unit_declared = bool(conversion) or _unit_declared_near(text, idx)
+        if not unit_declared and unit == "billion_usd" and abs(float(value)) > 1.5:
+            return EvidenceMatch(
+                False,
+                found,
+                True,
+                False,
+                False,
+                conversion,
+                span,
+                "low",
+                "unit_ambiguous",
+            )
+        return EvidenceMatch(
+            True if unit_declared or unit in {None, "ratio", "multiple"} else False,
+            found,
+            True,
+            False,
+            unit_declared or unit in {None, "ratio", "multiple"},
+            conversion,
+            span,
+            "medium" if unit_declared or unit in {None, "ratio", "multiple"} else "low",
+            "period_unknown",
+        )
+
     unit_ok = True
-    conf = "high" if structured else "medium"
+    conf = "medium"
     if conversion is None and unit == "billion_usd" and abs(float(value)) > 1.5:
-        # Bare large integers without unit/caption cannot support a billion claim.
         after = text.lower()[idx : idx + 40]
         before = text.lower()[max(0, idx - 80) : idx]
         if (
-            not structured
-            and "billion" not in after
+            "billion" not in after
             and "million" not in after
             and "million" not in before
             and "in millions" not in before
             and "billion" not in before
+            and not _unit_declared_near(text, idx)
         ):
-            if re.search(r"\b\d{4,}\b", span):
+            if re.search(r"\b\d{4,}\b", span) or not _unit_declared_near(text, idx):
                 return EvidenceMatch(
                     False,
                     found,
@@ -578,6 +785,8 @@ def match_numeric_evidence(
                 )
     if conversion:
         unit_ok = True
+        conf = "high"
+    elif _unit_declared_near(text, idx):
         conf = "high"
 
     return EvidenceMatch(
@@ -614,10 +823,14 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
         source_type: str,
         text: str,
         period: str | None = None,
+        metric_name: str | None = None,
+        value: float | None = None,
+        unit: str | None = None,
+        confidence: str | None = None,
     ) -> None:
-        if not citation or citation in seen:
+        if not citation or evidence_id in seen:
             return
-        seen.add(citation)
+        seen.add(evidence_id)
         pool.append(
             EvidenceRef(
                 evidence_id=evidence_id,
@@ -627,6 +840,10 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
                 text=text or "",
                 page=_page_from_citation(citation),
                 period=period,
+                metric_name=metric_name,
+                value=value,
+                unit=unit,
+                confidence=confidence,
             )
         )
 
@@ -644,20 +861,37 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
     period = period_label_from_meta(payload.get("fundamentals_meta"))
     structured = str(payload.get("structured_source") or "none")
     market_data = payload.get("market_data") or {}
+    provenance = payload.get("fundamental_provenance") or {}
     if market_data:
-        text = (
-            f"{company} {period} revenue was {get_fundamental(market_data, 'revenue')} billion USD, "
-            f"EBITDA was {get_fundamental(market_data, 'ebitda')} billion USD, "
-            f"R&D was {get_fundamental(market_data, 'r_and_d')} billion USD, and "
-            f"operating income was {get_fundamental(market_data, 'operating_income')} billion USD."
-        )
-        add(
-            evidence_id=f"ev_fund_{company}_{period}",
-            citation=f"lumenfin:{structured}:{company}:{period}",
-            source_type=structured if structured != "none" else "fundamentals",
-            text=text,
-            period=period,
-        )
+        labels = {
+            "revenue": "revenue",
+            "ebitda": "EBITDA",
+            "r_and_d": "R&D",
+            "operating_income": "operating income",
+        }
+        for key, label in labels.items():
+            raw = get_fundamental(market_data, key)
+            if raw is None:
+                continue
+            field_prov = provenance.get(key) if isinstance(provenance, dict) else None
+            if not isinstance(field_prov, dict):
+                field_prov = {}
+            field_period = str(field_prov.get("period") or period or "") or None
+            field_source = str(field_prov.get("source") or structured or "fundamentals")
+            field_conf = str(field_prov.get("confidence") or "high")
+            source_type = field_source if field_source != "none" else "fundamentals"
+            display = f"{company} {label} was {float(raw)} billion USD."
+            add(
+                evidence_id=f"ev_fund_{company}_{key}_{field_period or 'unknown'}",
+                citation=f"lumenfin:{source_type}:{company}:{field_period or period}:{key}",
+                source_type=source_type,
+                text=display,
+                period=field_period,
+                metric_name=key,
+                value=float(raw),
+                unit="billion_usd",
+                confidence=field_conf,
+            )
 
     supply = payload.get("supply_chain") or {}
     if supply:
@@ -733,6 +967,43 @@ def _fund_refs_for_values(
     """Return fundamentals evidence that structurally matches the claim."""
     needed = [v for v in values if v is not None]
     fund_refs = [r for r in pool if r.evidence_id.startswith("ev_fund_")]
+
+    if formula_inputs and entity:
+        bound: list[EvidenceRef] = []
+        for input_name, input_value in formula_inputs.items():
+            hit = None
+            for ref in fund_refs:
+                result = match_numeric_evidence(
+                    ref,
+                    entity=entity,
+                    metric_name=str(input_name),
+                    value=float(input_value),
+                    unit="billion_usd",
+                    period=period,
+                )
+                if result.matched and result.confidence == "high":
+                    hit = ref
+                    break
+            if hit is None:
+                for ref in pool:
+                    if ref in bound:
+                        continue
+                    result = match_numeric_evidence(
+                        ref,
+                        entity=entity,
+                        metric_name=str(input_name),
+                        value=float(input_value),
+                        unit="billion_usd",
+                        period=period,
+                    )
+                    if result.matched and result.confidence in {"high", "medium"}:
+                        hit = ref
+                        break
+            if hit is None:
+                return []
+            bound.append(hit)
+        return bound
+
     if fund_refs and metric_name and entity and needed:
         matched = [
             r
@@ -744,16 +1015,17 @@ def _fund_refs_for_values(
                 value=float(needed[0]),
                 unit=unit,
                 period=period,
-                formula_inputs=formula_inputs,
             ).matched
         ]
         if matched:
             return matched[:1]
         return []
+    if metric_name:
+        # Structured metric context present: do not fall back to whole-text number match.
+        return []
     if fund_refs and (
         not needed or any(_text_contains_number(r.text, v) for r in fund_refs for v in needed)
     ):
-        # Legacy fallback when metric context is unavailable.
         usable = [
             r
             for r in fund_refs
@@ -787,7 +1059,6 @@ def _fund_refs_for_values(
                 value=float(needed[0]),
                 unit=unit,
                 period=period,
-                formula_inputs=formula_inputs,
             ).matched:
                 return [r]
             continue
@@ -857,7 +1128,49 @@ def _verify_numeric(
 ) -> Claim:
     needed = [v for v in input_values if v is not None]
 
+    def _bind_formula(candidates: list[EvidenceRef]) -> tuple[list[EvidenceRef], str]:
+        assert formula_inputs is not None
+        bound: list[EvidenceRef] = []
+        last_reason = "formula_input_incomplete"
+        input_ids: dict[str, str] = {}
+        search_space = list(candidates)
+        if pool:
+            for ref in pool:
+                if ref not in search_space:
+                    search_space.append(ref)
+        for input_name, input_value in formula_inputs.items():
+            hit = None
+            for ref in search_space:
+                result = match_numeric_evidence(
+                    ref,
+                    entity=claim.entity,
+                    metric_name=str(input_name),
+                    value=float(input_value),
+                    unit="billion_usd",
+                    period=claim.period,
+                )
+                if result.matched and (
+                    result.confidence == "high"
+                    or (
+                        not ref.has_structured_fields
+                        and result.confidence == "medium"
+                    )
+                ):
+                    hit = ref
+                    last_reason = result.reason
+                    break
+                last_reason = result.reason
+            if hit is None:
+                return [], last_reason
+            bound.append(hit)
+            input_ids[str(input_name)] = hit.evidence_id
+        # Keep formula input map in verify_reason for auditability.
+        claim.verify_reason = f"formula_inputs={input_ids}"
+        return bound, "formula_inputs_bound"
+
     def _usable_from(candidates: list[EvidenceRef]) -> tuple[list[EvidenceRef], str]:
+        if formula_inputs and claim.metric_name:
+            return _bind_formula(candidates)
         usable: list[EvidenceRef] = []
         last_reason = "number_not_found"
         for ref in candidates:
@@ -869,14 +1182,19 @@ def _verify_numeric(
                     value=float(claim.value),
                     unit=claim.unit,
                     period=claim.period,
-                    formula_inputs=formula_inputs,
                 )
-                if result.matched:
+                if result.matched and result.confidence in {"high", "medium"}:
+                    # Verified numeric facts require high confidence when structured fields exist.
+                    if ref.has_structured_fields and result.confidence != "high":
+                        last_reason = result.reason
+                        continue
                     usable.append(ref)
                     last_reason = result.reason
                 else:
                     last_reason = result.reason
-            elif needed and any(_text_contains_number(ref.text, v) for v in needed):
+            elif not claim.metric_name and needed and any(
+                _text_contains_number(ref.text, v) for v in needed
+            ):
                 usable.append(ref)
                 last_reason = "legacy_number_match"
         return usable, last_reason
@@ -906,11 +1224,13 @@ def _verify_numeric(
         return claim
     claim.evidence_refs = usable
     claim.verification = "verified"
+    detail = claim.verify_reason if claim.verify_reason.startswith("formula_inputs=") else ""
     claim.verify_reason = (
         f"Metric/period/unit-bound evidence ({reason})"
+        + (f"; {detail}" if detail else "")
         + (
             f"; formula_inputs={sorted(formula_inputs)}"
-            if formula_inputs
+            if formula_inputs and not detail
             else ""
         )
     )
