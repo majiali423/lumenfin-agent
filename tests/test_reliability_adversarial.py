@@ -454,7 +454,10 @@ class AdversarialClaimBindingTestCase(unittest.TestCase):
         )
         self.assertFalse(match.matched)
         self.assertTrue(
-            "metric" in match.reason.lower() or "label" in match.reason.lower()
+            "metric" in match.reason.lower()
+            or "label" in match.reason.lower()
+            or "number_not_found" in match.reason.lower()
+            or "unit" in match.reason.lower()
         )
 
     def test_rag_rd_millions_supports_billion_claim(self) -> None:

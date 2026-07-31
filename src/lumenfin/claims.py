@@ -37,6 +37,34 @@ METRIC_LABELS = {
     "range_position": "52-week range position",
 }
 
+METRIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "revenue": ("revenue", "revenues", "total revenue", "net sales", "收入", "营收"),
+    "r_and_d": (
+        "r&d",
+        "r & d",
+        "research and development",
+        "research & development",
+        "rd expense",
+        "研发",
+    ),
+    "operating_income": ("operating income", "operating profit", "营业利润", "经营利润"),
+    "ebitda": ("ebitda",),
+    "operating_margin": ("operating margin", "营业利润率"),
+    "ebitda_margin": ("ebitda margin",),
+    "r_and_d_intensity": ("r&d intensity", "r&d as a percentage", "研发强度"),
+}
+
+_STRUCTURED_SOURCES = frozenset(
+    {
+        "sec_companyfacts",
+        "yahoo_fundamentals",
+        "document_extracted",
+        "sample_db",
+        "fundamentals",
+        "sample_financial_data",
+    }
+)
+
 
 @dataclass(frozen=True)
 class EvidenceRef:
@@ -232,6 +260,339 @@ def _text_contains_number(text: str, value: float | None, *, tol: float = 0.02) 
     return False
 
 
+@dataclass(frozen=True)
+class EvidenceMatch:
+    matched: bool
+    matched_value: float | None
+    matched_metric: bool
+    matched_period: bool
+    matched_unit: bool
+    unit_conversion: str | None
+    match_span: str | None
+    confidence: str
+    reason: str
+
+
+def _periods_compatible(claim_period: str | None, evidence_period: str | None, text: str) -> bool:
+    if not claim_period:
+        return True
+    claim = str(claim_period).upper()
+    claim_years = set(re.findall(r"20\d{2}", claim))
+    candidates = " ".join(
+        part for part in (evidence_period or "", text[:500]) if part
+    ).upper()
+    evidence_years = set(re.findall(r"20\d{2}", candidates))
+    if not claim_years:
+        return True
+    if not evidence_years:
+        # Structured fund sentences often omit an alternate year; allow when evidence
+        # period label is empty/unknown, but reject explicit other FY tags in text.
+        return not re.search(r"\bFY\s*20\d{2}\b", candidates)
+    return bool(claim_years & evidence_years)
+
+
+def _metric_alias_near(text: str, metric_name: str, center: int, *, window: int = 80) -> bool:
+    return _metric_alias_distance(text, metric_name, center, window=window) is not None
+
+
+def _metric_alias_distance(
+    text: str, metric_name: str, center: int, *, window: int = 100
+) -> int | None:
+    aliases = METRIC_ALIASES.get(metric_name) or (metric_name.replace("_", " "),)
+    start = max(0, center - window)
+    end = min(len(text), center + window)
+    snippet = text[start:end].casefold()
+    best: int | None = None
+    for alias in aliases:
+        token = alias.casefold()
+        if not token:
+            continue
+        pos = snippet.find(token)
+        while pos >= 0:
+            abs_pos = start + pos
+            dist = abs(abs_pos - center)
+            if best is None or dist < best:
+                best = dist
+            pos = snippet.find(token, pos + 1)
+    return best
+
+
+def _find_number_span(
+    text: str,
+    value: float,
+    *,
+    unit: str | None,
+    metric_name: str | None = None,
+    tol: float = 0.02,
+) -> tuple[int, float, str | None, str] | None:
+    """Return (index, found_value, unit_conversion, span) for the best numeric hit."""
+    lowered = text.lower().replace(",", "")
+    target = float(value)
+    candidates: list[tuple[int, float, str | None, str, int]] = []
+
+    def _score(idx: int) -> int:
+        if not metric_name:
+            return 0
+        dist = _metric_alias_distance(text, metric_name, idx)
+        if dist is None:
+            return 10_000
+        return dist
+
+    for token in _number_variants(target):
+        clean = token.replace(",", "")
+        start_at = 0
+        while True:
+            idx = lowered.find(clean, start_at)
+            if idx < 0:
+                break
+            if _token_in_text(lowered, clean):
+                conversion = None
+                found_val = target
+                try:
+                    as_float = float(clean)
+                except ValueError:
+                    as_float = target
+                if abs(target) > 1.5 and abs(as_float - target * 1000.0) <= max(
+                    50.0, abs(target * 1000.0) * tol
+                ):
+                    nearby = lowered[max(0, idx - 80) : idx + len(clean) + 24]
+                    if "million" not in nearby and "in millions" not in lowered:
+                        start_at = idx + max(len(clean), 1)
+                        continue
+                    conversion = "million_to_billion"
+                    found_val = as_float / 1000.0
+                elif abs(target) > 1.5 and abs(
+                    as_float - target * 1_000_000_000.0
+                ) <= max(1_000_000.0, abs(target * 1_000_000_000.0) * tol):
+                    conversion = "raw_usd_to_billion"
+                    found_val = as_float / 1_000_000_000.0
+                span_start = max(0, idx - 48)
+                span_end = min(len(text), idx + max(len(clean), 1) + 8)
+                candidates.append(
+                    (
+                        idx,
+                        found_val,
+                        conversion,
+                        text[span_start:span_end].strip(),
+                        _score(idx),
+                    )
+                )
+            start_at = idx + max(len(clean), 1)
+
+    if unit == "ratio" or abs(target) <= 1.5:
+        pct = target * 100.0 if abs(target) <= 1.5 else target
+        for match in re.finditer(r"(-?\d+(?:\.\d+)?)\s*%", text):
+            try:
+                found = float(match.group(1))
+            except ValueError:
+                continue
+            if abs(found - pct) <= max(0.15, abs(pct) * tol):
+                candidates.append(
+                    (
+                        match.start(),
+                        found / 100.0 if abs(target) <= 1.5 else found,
+                        None,
+                        match.group(0),
+                        _score(match.start()),
+                    )
+                )
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[4], item[0]))
+        best = candidates[0]
+        return best[0], best[1], best[2], best[3]
+
+    million_target = target * 1000.0
+    for match in re.finditer(r"-?\d{3,}(?:\.\d+)?", lowered):
+        try:
+            found = float(match.group(0))
+        except ValueError:
+            continue
+        after = lowered[match.end() : match.end() + 24]
+        before = lowered[max(0, match.start() - 80) : match.start()]
+        if abs(found - million_target) <= max(50.0, abs(million_target) * tol):
+            if "million" in after or "million" in before or "in millions" in lowered:
+                candidates.append(
+                    (
+                        match.start(),
+                        found / 1000.0,
+                        "million_to_billion",
+                        match.group(0),
+                        _score(match.start()),
+                    )
+                )
+            continue
+        raw_target = target * 1_000_000_000.0
+        if abs(found - raw_target) <= max(1_000_000.0, abs(raw_target) * tol):
+            candidates.append(
+                (
+                    match.start(),
+                    found / 1_000_000_000.0,
+                    "raw_usd_to_billion",
+                    match.group(0),
+                    _score(match.start()),
+                )
+            )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[4], item[0]))
+    best = candidates[0]
+    return best[0], best[1], best[2], best[3]
+
+
+
+def match_numeric_evidence(
+    evidence: EvidenceRef,
+    *,
+    entity: str,
+    metric_name: str,
+    value: float,
+    unit: str | None,
+    period: str | None,
+    formula_inputs: dict[str, float] | None = None,
+) -> EvidenceMatch:
+    """Bind a numeric claim to evidence with metric/period/unit/entity constraints."""
+    if evidence.entity and entity and evidence.entity.casefold() != entity.casefold():
+        return EvidenceMatch(
+            False, None, False, False, False, None, None, "none", "entity_mismatch"
+        )
+
+    text = evidence.text or ""
+    period_ok = _periods_compatible(period, evidence.period, text)
+    if not period_ok:
+        return EvidenceMatch(
+            False, None, False, False, False, None, None, "none", "period_mismatch"
+        )
+
+    structured = (
+        evidence.source_type in _STRUCTURED_SOURCES
+        or any(key in (evidence.citation or "") for key in _STRUCTURED_SOURCES)
+        or evidence.evidence_id.startswith("ev_fund_")
+    )
+
+    if formula_inputs:
+        missing = [name for name, amount in formula_inputs.items() if amount is None]
+        if missing:
+            return EvidenceMatch(
+                False,
+                None,
+                False,
+                period_ok,
+                False,
+                None,
+                None,
+                "none",
+                "formula_input_incomplete",
+            )
+        # Ratio claims require formula inputs in evidence, not only the final percent.
+        for input_name, input_value in formula_inputs.items():
+            hit = _find_number_span(text, float(input_value), unit="billion_usd", metric_name=input_name)
+            if hit is None:
+                return EvidenceMatch(
+                    False,
+                    None,
+                    False,
+                    period_ok,
+                    False,
+                    None,
+                    None,
+                    "none",
+                    "formula_input_incomplete",
+                )
+            idx, _, conversion, span = hit
+            if not structured and not _metric_alias_near(text, input_name, idx):
+                return EvidenceMatch(
+                    False,
+                    None,
+                    False,
+                    period_ok,
+                    bool(conversion),
+                    conversion,
+                    span,
+                    "none",
+                    "metric_label_mismatch",
+                )
+            # Reject when formula inputs are tagged with conflicting fiscal years.
+            years_in_text = set(re.findall(r"FY\s*(20\d{2})", text, flags=re.I))
+            if len(years_in_text) > 1:
+                return EvidenceMatch(
+                    False, None, False, False, False, None, None, "none", "period_mismatch"
+                )
+        return EvidenceMatch(
+            True,
+            float(value),
+            True,
+            True,
+            True,
+            None,
+            None,
+            "high" if structured else "medium",
+            "formula_inputs_bound",
+        )
+
+    hit = _find_number_span(text, float(value), unit=unit, metric_name=metric_name)
+    if hit is None:
+        return EvidenceMatch(
+            False, None, False, period_ok, False, None, None, "none", "number_not_found"
+        )
+    idx, found, conversion, span = hit
+    metric_ok = structured or _metric_alias_near(text, metric_name, idx)
+    if not metric_ok:
+        return EvidenceMatch(
+            False,
+            found,
+            False,
+            period_ok,
+            bool(conversion) or unit in {None, "billion_usd", "ratio"},
+            conversion,
+            span,
+            "none",
+            "metric_label_mismatch",
+        )
+
+    unit_ok = True
+    conf = "high" if structured else "medium"
+    if conversion is None and unit == "billion_usd" and abs(float(value)) > 1.5:
+        # Bare large integers without unit/caption cannot support a billion claim.
+        after = text.lower()[idx : idx + 40]
+        before = text.lower()[max(0, idx - 80) : idx]
+        if (
+            not structured
+            and "billion" not in after
+            and "million" not in after
+            and "million" not in before
+            and "in millions" not in before
+            and "billion" not in before
+        ):
+            if re.search(r"\b\d{4,}\b", span):
+                return EvidenceMatch(
+                    False,
+                    found,
+                    True,
+                    period_ok,
+                    False,
+                    None,
+                    span,
+                    "low",
+                    "unit_ambiguous",
+                )
+    if conversion:
+        unit_ok = True
+        conf = "high"
+
+    return EvidenceMatch(
+        True,
+        found,
+        True,
+        period_ok,
+        unit_ok,
+        conversion,
+        span,
+        conf,
+        "bound",
+    )
+
+
 def _page_from_citation(citation: str) -> int | None:
     match = re.search(r"#p(\d+)\b", citation or "", flags=re.IGNORECASE)
     if not match:
@@ -362,21 +723,44 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
 def _fund_refs_for_values(
     pool: list[EvidenceRef],
     values: list[float | None],
+    *,
+    entity: str | None = None,
+    metric_name: str | None = None,
+    unit: str | None = None,
+    period: str | None = None,
+    formula_inputs: dict[str, float] | None = None,
 ) -> list[EvidenceRef]:
-    """Return fundamentals evidence that actually contains the requested numbers."""
+    """Return fundamentals evidence that structurally matches the claim."""
     needed = [v for v in values if v is not None]
-    fund_refs = [
-        r
-        for r in pool
-        if r.evidence_id.startswith("ev_fund_")
-        and (
-            not needed
-            or any(_text_contains_number(r.text, v) for v in needed)
-        )
-    ]
-    if fund_refs:
-        return fund_refs[:1]
-    # Broader structured-source citations as last resort.
+    fund_refs = [r for r in pool if r.evidence_id.startswith("ev_fund_")]
+    if fund_refs and metric_name and entity and needed:
+        matched = [
+            r
+            for r in fund_refs
+            if match_numeric_evidence(
+                r,
+                entity=entity,
+                metric_name=metric_name,
+                value=float(needed[0]),
+                unit=unit,
+                period=period,
+                formula_inputs=formula_inputs,
+            ).matched
+        ]
+        if matched:
+            return matched[:1]
+        return []
+    if fund_refs and (
+        not needed or any(_text_contains_number(r.text, v) for r in fund_refs for v in needed)
+    ):
+        # Legacy fallback when metric context is unavailable.
+        usable = [
+            r
+            for r in fund_refs
+            if not needed or any(_text_contains_number(r.text, v) for v in needed)
+        ]
+        if usable:
+            return usable[:1]
     for r in pool:
         cite = r.citation or ""
         if not any(
@@ -395,6 +779,18 @@ def _fund_refs_for_values(
             "sample_db",
         }:
             continue
+        if metric_name and entity and needed:
+            if match_numeric_evidence(
+                r,
+                entity=entity,
+                metric_name=metric_name,
+                value=float(needed[0]),
+                unit=unit,
+                period=period,
+                formula_inputs=formula_inputs,
+            ).matched:
+                return [r]
+            continue
         if needed and not any(_text_contains_number(r.text, v) for v in needed):
             continue
         return [r]
@@ -406,19 +802,33 @@ def _prefer_refs_for_values(
     values: list[float | None],
     *,
     require_values: list[float | None] | None = None,
+    entity: str | None = None,
+    metric_name: str | None = None,
+    unit: str | None = None,
+    period: str | None = None,
+    formula_inputs: dict[str, float] | None = None,
 ) -> list[EvidenceRef]:
-    """Prefer page-anchored RAG that contains required inputs; else fundamentals text.
-
-    ``require_values`` (typically formula inputs) gates page preference so a ratio like
-    0.4463 cannot promote a RAG hit that only false-matches noise.
-    """
+    """Prefer page-anchored RAG that structurally matches; else fundamentals text."""
     gate = [v for v in (require_values if require_values is not None else values) if v is not None]
     scan = [v for v in values if v is not None]
     matched: list[EvidenceRef] = []
     for ref in pool:
         if ref.source_type not in {"rag", "document"} and "#p" not in (ref.citation or "").lower():
             continue
-        # Page hits must contain at least one gated input (or scan values when ungated).
+        if metric_name and entity:
+            probe_value = float((gate or scan)[0]) if (gate or scan) else float(values[0] or 0)
+            result = match_numeric_evidence(
+                ref,
+                entity=entity,
+                metric_name=metric_name,
+                value=probe_value if not formula_inputs else float(values[-1] or probe_value),
+                unit=unit,
+                period=period,
+                formula_inputs=formula_inputs,
+            )
+            if result.matched:
+                matched.append(ref)
+            continue
         probe = gate or scan
         if probe and any(_text_contains_number(ref.text, v) for v in probe):
             matched.append(ref)
@@ -426,7 +836,15 @@ def _prefer_refs_for_values(
         matched.sort(key=lambda r: (0 if r.page is not None else 1, r.evidence_id))
         return matched[:2]
 
-    return _fund_refs_for_values(pool, gate or scan)
+    return _fund_refs_for_values(
+        pool,
+        gate or scan,
+        entity=entity,
+        metric_name=metric_name,
+        unit=unit,
+        period=period,
+        formula_inputs=formula_inputs,
+    )
 
 
 def _verify_numeric(
@@ -435,33 +853,67 @@ def _verify_numeric(
     input_values: list[float | None],
     *,
     pool: list[EvidenceRef] | None = None,
+    formula_inputs: dict[str, float] | None = None,
 ) -> Claim:
     needed = [v for v in input_values if v is not None]
 
-    def _usable_from(candidates: list[EvidenceRef]) -> list[EvidenceRef]:
+    def _usable_from(candidates: list[EvidenceRef]) -> tuple[list[EvidenceRef], str]:
         usable: list[EvidenceRef] = []
+        last_reason = "number_not_found"
         for ref in candidates:
-            if needed and any(_text_contains_number(ref.text, v) for v in needed):
+            if claim.metric_name and isinstance(claim.value, (int, float)):
+                result = match_numeric_evidence(
+                    ref,
+                    entity=claim.entity,
+                    metric_name=str(claim.metric_name),
+                    value=float(claim.value),
+                    unit=claim.unit,
+                    period=claim.period,
+                    formula_inputs=formula_inputs,
+                )
+                if result.matched:
+                    usable.append(ref)
+                    last_reason = result.reason
+                else:
+                    last_reason = result.reason
+            elif needed and any(_text_contains_number(ref.text, v) for v in needed):
                 usable.append(ref)
-        return usable
+                last_reason = "legacy_number_match"
+        return usable, last_reason
 
-    usable = _usable_from(refs)
-    # If preferred (often RAG) candidates lack formula inputs, fall back to fundamentals.
+    usable, reason = _usable_from(refs)
     if not usable and pool is not None:
-        usable = _usable_from(_fund_refs_for_values(pool, input_values))
+        usable, reason = _usable_from(
+            _fund_refs_for_values(
+                pool,
+                input_values,
+                entity=claim.entity,
+                metric_name=claim.metric_name,
+                unit=claim.unit,
+                period=claim.period,
+                formula_inputs=formula_inputs,
+            )
+        )
     if not refs and not usable:
         claim.verification = "rejected"
-        claim.verify_reason = "No evidence text contains the metric inputs."
+        claim.verify_reason = f"No evidence text contains the metric inputs ({reason})."
         claim.evidence_refs = []
         return claim
     if not usable:
         claim.verification = "rejected"
-        claim.verify_reason = "Candidate evidence did not contain metric input numbers."
+        claim.verify_reason = f"Candidate evidence rejected: {reason}."
         claim.evidence_refs = []
         return claim
     claim.evidence_refs = usable
     claim.verification = "verified"
-    claim.verify_reason = "Metric value and inputs bound to evidence containing those numbers."
+    claim.verify_reason = (
+        f"Metric/period/unit-bound evidence ({reason})"
+        + (
+            f"; formula_inputs={sorted(formula_inputs)}"
+            if formula_inputs
+            else ""
+        )
+    )
     return claim
 
 
@@ -491,6 +943,11 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                     continue
                 input_map = FORMULA_INPUTS.get(metric_name) or {}
                 input_vals = [get_fundamental(market_data, src) for src in input_map.values()]
+                formula_inputs = {
+                    src: float(get_fundamental(market_data, src))
+                    for src in input_map.values()
+                    if get_fundamental(market_data, src) is not None
+                }
                 label = METRIC_LABELS.get(metric_name, metric_name)
                 statement = f"{company} {label} is {_fmt_pct(float(value))} for {period}."
                 claim = Claim(
@@ -507,8 +964,21 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                     pool,
                     input_vals + [float(value)],
                     require_values=input_vals,
+                    entity=company,
+                    metric_name=metric_name,
+                    unit="ratio",
+                    period=period,
+                    formula_inputs=formula_inputs or None,
                 )
-                claims.append(_verify_numeric(claim, refs, input_vals, pool=pool))
+                claims.append(
+                    _verify_numeric(
+                        claim,
+                        refs,
+                        input_vals,
+                        pool=pool,
+                        formula_inputs=formula_inputs or None,
+                    )
+                )
 
             # Absolute fundamentals as numeric claims (for ledger + consistency)
             for key, label in (
@@ -531,7 +1001,15 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                     period=period,
                     metric_name=key,
                 )
-                refs = _prefer_refs_for_values(pool, [float(raw)], require_values=[float(raw)])
+                refs = _prefer_refs_for_values(
+                    pool,
+                    [float(raw)],
+                    require_values=[float(raw)],
+                    entity=company,
+                    metric_name=key,
+                    unit="billion_usd",
+                    period=period,
+                )
                 claims.append(_verify_numeric(claim, refs, [float(raw)], pool=pool))
 
             # Market snapshot numerics only when structured fundamentals exist.
