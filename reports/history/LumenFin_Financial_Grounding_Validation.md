@@ -36,5 +36,5 @@ No mock LLM. Evaluators unchanged.
 
 ## Artifacts
 
-- `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_financial_grounding\validation.json`
-- `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_financial_grounding\finrun_nvidia_10k.json`
+- `../finagentbench-demo/outputs/lumenfin_financial_grounding/validation.json`
+- `../finagentbench-demo/outputs/lumenfin_financial_grounding/finrun_nvidia_10k.json`

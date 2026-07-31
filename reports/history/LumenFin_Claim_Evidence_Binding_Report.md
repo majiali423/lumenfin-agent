@@ -45,4 +45,4 @@ Evaluators unchanged. Citations are structural (no prompt-forced citation genera
 
 ## Artifacts
 
-- `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_claim_binding\validation.json`
+- `../finagentbench-demo/outputs/lumenfin_claim_binding/validation.json`

@@ -238,7 +238,7 @@ These anchors come from hybrid RAG hits and are written deterministically (not p
 
 ## Appendix — Raw artifacts
 
-- Directory: `C:\a_project\Projects\lumenfin-agent\outputs\e2e_production_audit`
+- Directory: `outputs\e2e_production_audit`
 - RAG raw: `raw/module2_rag.json`
 - Agent raw: `raw/module3_agents.json`
 - Stress raw: `raw/module5_stress.json`

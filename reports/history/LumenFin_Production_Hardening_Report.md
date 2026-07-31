@@ -122,5 +122,5 @@ Hardening focus remains: long-doc claim coverage, multi-entity claim parity, and
 
 ## Artifacts
 
-- `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_production_hardening\validation.json`
-- FinRuns: `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_production_hardening\finrun`
+- `../finagentbench-demo/outputs\lumenfin_production_hardening\validation.json`
+- FinRuns: `../finagentbench-demo/outputs\lumenfin_production_hardening\finrun`

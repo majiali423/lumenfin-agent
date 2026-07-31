@@ -103,7 +103,7 @@ class ReportingDataSourcesTestCase(unittest.TestCase):
         self.assertIn("data_sources", manifest)
         self.assertEqual(manifest["data_sources"]["structured"], "sample_db")
 
-    def test_humanize_citation_clerk_labels(self) -> None:
+    def test_humanize_citation_analyst_labels(self) -> None:
         self.assertEqual(humanize_citation("msft_10k.pdf#p12"), "msft_10k.pdf p.12")
         self.assertIn("SEC companyfacts", humanize_citation("lumenfin:sec_companyfacts:Apple:fy2024"))
         self.assertIn("Risk screening", humanize_citation("lumenfin:risk_model:Apple"))

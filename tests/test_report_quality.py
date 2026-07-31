@@ -13,7 +13,7 @@ if str(SRC) not in sys.path:
 from lumenfin import LumenFinAgentSystem
 from lumenfin.llm import LocalFallbackLLMClient
 from lumenfin.reporting import (
-    build_clerk_executive_summary,
+    build_analyst_executive_summary,
     filter_claims_for_brief,
     format_peer_metric_matrix,
     format_period_alignment_notice,
@@ -108,7 +108,7 @@ class ReportQualityHelpersTestCase(unittest.TestCase):
         self.assertIn("n/a", text)
         self.assertIn("asymmetric", text)
         self.assertIn("FY-label research comps", text)
-        summary = build_clerk_executive_summary(state, [], brief=True)
+        summary = build_analyst_executive_summary(state, [], brief=True)
         self.assertIn("Comparison capsule", summary)
         self.assertIn("Operating Margin", summary)
         self.assertNotIn("Apple:", summary)  # capsule-only; no per-company claim dump

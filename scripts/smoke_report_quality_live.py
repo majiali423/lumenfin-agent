@@ -1,6 +1,6 @@
 """Live e2e report-quality smoke (DeepSeek).
 
-Asserts clerk-facing quality gates on brief compare output.
+Asserts analyst-facing quality gates on brief compare output.
 Does not print secrets. Writes SUMMARY under outputs/.
 """
 from __future__ import annotations

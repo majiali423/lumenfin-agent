@@ -127,7 +127,7 @@ def infer_fiscal_year_from_documents(
     ``upload_text`` when a year is found.
     """
     docs = document_contexts or []
-    # Filename is the strongest clerk-facing signal for derived fixtures
+    # Filename is the strongest analyst-facing signal for derived fixtures
     # (e.g. msft_fy2024_10k_long_excerpt.pdf).
     for doc in docs:
         for key in ("filename", "source", "path", "citation"):
@@ -153,7 +153,7 @@ def infer_fiscal_year_from_documents(
 
 
 # Typical fiscal year-end month/day for common issuers when filing extract has no period_end.
-# These are convention hints for clerk disclosure — not a substitute for filing metadata.
+# These are convention hints for analyst disclosure — not a substitute for filing metadata.
 _ISSUER_FY_END_HINTS: dict[str, tuple[int, int]] = {
     "Apple": (9, 30),
     "Microsoft": (6, 30),
@@ -190,7 +190,7 @@ def annotate_upload_period_meta(
     """Fill fiscal_year / period_alignment for document_extracted payloads.
 
     Priority: existing meta fiscal_year → filename/text inference → query FY
-    (tagged ``assumed_from_query`` so clerks know it was not filing-labeled).
+    (tagged ``assumed_from_query`` so analysts know it was not filing-labeled).
     When period_end is missing, may attach an issuer-convention hint date.
     """
     out = dict(meta or {})
@@ -279,7 +279,7 @@ def used_fiscal_year_for_company(state: dict[str, Any] | None, company: str) -> 
 
 
 def period_end_for_company(state: dict[str, Any] | None, company: str) -> str | None:
-    """Return a clerk-facing period-end date string (YYYY-MM-DD) when metadata has one."""
+    """Return an analyst-facing period-end date string (YYYY-MM-DD) when metadata has one."""
     payload = ((state or {}).get("retrieved_docs") or {}).get(company) or {}
     meta = payload.get("fundamentals_meta") or {}
     for key in ("period_end", "period"):
@@ -576,23 +576,23 @@ def filter_claims_for_brief(claims: list[Any]) -> list[Any]:
     return kept
 
 
-def build_clerk_executive_summary(
+def build_analyst_executive_summary(
     state: dict[str, Any] | None,
     verified_claims: list[Any],
     *,
     brief: bool = False,
 ) -> str:
-    """Clerk-oriented summary: compare capsule first; single-issuer falls back to numeric claims."""
+    """Analyst-facing summary: compare capsule first; single-issuer falls back to numeric claims."""
     state = state or {}
     companies = [str(c) for c in (state.get("companies") or [])]
     parts: list[str] = []
     capsule = format_comparison_capsule(state)
-    # Multi-company: capsule alone is the clerk conclusion (no claim dump).
+    # Multi-company: capsule alone is the analyst conclusion (no claim dump).
     if capsule:
         parts.extend(line for line in capsule if line.strip())
         return "\n".join(parts)
 
-    # Clerk summary: numeric highlights only (risk/thesis live in dedicated sections).
+    # Analyst summary: numeric highlights only (risk/thesis live in dedicated sections).
     claims = [
         c
         for c in (filter_claims_for_brief(verified_claims) if brief else list(verified_claims))
@@ -714,7 +714,7 @@ def write_metrics_csv(path: Path, result: dict[str, Any] | None) -> Path:
 
 
 def humanize_citation(citation: str) -> str:
-    """Turn internal citation URIs into clerk-readable source labels."""
+    """Turn internal citation URIs into analyst-readable source labels."""
     cite = (citation or "").strip()
     if not cite:
         return ""

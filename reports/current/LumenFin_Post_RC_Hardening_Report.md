@@ -15,7 +15,7 @@ or `min_score` was added/relaxed.
 | Request state could cross-contaminate | `LumenFinAnalysisService` cached one `LumenFinAgentSystem`; `run()` clears shared reasoning memory while graph/checkpointer/audit are mutable | `_system_for()` now creates a request-scoped system; provider/RAG infrastructure remains shared behind an initialization lock; graph constructor accepts shared RAG resources | Concurrent NVIDIA/Apple test asserts isolated systems, memories, checkpoints, entities, reports, verified claims, evidence and audit traces |
 | Empty evaluation could pass | `unit_currency_consistency` and `temporal_consistency` returned 100 when `checked == 0`; empty evidence coverage had no shared fail-closed path | Reused `empty_check_result()` for unit/currency, temporal and evidence coverage when `require_checkable_metrics=true`; numeric and evidence consistency remain fail-closed | New empty numeric/evidence/unit/temporal tests; FinAgentBench full suite PASS |
 | Mutation detection was documented but not enforced | Four mutations existed in an ad-hoc correctness script; CI regression suite did not require all four | Added deterministic `benchmarks/mutations/suite.json`, `run_mutation_suite.py`, unit test, CI step and report artifact upload | wrong number/entity and missing citation/risk all detected; detection rate 1.0 |
-| Cross-repository runs depended on one workstation | Historical scripts embedded `C:\a_project\...`; no portable validation entry; LumenFin CI did not invoke FinAgentBench | Added sibling/env repository discovery; removed Python hardcoded workspace paths; added offline `validate_cross_repo.py`; LumenFin CI checks out/pins the benchmark branch and runs the gate | Portable gate exported sample state with current LumenFin exporter, FinAgentBench gate PASS, mutation gate PASS |
+| Cross-repository runs depended on one workstation | Historical scripts embedded `<workstation-absolute-path>/...`; no portable validation entry; LumenFin CI did not invoke FinAgentBench | Added sibling/env repository discovery; removed Python hardcoded workspace paths; added offline `validate_cross_repo.py`; LumenFin CI checks out/pins the benchmark branch and runs the gate | Portable gate exported sample state with current LumenFin exporter, FinAgentBench gate PASS, mutation gate PASS |
 | Dependency resolution was floating | CI/Docker installed unconstrained direct dependencies; `requirements.txt` differed from `pyproject.toml` | Added pip-compiled `requirements-lock.txt`; compatibility requirements file delegates to lock; Docker/CI install lock then package `--no-deps` | Lock generated from `pyproject.toml`; regression and live RC completed on locked project environment |
 
 ### Concurrency boundary after the change
@@ -129,13 +129,13 @@ cross-repository release tags.
 ```powershell
 # Both repositories cloned as siblings:
 cd finagentbench-demo
-python scripts\validate_cross_repo.py
+python scripts/validate_cross_repo.py
 ```
 
 Alternative roots:
 
 ```powershell
-$env:LUMENFIN_ROOT = "path\to\lumenfin-agent"
-$env:FINAGENTBENCH_DIR = "path\to\finagentbench-demo"
-python scripts\validate_cross_repo.py
+$env:LUMENFIN_ROOT = "path/to/lumenfin-agent"
+$env:FINAGENTBENCH_DIR = "path/to/finagentbench-demo"
+python scripts/validate_cross_repo.py
 ```

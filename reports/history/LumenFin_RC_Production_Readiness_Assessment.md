@@ -53,6 +53,6 @@ Generated: 2026-07-25T12:23:40.064647+00:00
 
 ## Related artifacts
 
-- Final reliability: `C:\a_project\Projects\lumenfin-agent\LumenFin_RC_Final_Reliability_Report.md`
-- Architecture index: `C:\a_project\Projects\lumenfin-agent\docs\ARCHITECTURE_INDEX.md`
-- RC validation JSON: `C:\a_project\Projects\finagentbench-demo\outputs\lumenfin_rc_validation\validation.json`
+- Final reliability: `LumenFin_RC_Final_Reliability_Report.md`
+- Architecture index: `docs/ARCHITECTURE_INDEX.md`
+- RC validation JSON: `../finagentbench-demo/outputs/lumenfin_rc_validation/validation.json`

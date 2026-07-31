@@ -23,7 +23,7 @@ from .rag.dedupe import dedupe_cross_company_rag_hits
 from .rag.telemetry import summarize_rag_telemetry
 from .repair_policies import RETRIEVAL_WORTHY_CODES
 from .reporting import (
-    build_clerk_executive_summary,
+    build_analyst_executive_summary,
     effective_report_output_format,
     filter_claims_for_brief,
     format_comparison_capsule,
@@ -1454,7 +1454,7 @@ class AgentRuntime:
             return hits[0].primary_citation
 
         def build_grounded_summary() -> str:
-            return build_clerk_executive_summary(
+            return build_analyst_executive_summary(
                 state,
                 verified_claims,
                 brief=effective_report_output_format(state) != "research_report",
@@ -1470,7 +1470,7 @@ class AgentRuntime:
         include_summary_and_ledger = not is_table
         ledger_claims = filter_claims_for_brief(verified_claims) if not is_full else verified_claims
 
-        # ── Report Construction (clerk-first; audit details in appendices) ──
+        # ── Report Construction (analyst-first; audit details in appendices) ──
         S("# LumenFin Diligence Report")
         S("")
         if is_full:
@@ -1712,7 +1712,7 @@ class AgentRuntime:
                 add_row("operating_margin", "Operating Margin", ">20%")
                 add_row("r_and_d_intensity", "R&D Intensity", "5-15%")
                 add_row("pe_ratio", "P/E (TTM, live)", "—")
-                # Absolute fundamentals (once) for clerk context
+                # Absolute fundamentals (once) for analyst context
                 market = ((state.get("retrieved_docs") or {}).get(company) or {}).get("market_data") or {}
                 abs_bits = []
                 for key, label in (
