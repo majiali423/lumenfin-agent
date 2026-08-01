@@ -231,12 +231,15 @@ def scenario_rag(root: Path) -> dict[str, int]:
     rag_root = root / "rag"
     rag_root.mkdir(parents=True, exist_ok=True)
     config = build_test_config(rag_root)
-    repo = RagDocumentRepository(config.database_url, db_path=config.db_path)
+    epoch = [100]
+    repo = RagDocumentRepository(
+        config.database_url, db_path=config.db_path, epoch_fn=lambda: epoch[0]
+    )
     store = OfflineVectorStore(
         pause_tenants={"tenant-dup"},
         fail_after_write_tenants={"tenant-fail"},
     )
-    indexer = DocumentIndexer(rag_store=store, repository=repo)
+    indexer = DocumentIndexer(rag_store=store, repository=repo, lease_seconds=10)
     document = rag_root / "notes.md"
     document.write_text(
         "# Apple FY2025\n\nApple revenue was 100 billion. Supply chain risk remains elevated.",
@@ -286,6 +289,64 @@ def scenario_rag(root: Path) -> dict[str, int]:
     assert orphan_vector_count == 0
     assert orphan_chunk_count == 0
 
+    lease_document = rag_root / "lease-recovery.md"
+    lease_document.write_text(
+        "# Lease recovery\n\nOnly the current fenced owner may publish this document.",
+        encoding="utf-8",
+    )
+    lease_pending = indexer.enqueue_file(lease_document, tenant_id="tenant-lease")
+    claimed_a, owns_a = repo.claim_pending_document(
+        document_id=lease_pending["document_id"], tenant_id="tenant-lease",
+        index_owner="owner-a", lease_seconds=10,
+    )
+    assert owns_a
+    epoch[0] = 111
+    claimed_b, owns_b = repo.claim_pending_document(
+        document_id=lease_pending["document_id"], tenant_id="tenant-lease",
+        index_owner="owner-b", lease_seconds=10,
+    )
+    stale_claim_recovered_count = int(owns_b and claimed_b["index_attempt"] == 2)
+    stale_finalize = repo.finalize_index_ready(
+        document_id=lease_pending["document_id"], tenant_id="tenant-lease",
+        index_owner="owner-a", index_attempt=1, filename=lease_pending["filename"],
+        content_hash=lease_pending["content_hash"], contexts=[], chunk_count=0,
+        source_path=str(lease_document),
+    )
+    lease_lost_finalize_rejected_count = int(not stale_finalize)
+    lease_chunk = {
+        "chunk_id": "lease-recovery-chunk", "document_id": "lease-recovery-context",
+        "filename": lease_document.name, "page": 1, "text": "new owner lease data",
+        "companies": [], "chunk_type": "narrative", "char_count": 20,
+    }
+    store.index_chunks(
+        [lease_chunk], tenant_id="tenant-lease",
+        source_document_id=lease_pending["document_id"],
+        content_hash=lease_pending["content_hash"], replace_existing=True,
+    )
+    repo.replace_chunks(
+        source_document_id=lease_pending["document_id"], tenant_id="tenant-lease",
+        chunks=[lease_chunk], content_hash=lease_pending["content_hash"],
+    )
+    stale_cleanup = indexer._fail(
+        claimed_a, "stale worker failure", index_owner="owner-a", index_attempt=1
+    )
+    lease_lost_cleanup_rejected_count = int(
+        stale_cleanup["error"] == "lease_lost"
+        and bool(store.rows_for("tenant-lease"))
+        and bool(repo.list_chunks(tenant_id="tenant-lease"))
+    )
+    finalized_b = repo.finalize_index_ready(
+        document_id=lease_pending["document_id"], tenant_id="tenant-lease",
+        index_owner="owner-b", index_attempt=2, filename=lease_pending["filename"],
+        content_hash=lease_pending["content_hash"], contexts=[], chunk_count=1,
+        source_path=str(lease_document),
+    )
+    final_ready_after_recovery_count = int(finalized_b)
+    assert stale_claim_recovered_count == 1
+    assert lease_lost_finalize_rejected_count >= 1
+    assert lease_lost_cleanup_rejected_count >= 1
+    assert final_ready_after_recovery_count == 1
+
     with Session(repo.engine) as session:
         document_count = int(session.scalar(select(func.count()).select_from(RagDocument)) or 0)
         chunk_count = int(session.scalar(select(func.count()).select_from(RagChunk)) or 0)
@@ -295,7 +356,7 @@ def scenario_rag(root: Path) -> dict[str, int]:
             )
             or 0
         )
-    assert document_count == 4
+    assert document_count == 5
     assert chunk_count > 0
     assert failed == 1
     repo.engine.dispose()
@@ -307,6 +368,10 @@ def scenario_rag(root: Path) -> dict[str, int]:
         "failed_document_count": failed,
         "orphan_vector_count": orphan_vector_count,
         "orphan_chunk_count": orphan_chunk_count,
+        "stale_claim_recovered_count": stale_claim_recovered_count,
+        "lease_lost_finalize_rejected_count": lease_lost_finalize_rejected_count,
+        "lease_lost_cleanup_rejected_count": lease_lost_cleanup_rejected_count,
+        "final_ready_after_recovery_count": final_ready_after_recovery_count,
     }
 
 
