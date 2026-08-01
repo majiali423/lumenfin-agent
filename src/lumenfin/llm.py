@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,6 +84,13 @@ class BaseLLMClient:
     def _add_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
         self._usage_totals["prompt_tokens"] += prompt_tokens
         self._usage_totals["completion_tokens"] += completion_tokens
+
+    def fork_usage(self) -> "BaseLLMClient":
+        """Share immutable provider configuration, but not mutable usage state."""
+        forked = copy(self)
+        forked._usage_totals = {"prompt_tokens": 0, "completion_tokens": 0}
+        forked._usage_mark = {"prompt_tokens": 0, "completion_tokens": 0}
+        return forked
 
 
 class DeepSeekChatClient(BaseLLMClient):
@@ -238,6 +246,16 @@ class ResilientLLMClient(BaseLLMClient):
             raise RuntimeError("No primary LLM configured and local fallback is disabled.")
         return self.fallback
 
+    def fork_usage(self) -> "ResilientLLMClient":
+        forked = ResilientLLMClient(
+            primary=fork_llm_client(self.primary) if self.primary is not None else None,
+            fallback=fork_llm_client(self.fallback),
+            allow_fallback=self.allow_fallback,
+        )
+        forked.last_error = None
+        forked.used_fallback = self.primary is None and self.allow_fallback
+        return forked
+
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 600) -> str:
         if self.primary is None:
             if not self.allow_fallback:
@@ -294,3 +312,18 @@ def build_llm_client(
         fallback=LocalFallbackLLMClient(),
         allow_fallback=allow_local_fallback,
     )
+
+
+def fork_llm_client(client: BaseLLMClient | None) -> BaseLLMClient | None:
+    """Create a run-local usage tracker while reusing provider configuration."""
+    if client is None:
+        return None
+    fork = getattr(client, "fork_usage", None)
+    if callable(fork):
+        return fork()
+    forked = copy(client)
+    if hasattr(forked, "_usage_totals"):
+        forked._usage_totals = {"prompt_tokens": 0, "completion_tokens": 0}
+    if hasattr(forked, "_usage_mark"):
+        forked._usage_mark = {"prompt_tokens": 0, "completion_tokens": 0}
+    return forked

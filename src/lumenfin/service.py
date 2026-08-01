@@ -10,7 +10,7 @@ from .database import JobRepository, RagDocumentRepository
 from .data_ingest import structured_metrics_to_document_contexts
 from .document_ingest import parse_upload_documents
 from .graph import LumenFinAgentSystem
-from .llm import BaseLLMClient
+from .llm import BaseLLMClient, fork_llm_client
 from .market_data import MarketDataClient
 from .providers.registry import ProviderRegistry, build_provider_registry
 from .queueing import RedisQueueManager
@@ -55,7 +55,9 @@ class LumenFinAnalysisService:
         return self._providers
 
     def _build_system(self) -> LumenFinAgentSystem:
-        llm_client = self._llm_client or self.providers.llm.client
+        provider_llm_client = self._llm_client or self.providers.llm.client
+        llm_client = fork_llm_client(provider_llm_client)
+        assert llm_client is not None
         market_data_client = self._market_data_client or self.providers.market_data.client
         rag_store, document_indexer = self._rag_resources()
         return LumenFinAgentSystem(
