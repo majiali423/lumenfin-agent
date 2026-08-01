@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Event, Thread
 from unittest.mock import patch
 from uuid import uuid4
 
 import fitz
+import httpx
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +40,88 @@ def build_offline_system(config=None) -> LumenFinAgentSystem:
 
 
 class OfflineSystemTestCase(unittest.TestCase):
+    def test_upload_analysis_does_not_block_lightweight_request(self) -> None:
+        tmp_root = ROOT / "test_artifacts" / f"api-upload-concurrency-{uuid4().hex[:8]}"
+        app = create_app(
+            build_test_config(tmp_root),
+            llm_client=LocalFallbackLLMClient(),
+            market_data_client=FakeMarketDataClient(),
+        )
+        analyze_entered = Event()
+        release_analyze = Event()
+        lightweight_done = Event()
+        observed = {"lightweight_before_release": False}
+        loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
+        lightweight_gate_holder: dict[str, asyncio.Event] = {}
+
+        def blocked_analyze(_service, *args, **kwargs):
+            analyze_entered.set()
+            self.assertTrue(release_analyze.wait(timeout=10))
+            thread_id = kwargs.get("thread_id") or "upload-concurrency"
+            result = {
+                "thread_id": thread_id,
+                "workflow_status": "completed",
+                "final_report": "Upload analysis completed.",
+                "audit_log": [],
+                "run_telemetry": {},
+                "llm_backend": "local-fallback",
+            }
+            return {
+                "thread_id": thread_id,
+                "query": kwargs.get("query", ""),
+                "llm_backend": "local-fallback",
+                "workflow_status": "completed",
+                "checkpoint": None,
+                "provider_health": {},
+                "result": result,
+                "artifacts": {},
+            }
+
+        def controller() -> None:
+            self.assertTrue(analyze_entered.wait(timeout=10))
+            loop_holder["loop"].call_soon_threadsafe(lightweight_gate_holder["gate"].set)
+            observed["lightweight_before_release"] = lightweight_done.wait(timeout=2)
+            release_analyze.set()
+
+        async def scenario() -> tuple[httpx.Response, httpx.Response]:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                loop_holder["loop"] = asyncio.get_running_loop()
+                lightweight_gate = asyncio.Event()
+                lightweight_gate_holder["gate"] = lightweight_gate
+
+                async def lightweight_request() -> httpx.Response:
+                    await lightweight_gate.wait()
+                    response = await client.get("/api/v1/config")
+                    lightweight_done.set()
+                    return response
+
+                lightweight_task = asyncio.create_task(lightweight_request())
+                upload_task = asyncio.create_task(
+                    client.post(
+                        "/api/v1/analyze-upload",
+                        data={
+                            "query": "Analyze Apple FY2025.",
+                            "thread_id": "upload-concurrency",
+                            "export_artifacts": "false",
+                        },
+                        files={"files": ("notes.txt", b"Apple revenue FY2025 was 100 billion.", "text/plain")},
+                    )
+                )
+                lightweight = await lightweight_task
+                upload = await upload_task
+                return upload, lightweight
+
+        controller_thread = Thread(target=controller, daemon=True)
+        controller_thread.start()
+        with patch.object(LumenFinAnalysisService, "analyze", blocked_analyze):
+            upload_response, lightweight_response = asyncio.run(scenario())
+        controller_thread.join(timeout=10)
+
+        self.assertTrue(observed["lightweight_before_release"])
+        self.assertEqual(lightweight_response.status_code, 200)
+        self.assertEqual(upload_response.status_code, 200)
+
     def test_api_returns_409_for_checkpoint_conflicts(self) -> None:
         tmp_root = ROOT / "test_artifacts" / f"api-conflict-{uuid4().hex[:8]}"
         app = create_app(
