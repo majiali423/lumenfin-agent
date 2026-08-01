@@ -17,6 +17,7 @@ from lumenfin.tools import (
     has_computable_fundamentals,
     retrieve_company_payload,
 )
+from lumenfin.documents import extract_metric_hint_meta
 
 
 def _doc_meta(value: float, *, period: str | None = None) -> dict:
@@ -38,6 +39,24 @@ def _doc_meta(value: float, *, period: str | None = None) -> dict:
 
 
 class FinancialGroundingMergeTests(unittest.TestCase):
+    def test_later_metric_period_does_not_bind_to_revenue(self) -> None:
+        meta = extract_metric_hint_meta(
+            "Revenue was 245.0 billion USD. Operating income for FY2023 was 100.0 billion USD.",
+            metric="revenue",
+        )
+        self.assertIsNotNone(meta)
+        self.assertIsNone(meta.get("period"))
+        self.assertIsNone(meta.get("period_source"))
+
+    def test_local_metric_period_binds_to_revenue(self) -> None:
+        meta = extract_metric_hint_meta(
+            "Revenue for FY2024 was 245.0 billion USD.", metric="revenue"
+        )
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta.get("period"), "FY2024")
+        self.assertEqual(meta.get("period_source"), "document_text")
+        self.assertEqual(meta.get("period_alignment"), "exact")
+
     def test_document_wins_overlap_live_fills_gaps(self) -> None:
         merged, filled = _merge_document_market_data_with_live(
             {"revenue": 10.0},

@@ -215,6 +215,52 @@ class ClaimBindingTests(unittest.TestCase):
 
 
 class PeriodProvenanceBindingTests(unittest.TestCase):
+    def test_factual_period_requires_explicit_alignment(self) -> None:
+        for source, alignment in (("provider_record", None), ("document_text", "")):
+            with self.subTest(source=source, alignment=alignment):
+                ref = EvidenceRef(
+                    evidence_id=f"alignment-{source}", entity="Microsoft",
+                    citation="provider://record/1", source_type="sec_companyfacts",
+                    text="Microsoft revenue was 245.122 billion USD.", period="FY2024",
+                    period_source=source, period_alignment=alignment,
+                    source_record_id="provider:record:1", metric_name="revenue",
+                    value=245.122, unit="billion_usd", confidence="high",
+                )
+                result = match_numeric_evidence(
+                    ref, entity="Microsoft", metric_name="revenue", value=245.122,
+                    unit="billion_usd", period="FY2024",
+                )
+                self.assertFalse(result.matched)
+
+    def test_structured_query_period_source_is_rejected(self) -> None:
+        ref = EvidenceRef(
+            evidence_id="structured-query-period", entity="Microsoft",
+            citation="provider://record/1", source_type="sec_companyfacts",
+            text="Microsoft revenue was 245.122 billion USD.", period="FY2024",
+            period_source="query", period_alignment="exact",
+            source_record_id="provider:record:1", metric_name="revenue",
+            value=245.122, unit="billion_usd", confidence="high",
+        )
+        result = match_numeric_evidence(
+            ref, entity="Microsoft", metric_name="revenue", value=245.122,
+            unit="billion_usd", period="FY2024",
+        )
+        self.assertFalse(result.matched)
+
+    def test_source_document_query_period_does_not_verify(self) -> None:
+        state = {"retrieved_docs": {"Microsoft": {"source_documents": [{
+            "filename": "microsoft_report.pdf", "source_type": "document",
+            "text": "Revenue was 245.122 billion USD.", "period": "FY2024",
+            "period_source": "query", "period_alignment": "exact",
+            "source_record_id": "document:1",
+        }]}}}
+        ref = next(r for r in _collect_evidence_pool(state, "Microsoft") if r.evidence_id.startswith("ev_doc_"))
+        result = match_numeric_evidence(
+            ref, entity="Microsoft", metric_name="revenue", value=245.122,
+            unit="billion_usd", period="FY2024",
+        )
+        self.assertFalse(result.matched)
+
     def test_missing_per_metric_provenance_is_not_high_or_period_bound(self) -> None:
         state = {"retrieved_docs": {"Microsoft": {
             "structured_source": "sec_companyfacts",
