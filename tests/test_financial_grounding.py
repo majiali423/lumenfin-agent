@@ -191,6 +191,29 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
         self.assertEqual(meta.get("fiscal_year_source"), "query")
         self.assertEqual(meta.get("period_alignment"), "assumed_from_query")
         self.assertNotEqual(meta.get("period_end"), "2024-06-30")
+        for field in ("revenue", "operating_income", "r_and_d"):
+            provenance = payload["fundamental_provenance"][field]
+            self.assertIsNone(provenance.get("period"))
+            self.assertIsNone(provenance.get("period_source"))
+
+    def test_filename_period_is_only_a_hint_for_unlabeled_metric_rows(self) -> None:
+        docs = [{
+            "detected_companies": ["Microsoft"],
+            "filename": "microsoft_fy2024_report.pdf",
+            "metric_hints": {"revenue": 245.122, "operating_income": 109.433, "r_and_d": 29.5},
+            "metric_hint_meta": {
+                "revenue": _doc_meta(245.122),
+                "operating_income": _doc_meta(109.433),
+                "r_and_d": _doc_meta(29.5),
+            },
+            "excerpt": "unlabeled table", "text": "unlabeled table",
+        }]
+        payload = retrieve_company_payload(
+            "Microsoft", document_contexts=docs, allow_sample_data=False
+        )
+        for provenance in payload["fundamental_provenance"].values():
+            self.assertIsNone(provenance.get("period"))
+            self.assertIsNone(provenance.get("period_source"))
 
     def test_prefer_uploaded_only_blocks_partial_gap_fill(self) -> None:
         docs = [

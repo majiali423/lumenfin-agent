@@ -12,11 +12,16 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.claims import (
+    EvidenceRef,
+    _collect_evidence_pool,
     _number_variants,
+    _period_identities_compatible,
     _text_contains_number,
     binding_summary,
     build_claims,
     filter_verified,
+    match_numeric_evidence,
+    parse_period_identity,
 )
 
 
@@ -189,6 +194,72 @@ class ClaimBindingTests(unittest.TestCase):
         self.assertEqual(by_metric["r_and_d_intensity"].verification, "verified")
         inv = [c for c in claims if c.claim_type == "investment_conclusion"]
         self.assertEqual(inv[0].verification, "verified")
+
+
+class PeriodProvenanceBindingTests(unittest.TestCase):
+    def test_missing_per_metric_provenance_is_not_high_or_period_bound(self) -> None:
+        state = {"retrieved_docs": {"Microsoft": {
+            "structured_source": "sec_companyfacts",
+            "market_data": {"revenue": 245.122},
+            "fundamentals_meta": {"fiscal_year": 2024},
+            "fundamental_provenance": {},
+        }}}
+        ref = next(r for r in _collect_evidence_pool(state, "Microsoft") if r.metric_name == "revenue")
+        self.assertIsNone(ref.confidence)
+        self.assertIsNone(ref.period)
+        result = match_numeric_evidence(ref, entity="Microsoft", metric_name="revenue",
+                                        value=245.122, unit="billion_usd", period="FY2024")
+        self.assertFalse(result.matched)
+
+    def test_multi_period_text_binds_each_target_value_locally(self) -> None:
+        ref = EvidenceRef(evidence_id="multi", entity="Microsoft", citation="report.pdf#p1",
+                          source_type="rag", text=("FY2023 revenue was 211.9 billion USD. "
+                                                   "FY2024 revenue was 245.1 billion USD."))
+        for value, period in ((211.9, "FY2023"), (245.1, "FY2024")):
+            with self.subTest(period=period):
+                result = match_numeric_evidence(ref, entity="Microsoft", metric_name="revenue",
+                                                value=value, unit="billion_usd", period=period)
+                self.assertTrue(result.matched, result.reason)
+
+    def test_target_value_does_not_borrow_period_from_other_metric(self) -> None:
+        ref = EvidenceRef(evidence_id="local-conflict", entity="Microsoft",
+                          citation="report.pdf#p1", source_type="rag",
+                          text=("FY2023 revenue was 245.1 billion USD. "
+                                "FY2024 operating income was 109.4 billion USD."))
+        result = match_numeric_evidence(ref, entity="Microsoft", metric_name="revenue",
+                                        value=245.1, unit="billion_usd", period="FY2024")
+        self.assertFalse(result.matched)
+        self.assertEqual(result.reason, "period_mismatch")
+
+    def test_formula_uses_each_input_local_period_when_metadata_is_none(self) -> None:
+        ref = EvidenceRef(evidence_id="formula-local", entity="Microsoft",
+                          citation="report.pdf#p1", source_type="rag", period=None,
+                          text=("Operating income was 109.433 billion USD for FY2024. "
+                                "Revenue was 245.122 billion USD for FY2024."))
+        result = match_numeric_evidence(
+            ref, entity="Microsoft", metric_name="operating_margin", value=109.433 / 245.122,
+            unit="ratio", period="FY2024",
+            formula_inputs={"operating_income": 109.433, "revenue": 245.122})
+        self.assertTrue(result.matched, result.reason)
+
+    def test_formula_rejects_an_input_without_period(self) -> None:
+        ref = EvidenceRef(evidence_id="formula-unknown", entity="Microsoft",
+                          citation="report.pdf#p1", source_type="rag",
+                          text=("Operating income was 109.433 billion USD for FY2024. "
+                                "Revenue was 245.122 billion USD."))
+        result = match_numeric_evidence(
+            ref, entity="Microsoft", metric_name="operating_margin", value=109.433 / 245.122,
+            unit="ratio", period="FY2024",
+            formula_inputs={"operating_income": 109.433, "revenue": 245.122})
+        self.assertFalse(result.matched)
+        self.assertEqual(result.reason, "formula_input_period_unknown")
+
+    def test_period_identity_comparison_is_strict(self) -> None:
+        for left, right in (("2024-04-01", "2024-06-30"),
+                            ("Q2 2024", "2024-06-30"), ("FY2024", "2024")):
+            with self.subTest(left=left, right=right):
+                self.assertFalse(_period_identities_compatible(
+                    parse_period_identity(left), parse_period_identity(right)))
 
 
 if __name__ == "__main__":

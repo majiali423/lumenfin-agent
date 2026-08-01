@@ -1611,5 +1611,50 @@ class Phase2PeriodIdentityTestCase(unittest.TestCase):
         self.assertEqual(match.reason, "confidence_missing")
 
 
+class Phase23PeriodProvenanceClosingTestCase(unittest.TestCase):
+    @staticmethod
+    def _state(*, provenance: dict) -> dict:
+        return {
+            "companies": ["Microsoft"],
+            "financial_metrics": {"Microsoft": {"operating_margin": 109.433 / 245.122}},
+            "retrieved_docs": {"Microsoft": {
+                "structured_source": "document_extracted",
+                "market_data": {"revenue": 245.122, "operating_income": 109.433, "r_and_d": 29.5},
+                "fundamentals_meta": {
+                    "fiscal_year": 2024,
+                    "fiscal_year_source": "query",
+                    "period_alignment": "assumed_from_query",
+                },
+                "fundamental_provenance": provenance,
+                "supply_chain": {"risk_level": "unknown", "signals": []},
+                "source_documents": [],
+            }},
+            "rag_evidence": {}, "risk_scores": {}, "market_snapshots": {},
+        }
+
+    def test_query_assumed_period_does_not_verify_fy_claims(self) -> None:
+        provenance = {
+            key: {"source": "document_extracted", "confidence": "high",
+                  "period": None, "period_source": None}
+            for key in ("revenue", "operating_income", "r_and_d")
+        }
+        claims = build_claims(self._state(provenance=provenance))
+        by_metric = {claim.metric_name: claim for claim in claims}
+        for metric in ("revenue", "operating_margin"):
+            self.assertNotEqual(by_metric[metric].verification, "verified")
+            self.assertRegex(by_metric[metric].verify_reason, r"period_(?:assumed|unknown)|period unknown")
+
+    def test_generated_display_citation_is_not_trusted_record_proof(self) -> None:
+        provenance = {
+            key: {"source": "sec_companyfacts", "confidence": "high", "period": "FY2024",
+                  "period_source": "provider_record", "period_alignment": "exact"}
+            for key in ("revenue", "operating_income", "r_and_d")
+        }
+        claims = build_claims(self._state(provenance=provenance))
+        revenue = next(claim for claim in claims if claim.metric_name == "revenue")
+        self.assertNotEqual(revenue.verification, "verified")
+        self.assertFalse(revenue.evidence_refs)
+
+
 if __name__ == "__main__":
     unittest.main()
