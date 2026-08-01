@@ -288,6 +288,37 @@ def detect_concrete_period(text: str) -> str | None:
     return unique[0] if len(unique) == 1 else None
 
 
+def _document_local_context_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+    boundaries = [0]
+    for match in re.finditer(r"[\r\n;|]+|(?<=[.!?])\s+", text or ""):
+        boundaries.extend((match.start(), match.end()))
+    boundaries.append(len(text or ""))
+    left = max((point for point in boundaries if point <= start), default=0)
+    right = min((point for point in boundaries if point >= end), default=len(text or ""))
+    return left, right
+
+
+def _nearest_document_period(text: str, number_start: int, number_end: int) -> str | None:
+    patterns = (
+        r"\bFY\s*20\d{2}\b",
+        r"\bQ[1-4]\s*20\d{2}\b",
+        r"\b20\d{2}\s*Q[1-4]\b",
+        r"\b20\d{2}-\d{2}-\d{2}\b",
+    )
+    center = (number_start + number_end) / 2.0
+    candidates: list[tuple[float, str]] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text or "", re.I):
+            normalized = match.group(0).upper().replace("FY ", "FY")
+            candidates.append((abs(((match.start() + match.end()) / 2.0) - center), normalized))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    nearest_distance = candidates[0][0]
+    nearest = {period for distance, period in candidates if distance == nearest_distance}
+    return next(iter(nearest)) if len(nearest) == 1 else None
+
+
 def _looks_already_normalized(value: float, scale: str | None) -> bool:
     """Deprecated: do not use shape heuristics for normalization state."""
     del value, scale
@@ -514,33 +545,45 @@ def _parse_raw_metric_number(
     document_scale: str | None = None,
     document_currency: str | None = None,
     period_hint: str | None = None,
+    metric_start: int = 0,
+    metric_end: int = 0,
 ) -> ExtractedAmount | None:
     """Raw extraction only; normalization is applied once via ``normalize_extracted_amount``.
 
     Forward context may contain a later table's caption; do not let that override the
     caller-provided local/document scale. Inline units on the number itself still win.
     """
-    local_currency = detect_statement_currency(context) or document_currency
-    local_period = detect_period_hint(context) or period_hint
-    concrete_period = detect_concrete_period(context)
-    for num_match in re.finditer(r"[-$]?\s*([0-9][0-9,\.]+)", context):
+    for num_match in re.finditer(r"[-$]?\s*([0-9][0-9,\.]+)", context[metric_end:]):
+        number_start = metric_end + num_match.start()
+        number_end = metric_end + num_match.end()
+        local_left, local_right = _document_local_context_bounds(
+            context, number_start, number_end
+        )
+        if not (local_left <= metric_start < local_right and local_left <= metric_end <= local_right):
+            continue
+        local_context = context[local_left:local_right]
+        local_currency = detect_statement_currency(local_context) or document_currency
+        local_period = detect_period_hint(local_context) or period_hint
+        concrete_period = _nearest_document_period(
+            local_context, number_start - local_left, number_end - local_left
+        )
         raw = num_match.group(1).replace(",", "")
         try:
             value = float(raw)
         except ValueError:
             continue
-        if context[num_match.start() : num_match.start() + 1] == "-" or (
-            num_match.start() > 0 and context[num_match.start() - 1] == "-"
+        if context[number_start : number_start + 1] == "-" or (
+            number_start > 0 and context[number_start - 1] == "-"
         ):
             value = -abs(value)
-        suffix = context[num_match.end() : num_match.end() + 4].lstrip()
+        suffix = context[number_end : number_end + 4].lstrip()
         if suffix.startswith("%"):
             continue
         if 2020 <= value <= 2035 and value == int(value):
             continue
-        if _is_non_amount_identifier(context, num_match.start(), num_match.end()):
+        if _is_non_amount_identifier(context, number_start, number_end):
             continue
-        after = context[num_match.end() : num_match.end() + 24].strip().lower()
+        after = context[number_end : number_end + 24].strip().lower()
         has_billion = any(token in after for token in ("billion", "亿", "万亿", "bn"))
         has_million = any(token in after for token in ("million", "万", "mm")) and not has_billion
         if has_million:
@@ -556,7 +599,7 @@ def _parse_raw_metric_number(
             scale = None
             source = "unitless"
         if source == "unitless" and not _amount_context_support(
-            context, num_match.start(), num_match.end(), document_scale=document_scale
+            context, number_start, number_end, document_scale=document_scale
         ):
             # Large unitless magnitudes may still project as inferred_million (low confidence).
             if abs(value) < _UNITLESS_MILLION_FLOOR:
@@ -586,27 +629,28 @@ def _extract_metric_amounts_raw(
     period_hint = detect_period_hint(text)
 
     for metric, keywords in _METRIC_KEYWORDS:
+        metric_found = False
         for kw in keywords:
-            kw_match = re.search(kw, lowered, flags=re.IGNORECASE)
-            if not kw_match:
-                continue
-            # Captions often sit before the label; keep numeric search forward-only.
-            prefix = lowered[max(0, kw_match.start() - 160) : kw_match.start()]
-            local_scale = detect_statement_scale(prefix) or doc_scale
-            local_currency = detect_statement_currency(prefix) or doc_currency
-            context = lowered[kw_match.end() : kw_match.end() + 200]
-            # Preserve a leading minus that sits just before the match window.
-            window_start = kw_match.end()
-            if window_start > 0 and text[window_start - 1] == "-":
-                context = "-" + context
-            amount = _parse_raw_metric_number(
-                context,
-                document_scale=local_scale,
-                document_currency=local_currency,
-                period_hint=period_hint,
-            )
-            if amount is not None:
-                amounts[metric] = amount
+            for kw_match in re.finditer(kw, lowered, flags=re.IGNORECASE):
+                # Captions often sit before the label; keep numeric search forward-only.
+                prefix = lowered[max(0, kw_match.start() - 160) : kw_match.start()]
+                local_scale = detect_statement_scale(prefix) or doc_scale
+                local_currency = detect_statement_currency(prefix) or doc_currency
+                window_start = kw_match.start()
+                context = text[window_start : kw_match.end() + 200]
+                amount = _parse_raw_metric_number(
+                    context,
+                    document_scale=local_scale,
+                    document_currency=local_currency,
+                    period_hint=period_hint,
+                    metric_start=0,
+                    metric_end=kw_match.end() - window_start,
+                )
+                if amount is not None:
+                    amounts[metric] = amount
+                    metric_found = True
+                    break
+            if metric_found:
                 break
     return amounts
 
