@@ -1279,6 +1279,12 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
         if specific and str(specific).lower() in _PERIOD_TYPE_TOKENS:
             ptype = ptype or str(specific).lower()
             specific = None
+        if specific and not is_factual_period_provenance(
+            period=specific,
+            period_source=period_source,
+            period_alignment=period_alignment,
+        ):
+            specific = None
         pool.append(
             EvidenceRef(
                 evidence_id=evidence_id,
