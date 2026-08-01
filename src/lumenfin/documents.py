@@ -298,6 +298,37 @@ def _document_local_context_bounds(text: str, start: int, end: int) -> tuple[int
     return left, right
 
 
+def _document_metric_label_spans(text: str) -> list[tuple[int, int, str]]:
+    spans: set[tuple[int, int, str]] = set()
+    for metric, keywords in _METRIC_KEYWORDS:
+        for keyword in keywords:
+            for match in re.finditer(keyword, text or "", re.I):
+                spans.add((match.start(), match.end(), metric))
+    return sorted(spans, key=lambda item: (item[0], -item[1], item[2]))
+
+
+def _document_metric_context_bounds(
+    text: str, metric_start: int, metric_end: int
+) -> tuple[int, int]:
+    """Bound one metric's context so periods cannot cross another metric label."""
+    spans = _document_metric_label_spans(text)
+    current = [
+        span for span in spans
+        if span[0] <= metric_start and span[1] >= metric_end
+    ]
+    current_start = min((span[0] for span in current), default=metric_start)
+    current_end = max((span[1] for span in current), default=metric_end)
+    previous_end = max(
+        (end for start, end, _ in spans if end <= current_start),
+        default=0,
+    )
+    next_start = min(
+        (start for start, _, _ in spans if start >= current_end and start != current_start),
+        default=len(text or ""),
+    )
+    return max(previous_end, current_start), next_start
+
+
 def _nearest_document_period(text: str, number_start: int, number_end: int) -> str | None:
     patterns = (
         r"\bFY\s*20\d{2}\b",
@@ -559,13 +590,25 @@ def _parse_raw_metric_number(
         local_left, local_right = _document_local_context_bounds(
             context, number_start, number_end
         )
-        if not (local_left <= metric_start < local_right and local_left <= metric_end <= local_right):
+        if metric_end > metric_start:
+            metric_left, metric_right = _document_metric_context_bounds(
+                context, metric_start, metric_end
+            )
+        else:
+            metric_left, metric_right = 0, len(context)
+        if not (
+            local_left <= metric_start < local_right
+            and local_left <= metric_end <= local_right
+            and metric_end <= number_start < metric_right
+        ):
             continue
-        local_context = context[local_left:local_right]
+        search_left = max(local_left, metric_left)
+        search_right = min(local_right, metric_right)
+        local_context = context[search_left:search_right]
         local_currency = detect_statement_currency(local_context) or document_currency
         local_period = detect_period_hint(local_context) or period_hint
         concrete_period = _nearest_document_period(
-            local_context, number_start - local_left, number_end - local_left
+            local_context, number_start - search_left, number_end - search_left
         )
         raw = num_match.group(1).replace(",", "")
         try:
