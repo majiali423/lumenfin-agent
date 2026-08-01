@@ -40,6 +40,90 @@ def build_offline_system(config=None) -> LumenFinAgentSystem:
 
 
 class OfflineSystemTestCase(unittest.TestCase):
+    def test_document_indexing_paths_do_not_block_lightweight_request(self) -> None:
+        cases = [
+            (False, "index_document_paths"),
+            (True, "enqueue_document_paths"),
+        ]
+        for async_mode, method_name in cases:
+            with self.subTest(async_mode=async_mode):
+                tmp_root = ROOT / "test_artifacts" / f"api-index-offload-{uuid4().hex[:8]}"
+                app = create_app(
+                    build_test_config(tmp_root),
+                    llm_client=LocalFallbackLLMClient(),
+                    market_data_client=FakeMarketDataClient(),
+                )
+                index_entered = Event()
+                release_index = Event()
+                lightweight_done = Event()
+                observed = {"lightweight_before_release": False}
+                loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
+                gate_holder: dict[str, asyncio.Event] = {}
+
+                def fake_save(_service, files):
+                    self.assertTrue(files)
+                    return [str(tmp_root / "saved.txt")]
+
+                def blocked_index(_service, paths, **kwargs):
+                    self.assertTrue(paths)
+                    index_entered.set()
+                    self.assertTrue(release_index.wait(timeout=10))
+                    return [
+                        {
+                            "document_id": "doc-offload",
+                            "tenant_id": kwargs.get("tenant_id") or "default",
+                            "filename": "saved.txt",
+                            "content_hash": "hash-offload",
+                            "status": "pending" if async_mode else "ready",
+                            "chunk_count": 0 if async_mode else 1,
+                            "error": None,
+                            "contexts": [],
+                            "embed_calls": 0 if async_mode else 1,
+                        }
+                    ]
+
+                def controller() -> None:
+                    self.assertTrue(index_entered.wait(timeout=10))
+                    loop_holder["loop"].call_soon_threadsafe(gate_holder["gate"].set)
+                    observed["lightweight_before_release"] = lightweight_done.wait(timeout=2)
+                    release_index.set()
+
+                async def scenario() -> tuple[httpx.Response, httpx.Response]:
+                    transport = httpx.ASGITransport(app=app)
+                    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                        loop_holder["loop"] = asyncio.get_running_loop()
+                        gate_holder["gate"] = asyncio.Event()
+
+                        async def lightweight_request() -> httpx.Response:
+                            await gate_holder["gate"].wait()
+                            response = await client.get("/api/v1/config")
+                            lightweight_done.set()
+                            return response
+
+                        lightweight_task = asyncio.create_task(lightweight_request())
+                        index_task = asyncio.create_task(
+                            client.post(
+                                "/api/v1/documents/index",
+                                data={"tenant_id": "offload-tenant", "async_mode": str(async_mode).lower()},
+                                files={"files": ("notes.txt", b"Apple FY2025 revenue.", "text/plain")},
+                            )
+                        )
+                        return await index_task, await lightweight_task
+
+                controller_thread = Thread(target=controller, daemon=True)
+                controller_thread.start()
+                with (
+                    patch.object(LumenFinAnalysisService, "save_uploaded_files", fake_save),
+                    patch.object(LumenFinAnalysisService, method_name, blocked_index),
+                    patch.object(LumenFinAnalysisService, "enqueue_index_job", return_value=True),
+                ):
+                    index_response, lightweight_response = asyncio.run(scenario())
+                controller_thread.join(timeout=10)
+
+                self.assertTrue(observed["lightweight_before_release"])
+                self.assertEqual(lightweight_response.status_code, 200)
+                self.assertEqual(index_response.status_code, 200, index_response.text)
+
     def test_upload_file_persistence_does_not_block_lightweight_request(self) -> None:
         cases = [
             (
