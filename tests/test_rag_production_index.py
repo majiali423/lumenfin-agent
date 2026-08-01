@@ -162,6 +162,32 @@ class _PausingVectorStore(_RecordingVectorStore):
         return super().index_chunks(chunks, **kwargs)
 
 
+class _CleanupFailingVectorStore(_RecordingVectorStore):
+    def delete_by_source_document(self, *, tenant_id: str, source_document_id: str) -> int:
+        raise RuntimeError("injected vector cleanup failure")
+
+
+class _FailureInjectingRepository(RagDocumentRepository):
+    fail_replace = False
+    fail_ready = False
+    fail_delete = False
+
+    def replace_chunks(self, **kwargs) -> None:
+        if self.fail_replace:
+            raise RuntimeError("injected chunk persistence failure")
+        return super().replace_chunks(**kwargs)
+
+    def upsert_document(self, **kwargs):
+        if self.fail_ready and kwargs.get("index_status") == "ready":
+            raise RuntimeError("injected ready update failure")
+        return super().upsert_document(**kwargs)
+
+    def delete_chunks(self, **kwargs) -> int:
+        if self.fail_delete:
+            raise RuntimeError("injected chunk cleanup failure")
+        return super().delete_chunks(**kwargs)
+
+
 def _repository_counts(repo: RagDocumentRepository) -> tuple[int, int, int]:
     with Session(repo.engine) as session:
         documents = int(session.scalar(select(func.count()).select_from(RagDocument)) or 0)
@@ -548,6 +574,60 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
             len(repo.list_chunks(tenant_id="tenant-a", source_document_ids=[ready["document_id"]])),
             ready["chunk_count"],
         )
+
+    def test_vector_write_is_compensated_when_chunk_persistence_fails(self) -> None:
+        store = _RecordingVectorStore()
+        repo = _FailureInjectingRepository(self.config.database_url, db_path=self.config.db_path)
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+        other = indexer.index_file(_nvidia_markdown(self.root / "other.md"), tenant_id="tenant-b")
+        other_vectors = store.vector_search("NVIDIA", tenant_id="tenant-b")
+        other_chunks = repo.list_chunks(tenant_id="tenant-b")
+        repo.fail_replace = True
+
+        failed = indexer.index_file(_apple_markdown(self.root / "target.md"), tenant_id="tenant-a")
+
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("injected chunk persistence failure", failed["error"] or "")
+        self.assertEqual(store.vector_search("Apple", tenant_id="tenant-a"), [])
+        self.assertEqual(repo.list_chunks(tenant_id="tenant-a"), [])
+        self.assertEqual(store.vector_search("NVIDIA", tenant_id="tenant-b"), other_vectors)
+        self.assertEqual(repo.list_chunks(tenant_id="tenant-b"), other_chunks)
+        self.assertEqual(repo.get_document(failed["document_id"], tenant_id="tenant-a")["index_status"], "failed")
+        self.assertEqual(repo.get_document(other["document_id"], tenant_id="tenant-b")["index_status"], "ready")
+
+    def test_vectors_and_chunks_are_compensated_when_ready_update_fails(self) -> None:
+        store = _RecordingVectorStore()
+        repo = _FailureInjectingRepository(self.config.database_url, db_path=self.config.db_path)
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+        repo.fail_ready = True
+
+        failed = indexer.index_file(_apple_markdown(self.root / "ready-update.md"), tenant_id="tenant-a")
+
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("injected ready update failure", failed["error"] or "")
+        self.assertEqual(store.vector_search("Apple", tenant_id="tenant-a"), [])
+        self.assertEqual(repo.list_chunks(tenant_id="tenant-a"), [])
+        persisted = repo.get_document(failed["document_id"], tenant_id="tenant-a")
+        self.assertEqual(persisted["index_status"], "failed")
+        self.assertEqual(persisted["chunk_count"], 0)
+
+    def test_cleanup_failure_preserves_original_index_error(self) -> None:
+        store = _CleanupFailingVectorStore()
+        repo = _FailureInjectingRepository(self.config.database_url, db_path=self.config.db_path)
+        repo.fail_replace = True
+        repo.fail_delete = True
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+
+        failed = indexer.index_file(_apple_markdown(self.root / "cleanup-failure.md"), tenant_id="tenant-a")
+
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("injected chunk persistence failure", failed["error"] or "")
+        self.assertIn("cleanup", failed["error"] or "")
+        self.assertIn("injected vector cleanup failure", failed["error"] or "")
+        self.assertIn("injected chunk cleanup failure", failed["error"] or "")
+        persisted = repo.get_document(failed["document_id"], tenant_id="tenant-a")
+        self.assertEqual(persisted["index_status"], "failed")
+        self.assertEqual(persisted["error"], failed["error"])
 
     def test_same_content_concurrent_tenants_remain_separate(self) -> None:
         path = _apple_markdown(self.root / "shared.md")
