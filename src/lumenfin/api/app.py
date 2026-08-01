@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import RedirectResponse
 
 from ..config import AppConfig
@@ -237,7 +238,8 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
         try:
-            response = service.analyze(
+            response = await run_in_threadpool(
+                service.analyze,
                 query=query,
                 thread_id=thread_id,
                 export_artifacts=export_artifacts,
