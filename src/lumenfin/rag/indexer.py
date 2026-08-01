@@ -296,6 +296,25 @@ class DocumentIndexer:
     def _fail(self, record: dict[str, Any], error: str) -> IndexReceipt:
         document_id = str(record["document_id"])
         tenant = str(record["tenant_id"])
+        cleanup_errors: list[str] = []
+        if self.rag_store is not None:
+            try:
+                self.rag_store.delete_by_source_document(
+                    tenant_id=tenant,
+                    source_document_id=document_id,
+                )
+            except Exception as exc:
+                cleanup_errors.append(f"vector cleanup: {exc}")
+        try:
+            self.repository.delete_chunks(
+                tenant_id=tenant,
+                source_document_id=document_id,
+            )
+        except Exception as exc:
+            cleanup_errors.append(f"chunk cleanup: {exc}")
+        final_error = error
+        if cleanup_errors:
+            final_error = f"{error}; cleanup errors: {'; '.join(cleanup_errors)}"
         self.repository.upsert_document(
             document_id=document_id,
             tenant_id=tenant,
@@ -304,7 +323,7 @@ class DocumentIndexer:
             index_status="failed",
             contexts=[],
             chunk_count=0,
-            error=error,
+            error=final_error,
             source_path=record.get("source_path"),
         )
         return {
@@ -314,7 +333,7 @@ class DocumentIndexer:
             "content_hash": str(record.get("content_hash") or ""),
             "status": "failed",
             "chunk_count": 0,
-            "error": error,
+            "error": final_error,
             "contexts": [],
             "embed_calls": 0,
         }

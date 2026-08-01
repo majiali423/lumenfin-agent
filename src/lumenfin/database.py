@@ -399,6 +399,18 @@ class RagDocumentRepository:
                 )
             session.commit()
 
+    def delete_chunks(self, *, tenant_id: str, source_document_id: str) -> int:
+        """Delete only the chunks owned by one tenant/document pair."""
+        with Session(self.engine) as session:
+            result = session.execute(
+                delete(RagChunk).where(
+                    RagChunk.source_document_id == source_document_id,
+                    RagChunk.tenant_id == tenant_id,
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0)
+
     def list_chunks(
         self,
         *,
