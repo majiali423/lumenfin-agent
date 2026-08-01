@@ -326,9 +326,14 @@ class RagDocumentRepository:
                 )
                 session.add(row)
             else:
-                row.tenant_id = tenant_id
+                if row.tenant_id != tenant_id:
+                    raise ValueError(
+                        f"RAG document tenant mismatch for {document_id}: "
+                        f"stored={row.tenant_id}, requested={tenant_id}"
+                    )
+                if row.content_hash != content_hash:
+                    raise ValueError(f"RAG document content hash mismatch for {document_id}")
                 row.filename = filename
-                row.content_hash = content_hash
                 row.index_status = index_status
                 row.error = error
                 row.chunk_count = chunk_count
@@ -359,6 +364,16 @@ class RagDocumentRepository:
     ) -> None:
         now = utc_now()
         with Session(self.engine) as session:
+            owner = session.get(RagDocument, source_document_id)
+            if owner is None:
+                raise ValueError(f"RAG source document not found: {source_document_id}")
+            if owner.tenant_id != tenant_id:
+                raise ValueError(
+                    f"RAG chunk tenant mismatch for {source_document_id}: "
+                    f"stored={owner.tenant_id}, requested={tenant_id}"
+                )
+            if owner.content_hash != content_hash:
+                raise ValueError(f"RAG chunk content hash mismatch for {source_document_id}")
             session.execute(
                 delete(RagChunk).where(
                     RagChunk.source_document_id == source_document_id,
