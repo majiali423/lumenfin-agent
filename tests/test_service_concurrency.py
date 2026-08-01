@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Lock, get_ident
+from unittest.mock import patch
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +15,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.llm import LocalFallbackLLMClient
+from lumenfin.checkpoint_store import CheckpointConflictError
 from lumenfin.finrun import export_finrun_state
 from lumenfin.service import LumenFinAnalysisService
 from tests.support.fakes import FakeMarketDataClient
@@ -277,6 +279,26 @@ class ServiceConcurrencyIsolationTestCase(unittest.TestCase):
             winner["result"].get("user_clarification"),
         )
         self.assertEqual(len(stored["state"]["companies"]), 1)
+
+    def test_job_conflict_is_failed_and_keeps_conflict_error(self) -> None:
+        service = self._build_concurrent_service("job-conflict", LocalFallbackLLMClient())
+        created = service.submit_job("Analyze NVIDIA FY2025.", thread_id="job-conflict-thread")
+        conflict = CheckpointConflictError(
+            "Checkpoint conflict for thread_id=job-conflict-thread: expected revision 1"
+        )
+        with patch.object(service, "analyze", side_effect=conflict):
+            with self.assertRaises(CheckpointConflictError):
+                service.run_job(
+                    created["job_id"],
+                    "Analyze NVIDIA FY2025.",
+                    created["thread_id"],
+                    export_artifacts=False,
+                )
+
+        job = service.get_job(created["job_id"])
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("Checkpoint conflict", job["error_message"])
+        self.assertIsNone(job["result"])
 
 
 if __name__ == "__main__":

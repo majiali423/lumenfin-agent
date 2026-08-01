@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import fitz
@@ -18,8 +19,10 @@ if str(SRC) not in sys.path:
 
 from lumenfin import LumenFinAgentSystem
 from lumenfin.api.app import create_app
+from lumenfin.checkpoint_store import CheckpointConflictError
 from lumenfin.llm import LocalFallbackLLMClient
 from lumenfin.reporting import export_run_artifacts
+from lumenfin.service import LumenFinAnalysisService
 from tests.support.fakes import FakeMarketDataClient
 from tests.test_graph_routing import build_test_config
 
@@ -34,6 +37,39 @@ def build_offline_system(config=None) -> LumenFinAgentSystem:
 
 
 class OfflineSystemTestCase(unittest.TestCase):
+    def test_api_returns_409_for_checkpoint_conflicts(self) -> None:
+        tmp_root = ROOT / "test_artifacts" / f"api-conflict-{uuid4().hex[:8]}"
+        app = create_app(
+            build_test_config(tmp_root),
+            llm_client=LocalFallbackLLMClient(),
+            market_data_client=FakeMarketDataClient(),
+        )
+        requests = [
+            (
+                "/api/v1/analyze",
+                {"query": "Analyze Apple FY2025.", "thread_id": "conflict-thread"},
+                "analyze",
+            ),
+            (
+                "/api/v1/clarify",
+                {
+                    "thread_id": "conflict-thread",
+                    "clarification": {"company": "Apple", "time_range": "FY2025"},
+                },
+                "clarify",
+            ),
+        ]
+        with TestClient(app) as client:
+            for path, payload, method_name in requests:
+                with self.subTest(path=path), patch.object(
+                    LumenFinAnalysisService,
+                    method_name,
+                    side_effect=CheckpointConflictError("stale checkpoint revision"),
+                ):
+                    response = client.post(path, json=payload)
+                    self.assertEqual(response.status_code, 409)
+                    self.assertIn("stale checkpoint revision", response.json()["detail"])
+
     def test_end_to_end_report_generation(self) -> None:
         app = build_offline_system()
         result = app.run("对比分析 Apple 与 Microsoft 2025 年供应链风险和研发投入。", thread_id="test-e2e-offline")

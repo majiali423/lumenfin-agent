@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import RedirectResponse
 
 from ..config import AppConfig
+from ..checkpoint_store import CheckpointConflictError
 from ..llm import BaseLLMClient
 from ..logging_utils import configure_logging, request_logging_middleware
 from ..market_data import MarketDataClient, probe_market_provider
@@ -183,6 +184,8 @@ def create_app(
                 export_artifacts=payload.export_artifacts,
                 output_format=payload.output_format,
             )
+        except CheckpointConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _to_response(response, include_state=payload.include_state)
@@ -195,6 +198,8 @@ def create_app(
                 clarification=payload.clarification,
                 export_artifacts=payload.export_artifacts,
             )
+        except CheckpointConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _to_response(response, include_state=payload.include_state)
@@ -209,6 +214,8 @@ def create_app(
                 structured_metrics=payload.company_metrics,
                 output_format=payload.output_format,
             )
+        except CheckpointConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _to_response(response, include_state=payload.include_state)
@@ -237,6 +244,8 @@ def create_app(
                 document_paths=saved_paths,
                 output_format=output_format,
             )
+        except CheckpointConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _to_response(response, include_state=include_state)
