@@ -232,8 +232,12 @@ def create_app(
         _: None = Depends(auth_dependency),
     ) -> AnalyzeResponse:
         try:
-            saved_paths = service.save_uploaded_files(
-                [(upload.filename or "document.pdf", await upload.read()) for upload in files]
+            uploaded_files = [
+                (upload.filename or "document.pdf", await upload.read()) for upload in files
+            ]
+            saved_paths = await run_in_threadpool(
+                service.save_uploaded_files,
+                uploaded_files,
             )
         except ValueError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
@@ -261,8 +265,12 @@ def create_app(
         _: None = Depends(auth_dependency),
     ) -> DocumentIndexResponse:
         try:
-            saved_paths = service.save_uploaded_files(
-                [(upload.filename or "document.pdf", await upload.read()) for upload in files]
+            uploaded_files = [
+                (upload.filename or "document.pdf", await upload.read()) for upload in files
+            ]
+            saved_paths = await run_in_threadpool(
+                service.save_uploaded_files,
+                uploaded_files,
             )
         except ValueError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
