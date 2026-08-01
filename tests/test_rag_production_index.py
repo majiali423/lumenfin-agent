@@ -467,6 +467,38 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
         self.assertEqual(repo.list_chunks(tenant_id="tenant-a"), [])
         self.assertTrue(repo.list_chunks(tenant_id="tenant-b"))
 
+    def test_persistence_rejects_cross_tenant_document_and_chunk_mutation(self) -> None:
+        path = _apple_markdown(self.root / "tenant-boundary.md")
+        store = _RecordingVectorStore()
+        repo = RagDocumentRepository(self.config.database_url, db_path=self.config.db_path)
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+        receipt = indexer.index_file(path, tenant_id="tenant-a")
+        chunks = repo.list_chunks(tenant_id="tenant-a", source_document_ids=[receipt["document_id"]])
+        self.assertTrue(chunks)
+
+        with self.assertRaisesRegex(ValueError, "tenant"):
+            repo.upsert_document(
+                document_id=receipt["document_id"],
+                tenant_id="tenant-b",
+                filename=receipt["filename"],
+                content_hash=receipt["content_hash"],
+                index_status="ready",
+                contexts=receipt["contexts"],
+                chunk_count=receipt["chunk_count"],
+                source_path=str(path),
+            )
+        with self.assertRaisesRegex(ValueError, "tenant"):
+            repo.replace_chunks(
+                source_document_id=receipt["document_id"],
+                tenant_id="tenant-b",
+                chunks=chunks,
+                content_hash=receipt["content_hash"],
+            )
+
+        stored = repo.get_document(receipt["document_id"], tenant_id="tenant-a")
+        self.assertIsNotNone(stored)
+        self.assertIsNone(repo.get_document(receipt["document_id"], tenant_id="tenant-b"))
+
 
 class SyncOnRunCompatTestCase(unittest.TestCase):
     def test_default_mode_still_indexes_inside_retrieval(self) -> None:
