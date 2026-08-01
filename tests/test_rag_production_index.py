@@ -5,9 +5,14 @@ from __future__ import annotations
 import shutil
 import sys
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from threading import Barrier, Lock
 from uuid import uuid4
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -16,7 +21,7 @@ if str(SRC) not in sys.path:
 
 from lumenfin.api.app import create_app
 from lumenfin.agents import AgentRuntime
-from lumenfin.database import RagDocumentRepository
+from lumenfin.database import RagChunk, RagDocument, RagDocumentRepository
 from lumenfin.graph import LumenFinAgentSystem
 from lumenfin.knowledge_store import InMemoryKnowledgeStore
 from lumenfin.llm import LocalFallbackLLMClient
@@ -45,6 +50,103 @@ class CountingEmbedder:
         self.calls += 1
         self.texts += len(texts)
         return self._inner.embed(texts)
+
+
+class _BarrierReadyRepository(RagDocumentRepository):
+    def __init__(self, *args, parties: int = 2, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._ready_barrier = Barrier(parties)
+        self._ready_lock = Lock()
+        self._remaining_empty_checks = parties
+
+    def find_ready_by_hash(self, *, tenant_id: str, content_hash: str):
+        record = super().find_ready_by_hash(tenant_id=tenant_id, content_hash=content_hash)
+        should_wait = False
+        if record is None:
+            with self._ready_lock:
+                if self._remaining_empty_checks > 0:
+                    self._remaining_empty_checks -= 1
+                    should_wait = True
+        if should_wait:
+            self._ready_barrier.wait(timeout=10)
+        return record
+
+
+class _RecordingVectorStore:
+    def __init__(self, *, fail_tenants: set[str] | None = None) -> None:
+        self.fail_tenants = set(fail_tenants or set())
+        self._lock = Lock()
+        self.index_calls: list[tuple[str, str, tuple[str, ...]]] = []
+        self.rows: dict[tuple[str, str, str], dict] = {}
+
+    def index_chunks(
+        self,
+        chunks,
+        *,
+        tenant_id: str,
+        source_document_id: str,
+        content_hash: str = "",
+        session_id: str | None = None,
+        replace_existing: bool = True,
+    ):
+        if tenant_id in self.fail_tenants:
+            raise RuntimeError(f"injected vector failure for {tenant_id}")
+        chunk_ids = tuple(str(chunk["chunk_id"]) for chunk in chunks)
+        with self._lock:
+            self.index_calls.append((tenant_id, source_document_id, chunk_ids))
+            if replace_existing:
+                self.rows = {
+                    key: value
+                    for key, value in self.rows.items()
+                    if key[:2] != (tenant_id, source_document_id)
+                }
+            for chunk in chunks:
+                key = (tenant_id, source_document_id, str(chunk["chunk_id"]))
+                self.rows[key] = {**chunk, "tenant_id": tenant_id, "source_document_id": source_document_id}
+        return {"chunks_indexed": len(chunks), "embed_calls": 1}
+
+    def vector_search(
+        self,
+        query: str,
+        *,
+        tenant_id: str | None = None,
+        source_document_ids: list[str] | None = None,
+        **_kwargs,
+    ) -> list[dict]:
+        with self._lock:
+            rows = list(self.rows.values())
+        return [
+            dict(row)
+            for row in rows
+            if (tenant_id is None or row["tenant_id"] == tenant_id)
+            and (not source_document_ids or row["source_document_id"] in source_document_ids)
+        ]
+
+    def delete_by_source_document(self, *, tenant_id: str, source_document_id: str) -> int:
+        with self._lock:
+            before = len(self.rows)
+            self.rows = {
+                key: value
+                for key, value in self.rows.items()
+                if key[:2] != (tenant_id, source_document_id)
+            }
+            return before - len(self.rows)
+
+    def close(self) -> None:
+        return None
+
+
+def _repository_counts(repo: RagDocumentRepository) -> tuple[int, int, int]:
+    with Session(repo.engine) as session:
+        documents = int(session.scalar(select(func.count()).select_from(RagDocument)) or 0)
+        chunks = int(session.scalar(select(func.count()).select_from(RagChunk)) or 0)
+        failed = int(
+            session.scalar(
+                select(func.count()).select_from(RagDocument).where(RagDocument.index_status == "failed")
+            )
+            or 0
+        )
+    return documents, chunks, failed
 
 
 def _apple_markdown(path: Path) -> Path:
@@ -266,6 +368,104 @@ class RagProductionIndexTestCase(unittest.TestCase):
         first.close()
         with self.assertRaises(RuntimeError):
             MilvusRAGStore(uri, DeterministicEmbeddingProvider(dimension=1024), collection_name="dim_test")
+
+
+class RagConcurrencyHardeningTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = ROOT / "test_artifacts" / f"rag-concurrency-{uuid4().hex[:8]}"
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.config = replace(build_test_config(self.root), rag_index_mode="async_on_upload")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _indexer(self, store: _RecordingVectorStore) -> tuple[DocumentIndexer, _BarrierReadyRepository]:
+        repo = _BarrierReadyRepository(self.config.database_url, db_path=self.config.db_path)
+        return DocumentIndexer(rag_store=store, repository=repo), repo
+
+    def test_concurrent_same_tenant_same_content_has_one_canonical_index(self) -> None:
+        path = _apple_markdown(self.root / "duplicate.md")
+        store = _RecordingVectorStore()
+        indexer, repo = self._indexer(store)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            receipts = list(pool.map(lambda _: indexer.index_file(path, tenant_id="tenant-a"), range(2)))
+
+        self.assertEqual({receipt["document_id"] for receipt in receipts}, {receipts[0]["document_id"]})
+        self.assertEqual(sorted(receipt["status"] for receipt in receipts), ["ready", "skipped_duplicate"])
+        documents, chunks, failed = _repository_counts(repo)
+        self.assertEqual(documents, 1)
+        self.assertEqual(chunks, receipts[0]["chunk_count"] or receipts[1]["chunk_count"])
+        self.assertEqual(failed, 0)
+        self.assertEqual(len(store.index_calls), 1)
+        vector_chunk_ids = store.index_calls[0][2]
+        self.assertEqual(len(vector_chunk_ids), len(set(vector_chunk_ids)))
+
+        later = indexer.index_file(path, tenant_id="tenant-a")
+        self.assertEqual(later["status"], "skipped_duplicate")
+        self.assertEqual(later["document_id"], receipts[0]["document_id"])
+        self.assertEqual(len(store.index_calls), 1)
+
+    def test_same_content_concurrent_tenants_remain_separate(self) -> None:
+        path = _apple_markdown(self.root / "shared.md")
+        store = _RecordingVectorStore()
+        indexer, repo = self._indexer(store)
+
+        def index_and_retrieve(tenant: str) -> tuple[dict, list[dict]]:
+            receipt = indexer.index_file(path, tenant_id=tenant)
+            hits = store.vector_search(
+                "Apple revenue",
+                tenant_id=tenant,
+                source_document_ids=[receipt["document_id"]],
+            )
+            return receipt, hits
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = dict(zip(["tenant-a", "tenant-b"], pool.map(index_and_retrieve, ["tenant-a", "tenant-b"]), strict=True))
+
+        receipt_a, hits_a = outcomes["tenant-a"]
+        receipt_b, hits_b = outcomes["tenant-b"]
+        self.assertNotEqual(receipt_a["document_id"], receipt_b["document_id"])
+        self.assertTrue(hits_a and hits_b)
+        self.assertEqual({hit["tenant_id"] for hit in hits_a}, {"tenant-a"})
+        self.assertEqual({hit["tenant_id"] for hit in hits_b}, {"tenant-b"})
+        self.assertEqual(
+            store.vector_search("Apple", tenant_id="tenant-a", source_document_ids=[receipt_b["document_id"]]),
+            [],
+        )
+        self.assertEqual(
+            store.vector_search("Apple", tenant_id="tenant-b", source_document_ids=[receipt_a["document_id"]]),
+            [],
+        )
+        documents, chunks, failed = _repository_counts(repo)
+        self.assertEqual(documents, 2)
+        self.assertEqual(chunks, receipt_a["chunk_count"] + receipt_b["chunk_count"])
+        self.assertEqual(failed, 0)
+        self.assertEqual({row["tenant_id"] for row in repo.list_chunks(tenant_id="tenant-a")}, {"tenant-a"})
+        self.assertEqual({row["tenant_id"] for row in repo.list_chunks(tenant_id="tenant-b")}, {"tenant-b"})
+
+    def test_concurrent_tenant_failure_does_not_pollute_success(self) -> None:
+        path_a = _apple_markdown(self.root / "fail-a.md")
+        path_b = _apple_markdown(self.root / "ok-b.md")
+        store = _RecordingVectorStore(fail_tenants={"tenant-a"})
+        indexer, repo = self._indexer(store)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            receipt_a, receipt_b = list(
+                pool.map(
+                    lambda item: indexer.index_file(item[1], tenant_id=item[0]),
+                    [("tenant-a", path_a), ("tenant-b", path_b)],
+                )
+            )
+
+        self.assertEqual(receipt_a["status"], "failed")
+        self.assertEqual(receipt_b["status"], "ready")
+        self.assertEqual(store.vector_search("Apple", tenant_id="tenant-a"), [])
+        hits_b = store.vector_search("Apple", tenant_id="tenant-b")
+        self.assertTrue(hits_b)
+        self.assertEqual({hit["tenant_id"] for hit in hits_b}, {"tenant-b"})
+        self.assertEqual(repo.list_chunks(tenant_id="tenant-a"), [])
+        self.assertTrue(repo.list_chunks(tenant_id="tenant-b"))
 
 
 class SyncOnRunCompatTestCase(unittest.TestCase):
