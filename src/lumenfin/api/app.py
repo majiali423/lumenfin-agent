@@ -312,9 +312,9 @@ def create_app(
             tenant_id=receipt["tenant_id"],
             filename=receipt["filename"] or str(record.get("filename") or ""),
             content_hash=receipt["content_hash"] or str(record.get("content_hash") or ""),
-            index_status=receipt["status"] if receipt["status"] != "skipped_duplicate" else "ready",
-            chunk_count=int(receipt.get("chunk_count") or 0),
-            error=receipt.get("error"),
+            index_status=str(record.get("index_status") or receipt["status"]),
+            chunk_count=int(record.get("chunk_count") or receipt.get("chunk_count") or 0),
+            error=record.get("error") or receipt.get("error"),
             indexed_at=record.get("indexed_at"),
         )
 

@@ -12,7 +12,7 @@ from .chunking import chunk_document
 from .vector_store import VectorStore
 
 
-IndexStatus = Literal["pending", "ready", "failed", "skipped_duplicate"]
+IndexStatus = Literal["pending", "indexing", "ready", "failed", "skipped_duplicate"]
 
 
 class IndexReceipt(TypedDict):
@@ -43,7 +43,7 @@ def canonical_document_id(tenant_id: str, content_hash: str) -> str:
 def summarize_index_receipts(receipts: list[IndexReceipt]) -> dict[str, Any]:
     ready = [item for item in receipts if item["status"] in {"ready", "skipped_duplicate"}]
     failed = [item for item in receipts if item["status"] == "failed"]
-    pending = [item for item in receipts if item["status"] == "pending"]
+    pending = [item for item in receipts if item["status"] in {"pending", "indexing"}]
     return {
         "mode": "async_on_upload",
         "chunks_indexed": sum(int(item["chunk_count"]) for item in ready),
@@ -111,17 +111,7 @@ class DocumentIndexer:
             source_path=str(file_path),
         )
         if not owns_processing:
-            return {
-                "document_id": record["document_id"],
-                "tenant_id": tenant,
-                "filename": record["filename"],
-                "content_hash": digest,
-                "status": "skipped_duplicate",
-                "chunk_count": int(record.get("chunk_count") or 0),
-                "error": None,
-                "contexts": list(record.get("contexts") or []),
-                "embed_calls": 0,
-            }
+            return _receipt_for_persisted_record(record)
         return {
             "document_id": document_id,
             "tenant_id": tenant,
@@ -179,17 +169,7 @@ class DocumentIndexer:
                 "embed_calls": 0,
             }
         if not claimed:
-            return {
-                "document_id": record["document_id"],
-                "tenant_id": tenant,
-                "filename": record["filename"],
-                "content_hash": record["content_hash"],
-                "status": "skipped_duplicate",
-                "chunk_count": int(record.get("chunk_count") or 0),
-                "error": None,
-                "contexts": list(record.get("contexts") or []),
-                "embed_calls": 0,
-            }
+            return _receipt_for_persisted_record(record)
 
         source_path = record.get("source_path")
         if not source_path:
@@ -347,3 +327,25 @@ def _stabilize_context(context: dict[str, Any], *, source_document_id: str) -> d
         stabilized["document_id"] = f"{source_document_id}:{raw_id}"
     stabilized["source_document_id"] = source_document_id
     return stabilized
+
+
+def _receipt_for_persisted_record(record: dict[str, Any]) -> IndexReceipt:
+    persisted_status = str(record.get("index_status") or "failed")
+    status: IndexStatus
+    if persisted_status == "ready":
+        status = "skipped_duplicate"
+    elif persisted_status in {"pending", "indexing", "failed"}:
+        status = persisted_status  # type: ignore[assignment]
+    else:
+        status = "failed"
+    return {
+        "document_id": str(record["document_id"]),
+        "tenant_id": str(record["tenant_id"]),
+        "filename": str(record.get("filename") or ""),
+        "content_hash": str(record.get("content_hash") or ""),
+        "status": status,
+        "chunk_count": int(record.get("chunk_count") or 0),
+        "error": str(record["error"]) if record.get("error") else None,
+        "contexts": list(record.get("contexts") or []),
+        "embed_calls": 0,
+    }

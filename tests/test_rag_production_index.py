@@ -463,7 +463,11 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(sorted(receipt["status"] for receipt in receipts), ["indexing", "ready"])
+        self.assertEqual(sum(receipt["status"] == "ready" for receipt in receipts), 1)
+        self.assertIn(
+            next(receipt["status"] for receipt in receipts if receipt["status"] != "ready"),
+            {"indexing", "skipped_duplicate"},
+        )
         self.assertEqual(len(store.index_calls), 1)
         documents, chunks, failed = _repository_counts(repo)
         self.assertEqual(documents, 1)
