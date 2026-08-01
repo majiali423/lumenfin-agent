@@ -8,7 +8,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from threading import Barrier, Lock
+from threading import Barrier, Event, Lock
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -144,6 +144,22 @@ class _RecordingVectorStore:
 
     def close(self) -> None:
         return None
+
+
+class _PausingVectorStore(_RecordingVectorStore):
+    def __init__(self, *, fail_after_release: bool = False) -> None:
+        super().__init__()
+        self.entered = Event()
+        self.release = Event()
+        self.fail_after_release = fail_after_release
+
+    def index_chunks(self, chunks, **kwargs):
+        self.entered.set()
+        if not self.release.wait(timeout=10):
+            raise RuntimeError("timed out waiting to resume vector indexing")
+        if self.fail_after_release:
+            raise RuntimeError("injected paused vector failure")
+        return super().index_chunks(chunks, **kwargs)
 
 
 def _repository_counts(repo: RagDocumentRepository) -> tuple[int, int, int]:
@@ -447,12 +463,87 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(sorted(receipt["status"] for receipt in receipts), ["ready", "skipped_duplicate"])
+        self.assertEqual(sorted(receipt["status"] for receipt in receipts), ["indexing", "ready"])
         self.assertEqual(len(store.index_calls), 1)
         documents, chunks, failed = _repository_counts(repo)
         self.assertEqual(documents, 1)
         self.assertGreater(chunks, 0)
         self.assertEqual(failed, 0)
+
+    def test_losing_worker_and_api_report_indexing_until_winner_is_ready(self) -> None:
+        path = _apple_markdown(self.root / "paused-winner.md")
+        store = _PausingVectorStore()
+        repo = RagDocumentRepository(self.config.database_url, db_path=self.config.db_path)
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+        pending = indexer.enqueue_file(path, tenant_id="tenant-a")
+        app = create_app(
+            replace(self.config, rag_tenant_id="tenant-a"),
+            llm_client=LocalFallbackLLMClient(),
+            market_data_client=FakeMarketDataClient(),
+        )
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            winner = pool.submit(indexer.process_pending, pending["document_id"], tenant_id="tenant-a")
+            self.assertTrue(store.entered.wait(timeout=10))
+
+            loser = indexer.process_pending(pending["document_id"], tenant_id="tenant-a")
+            self.assertEqual(loser["status"], "indexing")
+            with TestClient(app) as client:
+                current = client.get(
+                    f"/api/v1/documents/{pending['document_id']}", params={"tenant_id": "tenant-a"}
+                )
+                process = client.post(
+                    f"/api/v1/documents/{pending['document_id']}/process", params={"tenant_id": "tenant-a"}
+                )
+            self.assertEqual(current.status_code, 200, current.text)
+            self.assertEqual(current.json()["index_status"], "indexing")
+            self.assertEqual(process.status_code, 200, process.text)
+            self.assertEqual(process.json()["index_status"], "indexing")
+
+            store.release.set()
+            completed = winner.result(timeout=10)
+
+        self.assertEqual(completed["status"], "ready")
+        self.assertEqual(repo.get_document(pending["document_id"], tenant_id="tenant-a")["index_status"], "ready")
+
+    def test_losing_worker_never_reports_ready_when_paused_winner_fails(self) -> None:
+        path = _apple_markdown(self.root / "paused-failure.md")
+        store = _PausingVectorStore(fail_after_release=True)
+        repo = RagDocumentRepository(self.config.database_url, db_path=self.config.db_path)
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+        pending = indexer.enqueue_file(path, tenant_id="tenant-a")
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            winner = pool.submit(indexer.process_pending, pending["document_id"], tenant_id="tenant-a")
+            self.assertTrue(store.entered.wait(timeout=10))
+            loser = indexer.process_pending(pending["document_id"], tenant_id="tenant-a")
+            self.assertEqual(loser["status"], "indexing")
+            store.release.set()
+            failed = winner.result(timeout=10)
+
+        self.assertEqual(failed["status"], "failed")
+        persisted = repo.get_document(pending["document_id"], tenant_id="tenant-a")
+        self.assertEqual(persisted["index_status"], "failed")
+        self.assertNotEqual(loser["status"], "ready")
+        self.assertNotEqual(loser["status"], "skipped_duplicate")
+
+    def test_ready_duplicate_is_the_only_skipped_duplicate_process_result(self) -> None:
+        path = _apple_markdown(self.root / "ready-duplicate.md")
+        store = _RecordingVectorStore()
+        repo = RagDocumentRepository(self.config.database_url, db_path=self.config.db_path)
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+
+        ready = indexer.index_file(path, tenant_id="tenant-a")
+        duplicate = indexer.process_pending(ready["document_id"], tenant_id="tenant-a")
+
+        self.assertEqual(ready["status"], "ready")
+        self.assertEqual(duplicate["status"], "skipped_duplicate")
+        self.assertEqual(duplicate["chunk_count"], ready["chunk_count"])
+        self.assertEqual(len(store.index_calls), 1)
+        self.assertEqual(
+            len(repo.list_chunks(tenant_id="tenant-a", source_document_ids=[ready["document_id"]])),
+            ready["chunk_count"],
+        )
 
     def test_same_content_concurrent_tenants_remain_separate(self) -> None:
         path = _apple_markdown(self.root / "shared.md")
