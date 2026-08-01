@@ -90,6 +90,8 @@ class WorkflowCheckpointRepository:
                 )
                 session.add(row)
                 try:
+                    session.flush()
+                    committed = self._row_to_dict(row)
                     session.commit()
                 except IntegrityError as exc:
                     session.rollback()
@@ -122,8 +124,11 @@ class WorkflowCheckpointRepository:
                         f"Checkpoint conflict for thread_id={thread_id}: "
                         f"expected revision {expected_revision}"
                     )
+                row = session.get(WorkflowCheckpoint, thread_id)
+                assert row is not None
+                committed = self._row_to_dict(row)
                 session.commit()
-        return self.get(thread_id) or {}
+        return committed
 
     def get(self, thread_id: str) -> Optional[dict[str, Any]]:
         with Session(self.engine) as session:

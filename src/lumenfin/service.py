@@ -222,14 +222,21 @@ class LumenFinAnalysisService:
             rag_tenant_id=tenant,
             output_format=output_format,
         )
-        self.checkpoint_repo.upsert(
+        committed_checkpoint = self.checkpoint_repo.upsert(
             thread_id=actual_thread_id,
             query=query,
             state=system.get_thread_state(actual_thread_id) or result,
             llm_backend=result.get("llm_backend", system.llm_client.backend_name),
             expected_revision=expected_revision,
         )
-        packaged = self._package_response(actual_thread_id, query, system, result, export_artifacts)
+        packaged = self._package_response(
+            actual_thread_id,
+            query,
+            system,
+            result,
+            export_artifacts,
+            checkpoint=committed_checkpoint,
+        )
         if rag_index_stats:
             packaged["rag_index"] = {
                 "document_ids": rag_document_ids,
@@ -254,14 +261,21 @@ class LumenFinAnalysisService:
         result = system.resume_with_clarification(thread_id, clarification)
         assert record is not None
         query = record.get("query", "")
-        self.checkpoint_repo.upsert(
+        committed_checkpoint = self.checkpoint_repo.upsert(
             thread_id=thread_id,
             query=query,
             state=system.get_thread_state(thread_id) or result,
             llm_backend=result.get("llm_backend", system.llm_client.backend_name),
             expected_revision=int(record["revision"]),
         )
-        return self._package_response(thread_id, query, system, result, export_artifacts)
+        return self._package_response(
+            thread_id,
+            query,
+            system,
+            result,
+            export_artifacts,
+            checkpoint=committed_checkpoint,
+        )
 
     def get_checkpoint(self, thread_id: str) -> dict | None:
         return self.checkpoint_repo.get(thread_id)
@@ -273,6 +287,7 @@ class LumenFinAnalysisService:
         system: LumenFinAgentSystem,
         result: dict,
         export_artifacts: bool,
+        checkpoint: dict | None = None,
     ) -> dict:
         artifacts: dict[str, str] = {}
         workflow_status = result.get("workflow_status", "completed")
@@ -291,7 +306,8 @@ class LumenFinAnalysisService:
                 rag_enabled=self.config.rag_enabled,
                 market_provider=self.config.market_data_provider,
             )
-        checkpoint = self.checkpoint_repo.get(thread_id)
+        if checkpoint is None:
+            checkpoint = self.checkpoint_repo.get(thread_id)
         return {
             "thread_id": thread_id,
             "query": query or (checkpoint or {}).get("query", ""),
