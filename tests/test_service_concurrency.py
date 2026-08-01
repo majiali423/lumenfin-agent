@@ -73,6 +73,28 @@ def _usage_projection(response: dict) -> dict:
 
 
 class ServiceConcurrencyIsolationTestCase(unittest.TestCase):
+    def _build_concurrent_service(self, name: str, llm: LocalFallbackLLMClient) -> LumenFinAnalysisService:
+        root = ROOT / "test_artifacts" / f"{name}-{uuid4().hex[:8]}"
+        config = replace(build_test_config(root), rag_enabled=False)
+        return LumenFinAnalysisService(
+            config,
+            llm_client=llm,
+            market_data_client=FakeMarketDataClient(),
+        )
+
+    def _assert_one_checkpoint_conflict(self, futures: list) -> dict:
+        successes: list[dict] = []
+        errors: list[Exception] = []
+        for future in futures:
+            try:
+                successes.append(future.result())
+            except Exception as exc:  # noqa: BLE001 - asserting public conflict type
+                errors.append(exc)
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(type(errors[0]).__name__, "CheckpointConflictError")
+        return successes[0]
+
     def test_concurrent_requests_match_serial_run_local_usage(self) -> None:
         requests = {
             "usage-apple": "Analyze Apple FY2025 profitability and R&D intensity.",
@@ -180,6 +202,77 @@ class ServiceConcurrencyIsolationTestCase(unittest.TestCase):
             service.get_checkpoint("apple-concurrent")["state"]["companies"],
             ["Apple"],
         )
+
+    def test_same_thread_concurrent_analyze_rejects_one_stale_write(self) -> None:
+        service = self._build_concurrent_service(
+            "same-thread-analyze",
+            _BarrierTokenLLM(Barrier(2)),
+        )
+        thread_id = "same-analyze"
+        queries = [
+            "Analyze Apple FY2025 profitability and R&D intensity.",
+            "Analyze NVIDIA FY2025 profitability and R&D intensity.",
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(service.analyze, query, thread_id, False)
+                for query in queries
+            ]
+            winner = self._assert_one_checkpoint_conflict(futures)
+
+        stored = service.get_checkpoint(thread_id)
+        self.assertEqual(stored["query"], winner["query"])
+        self.assertEqual(stored["state"]["companies"], winner["result"]["companies"])
+
+    def test_analyze_and_clarify_from_same_revision_conflict(self) -> None:
+        service = self._build_concurrent_service("analyze-clarify", LocalFallbackLLMClient())
+        thread_id = "analyze-clarify"
+        paused = service.analyze("Analyze profitability.", thread_id, False)
+        self.assertEqual(paused["workflow_status"], "needs_clarification")
+        service._llm_client = _BarrierTokenLLM(Barrier(2))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(
+                    service.clarify,
+                    thread_id,
+                    {"company": "NVIDIA", "time_range": "FY2025"},
+                    False,
+                ),
+                pool.submit(
+                    service.analyze,
+                    "Analyze Apple FY2025 profitability and R&D intensity.",
+                    thread_id,
+                    False,
+                ),
+            ]
+            winner = self._assert_one_checkpoint_conflict(futures)
+
+        stored = service.get_checkpoint(thread_id)
+        self.assertEqual(stored["query"], winner["query"])
+        self.assertEqual(stored["state"]["companies"], winner["result"]["companies"])
+
+    def test_two_clarifications_from_same_revision_conflict(self) -> None:
+        service = self._build_concurrent_service("double-clarify", LocalFallbackLLMClient())
+        thread_id = "double-clarify"
+        paused = service.analyze("Analyze profitability.", thread_id, False)
+        self.assertEqual(paused["workflow_status"], "needs_clarification")
+        service._llm_client = _BarrierTokenLLM(Barrier(2))
+        clarifications = [
+            {"company": "Apple", "time_range": "FY2025"},
+            {"company": "NVIDIA", "time_range": "FY2025"},
+        ]
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(service.clarify, thread_id, clarification, False)
+                for clarification in clarifications
+            ]
+            winner = self._assert_one_checkpoint_conflict(futures)
+
+        stored = service.get_checkpoint(thread_id)
+        self.assertEqual(stored["state"]["companies"], winner["result"]["companies"])
+        self.assertEqual(len(stored["state"]["companies"]), 1)
 
 
 if __name__ == "__main__":
