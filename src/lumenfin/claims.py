@@ -372,7 +372,7 @@ def is_factual_period_provenance(
         return False
     if source in _ASSUMED_PERIOD_SOURCES or source not in _FACTUAL_PERIOD_SOURCES:
         return False
-    if alignment in _ASSUMED_PERIOD_ALIGNMENTS:
+    if alignment != "exact":
         return False
     return True
 
@@ -879,6 +879,23 @@ def match_numeric_evidence(
 
     # Structured field path: display text is not the source of truth.
     if evidence.has_structured_fields and not formula_inputs:
+        claim_period_id = parse_period_identity(period)
+        if claim_period_id.kind != "unknown" and not is_factual_period_provenance(
+            period=evidence.period,
+            period_source=evidence.period_source,
+            period_alignment=evidence.period_alignment,
+        ):
+            return EvidenceMatch(
+                False,
+                float(evidence.value) if evidence.value is not None else None,
+                bool(evidence.metric_name == metric_name),
+                False,
+                bool(evidence.unit),
+                None,
+                None,
+                "none",
+                "period_provenance_invalid",
+            )
         if str(evidence.metric_name) != str(metric_name):
             return EvidenceMatch(
                 False,
