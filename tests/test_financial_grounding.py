@@ -39,6 +39,42 @@ def _doc_meta(value: float, *, period: str | None = None) -> dict:
 
 
 class FinancialGroundingMergeTests(unittest.TestCase):
+    def test_same_sentence_period_cannot_cross_next_metric_label(self) -> None:
+        text = (
+            "Revenue was 245.0 billion USD and operating income for FY2023 "
+            "was 100.0 billion USD."
+        )
+        revenue = extract_metric_hint_meta(text, metric="revenue")
+        operating_income = extract_metric_hint_meta(text, metric="operating_income")
+        self.assertIsNotNone(revenue)
+        self.assertIsNotNone(operating_income)
+        self.assertIsNone(revenue.get("period"))
+        self.assertEqual(operating_income.get("period"), "FY2023")
+
+    def test_same_sentence_each_metric_keeps_its_own_period(self) -> None:
+        text = (
+            "Revenue for FY2024 was 245.0 billion USD and operating income "
+            "for FY2023 was 100.0 billion USD."
+        )
+        revenue = extract_metric_hint_meta(text, metric="revenue")
+        operating_income = extract_metric_hint_meta(text, metric="operating_income")
+        self.assertIsNotNone(revenue)
+        self.assertIsNotNone(operating_income)
+        self.assertEqual(revenue.get("period"), "FY2024")
+        self.assertEqual(operating_income.get("period"), "FY2023")
+
+    def test_trailing_period_does_not_apply_to_all_metrics_in_sentence(self) -> None:
+        text = (
+            "Revenue was 245.0 billion USD, operating income was 100.0 billion USD "
+            "for FY2023."
+        )
+        revenue = extract_metric_hint_meta(text, metric="revenue")
+        operating_income = extract_metric_hint_meta(text, metric="operating_income")
+        self.assertIsNotNone(revenue)
+        self.assertIsNotNone(operating_income)
+        self.assertIsNone(revenue.get("period"))
+        self.assertEqual(operating_income.get("period"), "FY2023")
+
     def test_later_metric_period_does_not_bind_to_revenue(self) -> None:
         meta = extract_metric_hint_meta(
             "Revenue was 245.0 billion USD. Operating income for FY2023 was 100.0 billion USD.",
