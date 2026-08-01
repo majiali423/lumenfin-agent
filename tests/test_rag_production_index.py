@@ -72,6 +72,16 @@ class _BarrierReadyRepository(RagDocumentRepository):
         return record
 
 
+class _BarrierClaimRepository(RagDocumentRepository):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._claim_barrier = Barrier(2)
+
+    def claim_pending_document(self, *, document_id: str, tenant_id: str):
+        self._claim_barrier.wait(timeout=10)
+        return super().claim_pending_document(document_id=document_id, tenant_id=tenant_id)
+
+
 class _RecordingVectorStore:
     def __init__(self, *, fail_tenants: set[str] | None = None) -> None:
         self.fail_tenants = set(fail_tenants or set())
@@ -420,6 +430,29 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
         self.assertEqual(later["status"], "skipped_duplicate")
         self.assertEqual(later["document_id"], receipts[0]["document_id"])
         self.assertEqual(len(store.index_calls), 1)
+
+    def test_duplicate_pending_workers_write_chunks_and_vectors_once(self) -> None:
+        path = _apple_markdown(self.root / "duplicate-workers.md")
+        store = _RecordingVectorStore()
+        repo = _BarrierClaimRepository(self.config.database_url, db_path=self.config.db_path)
+        indexer = DocumentIndexer(rag_store=store, repository=repo)
+        pending = indexer.enqueue_file(path, tenant_id="tenant-a")
+        self.assertEqual(pending["status"], "pending")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            receipts = list(
+                pool.map(
+                    lambda _: indexer.process_pending(pending["document_id"], tenant_id="tenant-a"),
+                    range(2),
+                )
+            )
+
+        self.assertEqual(sorted(receipt["status"] for receipt in receipts), ["ready", "skipped_duplicate"])
+        self.assertEqual(len(store.index_calls), 1)
+        documents, chunks, failed = _repository_counts(repo)
+        self.assertEqual(documents, 1)
+        self.assertGreater(chunks, 0)
+        self.assertEqual(failed, 0)
 
     def test_same_content_concurrent_tenants_remain_separate(self) -> None:
         path = _apple_markdown(self.root / "shared.md")
