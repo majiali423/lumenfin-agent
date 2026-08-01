@@ -51,7 +51,12 @@ def export_finrun_state(state: dict[str, Any]) -> dict[str, Any]:
 def _retrieval_provenance(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     explicit = state.get("retrieval_provenance") or {}
     if explicit:
-        return {str(company): dict(value) for company, value in explicit.items()}
+        merged = {str(company): dict(value) for company, value in explicit.items()}
+        for company, bundle in (state.get("retrieved_docs") or {}).items():
+            merged.setdefault(str(company), {})["fundamental_provenance"] = dict(
+                bundle.get("fundamental_provenance") or {}
+            )
+        return merged
 
     derived: dict[str, dict[str, Any]] = {}
     for company, bundle in (state.get("retrieved_docs") or {}).items():
@@ -95,7 +100,12 @@ def _metrics(state: dict[str, Any]) -> list[dict[str, Any]]:
                 "period": period,
                 "value": value,
                 "formula": formula,
-                "inputs": _metric_inputs(input_map, source_values, period=period),
+                "inputs": _metric_inputs(
+                    input_map,
+                    source_values,
+                    period=period,
+                    provenance=bundle.get("fundamental_provenance"),
+                ),
                 "confidence": _metric_confidence(
                     metric_confidence.get(company) or {},
                     name,
@@ -111,17 +121,28 @@ def _metric_inputs(
     source_values: dict[str, Any],
     *,
     period: str,
+    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     inputs = {}
     for input_name, source_key in input_map.items():
         value = get_fundamental(source_values, source_key)
         if value is None:
             continue
+        field_provenance = (provenance or {}).get(source_key) or {}
+        input_period = field_provenance.get("period") if isinstance(provenance, dict) else period
         inputs[input_name] = {
             "value": value,
             "unit": "billion",
             "currency": "USD",
-            "period": period,
+            "period": input_period,
+            "source": field_provenance.get("source") or "market_data",
+            "period_source": field_provenance.get("period_source"),
+            "period_alignment": field_provenance.get("period_alignment"),
+            "citation": field_provenance.get("citation"),
+            "source_record_id": (
+                field_provenance.get("source_record_id")
+                or field_provenance.get("provider_record_id")
+            ),
         }
     return inputs
 

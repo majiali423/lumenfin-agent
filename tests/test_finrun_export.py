@@ -37,6 +37,11 @@ class FinRunExportTestCase(unittest.TestCase):
         )
         metric = next(item for item in finrun["metrics"] if item["name"] == "ebitda_margin")
         self.assertEqual(metric["confidence"]["structured_source"], "sample_db")
+        self.assertEqual(metric["inputs"]["revenue"]["period_source"], "provider_record")
+        self.assertEqual(
+            metric["inputs"]["revenue"]["source_record_id"],
+            "sample:apple:FY2025:revenue",
+        )
 
     def test_export_finrun_script_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -93,6 +98,16 @@ def _sample_state() -> dict:
                 },
                 "earnings_call_quotes": ["Management cited services expansion and margin discipline."],
                 "structured_source": "sample_db",
+                "fundamentals_meta": {"fiscal_year": 2025},
+                "fundamental_provenance": {
+                    key: {
+                        "source": "provider_record", "confidence": "high",
+                        "period": "FY2025", "period_source": "provider_record",
+                        "period_alignment": "exact", "citation": f"sample://apple/{key}",
+                        "source_record_id": f"sample:apple:FY2025:{key}",
+                    }
+                    for key in ("revenue", "ebitda", "r_and_d", "operating_income")
+                },
                 "provenance": {
                     "structured_source": "sample_db",
                     "market_provider": "fake",
