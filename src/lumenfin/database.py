@@ -27,6 +27,7 @@ class WorkflowCheckpoint(Base):
     llm_backend: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class AnalysisJob(Base):

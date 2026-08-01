@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .database import Base, WorkflowCheckpoint, utc_now
+
+
+class CheckpointConflictError(RuntimeError):
+    """Raised when a checkpoint write is based on a stale revision."""
 
 
 def infer_last_node(state: dict[str, Any]) -> str:
@@ -27,6 +32,19 @@ class WorkflowCheckpointRepository:
     def __init__(self, engine) -> None:
         self.engine = engine
         Base.metadata.create_all(self.engine)
+        self._ensure_sqlite_revision_column()
+
+    def _ensure_sqlite_revision_column(self) -> None:
+        if not str(self.engine.url).startswith("sqlite"):
+            return
+        with self.engine.begin() as conn:
+            rows = conn.exec_driver_sql("PRAGMA table_info(workflow_checkpoints)").fetchall()
+            columns = {str(row[1]) for row in rows}
+            if rows and "revision" not in columns:
+                conn.exec_driver_sql(
+                    "ALTER TABLE workflow_checkpoints "
+                    "ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                )
 
     @classmethod
     def from_database_url(cls, database_url: str, db_path=None) -> "WorkflowCheckpointRepository":
@@ -42,7 +60,12 @@ class WorkflowCheckpointRepository:
         query: str,
         state: dict[str, Any],
         llm_backend: str | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
+        if expected_revision is None:
+            raise ValueError("expected_revision is required for checkpoint writes")
+        if expected_revision < 0:
+            raise ValueError("expected_revision must be non-negative")
         now = utc_now()
         payload = json.dumps(state, ensure_ascii=False, default=str)
         clarification_questions = json.dumps(
@@ -52,8 +75,7 @@ class WorkflowCheckpointRepository:
         last_node = infer_last_node(state)
         workflow_status = str(state.get("workflow_status") or "running")
         with Session(self.engine) as session:
-            row = session.get(WorkflowCheckpoint, thread_id)
-            if row is None:
+            if expected_revision == 0:
                 row = WorkflowCheckpoint(
                     thread_id=thread_id,
                     query=query,
@@ -64,18 +86,43 @@ class WorkflowCheckpointRepository:
                     llm_backend=llm_backend,
                     created_at=now,
                     updated_at=now,
+                    revision=1,
                 )
                 session.add(row)
+                try:
+                    session.commit()
+                except IntegrityError as exc:
+                    session.rollback()
+                    raise CheckpointConflictError(
+                        f"Checkpoint conflict for thread_id={thread_id}: expected revision 0"
+                    ) from exc
             else:
-                row.query = query or row.query
-                row.workflow_status = workflow_status
-                row.state_json = payload
-                row.clarification_questions_json = clarification_questions
-                row.last_node = last_node
+                values: dict[str, Any] = {
+                    "query": query,
+                    "workflow_status": workflow_status,
+                    "state_json": payload,
+                    "clarification_questions_json": clarification_questions,
+                    "last_node": last_node,
+                    "updated_at": now,
+                    "revision": expected_revision + 1,
+                }
                 if llm_backend is not None:
-                    row.llm_backend = llm_backend
-                row.updated_at = now
-            session.commit()
+                    values["llm_backend"] = llm_backend
+                result = session.execute(
+                    update(WorkflowCheckpoint)
+                    .where(
+                        WorkflowCheckpoint.thread_id == thread_id,
+                        WorkflowCheckpoint.revision == expected_revision,
+                    )
+                    .values(**values)
+                )
+                if result.rowcount != 1:
+                    session.rollback()
+                    raise CheckpointConflictError(
+                        f"Checkpoint conflict for thread_id={thread_id}: "
+                        f"expected revision {expected_revision}"
+                    )
+                session.commit()
         return self.get(thread_id) or {}
 
     def get(self, thread_id: str) -> Optional[dict[str, Any]]:
@@ -115,4 +162,5 @@ class WorkflowCheckpointRepository:
             "llm_backend": row.llm_backend,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
+            "revision": row.revision,
         }

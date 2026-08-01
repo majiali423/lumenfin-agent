@@ -272,6 +272,10 @@ class ServiceConcurrencyIsolationTestCase(unittest.TestCase):
 
         stored = service.get_checkpoint(thread_id)
         self.assertEqual(stored["state"]["companies"], winner["result"]["companies"])
+        self.assertEqual(
+            stored["state"].get("user_clarification"),
+            winner["result"].get("user_clarification"),
+        )
         self.assertEqual(len(stored["state"]["companies"]), 1)
 
 

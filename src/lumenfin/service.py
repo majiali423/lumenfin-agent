@@ -91,14 +91,19 @@ class LumenFinAnalysisService:
         _, indexer = self._rag_resources()
         return indexer
 
-    def _load_thread_state(self, system: LumenFinAgentSystem, thread_id: str) -> dict | None:
+    def _load_thread_state(
+        self,
+        system: LumenFinAgentSystem,
+        thread_id: str,
+        record: dict | None = None,
+    ) -> dict | None:
         state = system.get_thread_state(thread_id)
         if state is not None:
             return state
-        record = self.checkpoint_repo.get(thread_id)
+        record = record or self.checkpoint_repo.get(thread_id)
         if record is None:
             return None
-        return system.bootstrap_thread_from_store(thread_id, self.checkpoint_repo)
+        return system.bootstrap_thread_from_store(thread_id, self.checkpoint_repo, record=record)
 
     def index_document_paths(
         self,
@@ -161,6 +166,8 @@ class LumenFinAnalysisService:
         output_format: str | None = None,
     ) -> dict:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
+        base_checkpoint = self.checkpoint_repo.get(actual_thread_id)
+        expected_revision = int(base_checkpoint["revision"]) if base_checkpoint else 0
         system = self._system_for(actual_thread_id)
         tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
         document_contexts: list[dict] = []
@@ -220,6 +227,7 @@ class LumenFinAnalysisService:
             query=query,
             state=system.get_thread_state(actual_thread_id) or result,
             llm_backend=result.get("llm_backend", system.llm_client.backend_name),
+            expected_revision=expected_revision,
         )
         packaged = self._package_response(actual_thread_id, query, system, result, export_artifacts)
         if rag_index_stats:
@@ -237,19 +245,21 @@ class LumenFinAnalysisService:
         export_artifacts: bool = True,
     ) -> dict:
         system = self._system_for(thread_id)
-        prior = self._load_thread_state(system, thread_id)
+        record = self.checkpoint_repo.get(thread_id)
+        prior = self._load_thread_state(system, thread_id, record=record)
         if prior is None:
             raise ValueError(f"No checkpoint found for thread_id={thread_id}")
         if prior.get("workflow_status") != "needs_clarification":
             raise ValueError(f"Thread {thread_id} is not awaiting clarification.")
         result = system.resume_with_clarification(thread_id, clarification)
-        record = self.checkpoint_repo.get(thread_id) or {}
+        assert record is not None
         query = record.get("query", "")
         self.checkpoint_repo.upsert(
             thread_id=thread_id,
             query=query,
             state=system.get_thread_state(thread_id) or result,
             llm_backend=result.get("llm_backend", system.llm_client.backend_name),
+            expected_revision=int(record["revision"]),
         )
         return self._package_response(thread_id, query, system, result, export_artifacts)
 

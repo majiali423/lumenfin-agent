@@ -328,8 +328,9 @@ class LumenFinAgentSystem:
         self,
         thread_id: str,
         checkpoint_repo: WorkflowCheckpointRepository,
+        record: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        record = checkpoint_repo.get(thread_id)
+        record = record or checkpoint_repo.get(thread_id)
         if record is None:
             raise ValueError(f"No persisted checkpoint found for thread_id={thread_id}")
         config = {"configurable": {"thread_id": thread_id}}
@@ -346,6 +347,7 @@ class LumenFinAgentSystem:
         query: str,
         result: dict[str, Any],
         checkpoint_repo: WorkflowCheckpointRepository,
+        expected_revision: int,
     ) -> dict[str, Any]:
         state = self.get_thread_state(thread_id) or result
         merged = {**state, **{k: v for k, v in result.items() if k not in state or v is not None}}
@@ -354,6 +356,7 @@ class LumenFinAgentSystem:
             query=query,
             state=merged,
             llm_backend=result.get("llm_backend", self.llm_client.backend_name),
+            expected_revision=expected_revision,
         )
 
     def _finalize_result(self, result: dict[str, Any], thread_id: str) -> dict[str, Any]:
