@@ -11,7 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from threading import Barrier, Lock, get_ident
+from threading import Barrier, Event, Lock, get_ident
 from typing import Any
 
 from sqlalchemy import func, select
@@ -75,31 +75,20 @@ class FirstCallBarrierLLM(LocalFallbackLLMClient):
         return super().chat(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
 
 
-class BarrierRepository(RagDocumentRepository):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._barrier = Barrier(2)
-        self._lock = Lock()
-        self._remaining = 2
-
-    def find_ready_by_hash(self, *, tenant_id: str, content_hash: str):
-        record = super().find_ready_by_hash(tenant_id=tenant_id, content_hash=content_hash)
-        wait = False
-        if record is None:
-            with self._lock:
-                if self._remaining:
-                    self._remaining -= 1
-                    wait = True
-        if wait:
-            self._barrier.wait(timeout=10)
-        return record
-
-
 class OfflineVectorStore:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        pause_tenants: set[str] | None = None,
+        fail_after_write_tenants: set[str] | None = None,
+    ) -> None:
         self._lock = Lock()
         self.rows: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.index_calls = 0
+        self.pause_tenants = set(pause_tenants or set())
+        self.fail_after_write_tenants = set(fail_after_write_tenants or set())
+        self.entered = Event()
+        self.release = Event()
 
     def index_chunks(
         self,
@@ -112,6 +101,10 @@ class OfflineVectorStore:
         replace_existing: bool = True,
     ) -> dict[str, int]:
         del content_hash, session_id
+        if tenant_id in self.pause_tenants:
+            self.entered.set()
+            if not self.release.wait(timeout=10):
+                raise RuntimeError("offline validator timed out waiting to resume indexing")
         with self._lock:
             self.index_calls += 1
             if replace_existing:
@@ -127,11 +120,23 @@ class OfflineVectorStore:
                     "tenant_id": tenant_id,
                     "source_document_id": source_document_id,
                 }
+        if tenant_id in self.fail_after_write_tenants:
+            raise RuntimeError(f"injected post-vector failure for {tenant_id}")
         return {"chunks_indexed": len(chunks), "embed_calls": 1}
 
     def rows_for(self, tenant_id: str) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(row) for row in self.rows.values() if row["tenant_id"] == tenant_id]
+
+    def delete_by_source_document(self, *, tenant_id: str, source_document_id: str) -> int:
+        with self._lock:
+            before = len(self.rows)
+            self.rows = {
+                key: row
+                for key, row in self.rows.items()
+                if key[:2] != (tenant_id, source_document_id)
+            }
+            return before - len(self.rows)
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -222,12 +227,15 @@ def scenario_same_thread(root: Path) -> tuple[int, int, int, list[float], list[s
     return len(queries), successes, conflicts, [item[1] for item in outcomes], errors
 
 
-def scenario_rag(root: Path) -> tuple[int, int]:
+def scenario_rag(root: Path) -> dict[str, int]:
     rag_root = root / "rag"
     rag_root.mkdir(parents=True, exist_ok=True)
     config = build_test_config(rag_root)
-    repo = BarrierRepository(config.database_url, db_path=config.db_path)
-    store = OfflineVectorStore()
+    repo = RagDocumentRepository(config.database_url, db_path=config.db_path)
+    store = OfflineVectorStore(
+        pause_tenants={"tenant-dup"},
+        fail_after_write_tenants={"tenant-fail"},
+    )
     indexer = DocumentIndexer(rag_store=store, repository=repo)
     document = rag_root / "notes.md"
     document.write_text(
@@ -235,10 +243,24 @@ def scenario_rag(root: Path) -> tuple[int, int]:
         encoding="utf-8",
     )
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        duplicates = list(pool.map(lambda _: indexer.index_file(document, tenant_id="tenant-dup"), range(2)))
-    assert len({item["document_id"] for item in duplicates}) == 1
-    assert sorted(item["status"] for item in duplicates) == ["ready", "skipped_duplicate"]
+    pending = indexer.enqueue_file(document, tenant_id="tenant-dup")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        winning_worker = pool.submit(
+            indexer.process_pending,
+            pending["document_id"],
+            tenant_id="tenant-dup",
+        )
+        assert store.entered.wait(timeout=10)
+        losing_worker = indexer.process_pending(pending["document_id"], tenant_id="tenant-dup")
+        in_progress_count = int(losing_worker["status"] == "indexing")
+        false_ready_count = int(losing_worker["status"] in {"ready", "skipped_duplicate"})
+        assert in_progress_count == 1
+        assert false_ready_count == 0
+        store.release.set()
+        winner = winning_worker.result(timeout=10)
+    assert winner["status"] == "ready"
+    duplicate = indexer.process_pending(pending["document_id"], tenant_id="tenant-dup")
+    assert duplicate["status"] == "skipped_duplicate"
     assert store.index_calls == 1
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -249,6 +271,21 @@ def scenario_rag(root: Path) -> tuple[int, int]:
     assert {row["tenant_id"] for row in store.rows_for("tenant-a")} == {"tenant-a"}
     assert {row["tenant_id"] for row in store.rows_for("tenant-b")} == {"tenant-b"}
 
+    failure_document = rag_root / "failure.md"
+    failure_document.write_text(
+        "# Failure injection\n\nA failed index must not leave vectors or chunks.",
+        encoding="utf-8",
+    )
+    failed_receipt = indexer.index_file(failure_document, tenant_id="tenant-fail")
+    assert failed_receipt["status"] == "failed"
+    failed_document_id = failed_receipt["document_id"]
+    orphan_vector_count = len(store.rows_for("tenant-fail"))
+    orphan_chunk_count = len(
+        repo.list_chunks(tenant_id="tenant-fail", source_document_ids=[failed_document_id])
+    )
+    assert orphan_vector_count == 0
+    assert orphan_chunk_count == 0
+
     with Session(repo.engine) as session:
         document_count = int(session.scalar(select(func.count()).select_from(RagDocument)) or 0)
         chunk_count = int(session.scalar(select(func.count()).select_from(RagChunk)) or 0)
@@ -258,11 +295,19 @@ def scenario_rag(root: Path) -> tuple[int, int]:
             )
             or 0
         )
-    assert document_count == 3
+    assert document_count == 4
     assert chunk_count > 0
-    assert failed == 0
+    assert failed == 1
     repo.engine.dispose()
-    return document_count, chunk_count
+    return {
+        "document_count": document_count,
+        "chunk_count": chunk_count,
+        "in_progress_count": in_progress_count,
+        "false_ready_count": false_ready_count,
+        "failed_document_count": failed,
+        "orphan_vector_count": orphan_vector_count,
+        "orphan_chunk_count": orphan_chunk_count,
+    }
 
 
 def main() -> int:
@@ -272,7 +317,7 @@ def main() -> int:
         root = Path(temp_dir)
         count_a, success_a, latency_a, errors_a = scenario_different_threads(root)
         count_b, success_b, conflicts_b, latency_b, errors_b = scenario_same_thread(root)
-        document_count, chunk_count = scenario_rag(root)
+        rag_metrics = scenario_rag(root)
 
     latencies = latency_a + latency_b
     unexpected = errors_a + errors_b
@@ -284,8 +329,7 @@ def main() -> int:
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
         "p50_latency_ms": round(statistics.median(latencies), 2) if latencies else 0.0,
         "p95_latency_ms": percentile(latencies, 0.95),
-        "document_count": document_count,
-        "chunk_count": chunk_count,
+        **rag_metrics,
         "unexpected_errors": unexpected,
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))
