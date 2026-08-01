@@ -21,6 +21,17 @@ def _normalize_rag_index_mode(raw: str | None) -> str:
     return mode
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
 @dataclass(frozen=True)
 class AppConfig:
     output_dir: Path
@@ -56,6 +67,7 @@ class AppConfig:
     rag_index_mode: str
     rag_tenant_id: str
     rag_require_ready: bool
+    rag_index_lease_seconds: int
     embedding_max_retries: int
     embedding_backoff_seconds: float
     embedding_timeout_seconds: float
@@ -135,6 +147,7 @@ class AppConfig:
             rag_index_mode=_normalize_rag_index_mode(os.getenv("MAS_RAG_INDEX_MODE", "sync_on_run")),
             rag_tenant_id=(os.getenv("MAS_RAG_TENANT_ID", "default").strip() or "default"),
             rag_require_ready=os.getenv("MAS_RAG_REQUIRE_READY", "false").lower() in {"1", "true", "yes"},
+            rag_index_lease_seconds=_positive_int_env("MAS_RAG_INDEX_LEASE_SECONDS", 300),
             embedding_max_retries=max(1, int(os.getenv("MAS_EMBEDDING_MAX_RETRIES", "3"))),
             embedding_backoff_seconds=float(os.getenv("MAS_EMBEDDING_BACKOFF_SECONDS", "0.5")),
             embedding_timeout_seconds=float(

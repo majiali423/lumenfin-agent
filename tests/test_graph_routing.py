@@ -58,6 +58,7 @@ def build_test_config(root: Path) -> AppConfig:
         rag_index_mode="sync_on_run",
         rag_tenant_id="test-tenant",
         rag_require_ready=False,
+        rag_index_lease_seconds=300,
         embedding_max_retries=3,
         embedding_backoff_seconds=0.01,
         embedding_timeout_seconds=30.0,

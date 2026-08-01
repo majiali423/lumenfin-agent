@@ -1,9 +1,10 @@
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-from sqlalchemy import Integer, Text, create_engine, delete, select, update
+from sqlalchemy import BigInteger, Integer, Text, and_, create_engine, delete, inspect, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -61,6 +62,9 @@ class RagDocument(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     contexts_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     source_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    index_owner: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    index_lease_expires: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    index_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -162,12 +166,23 @@ class JobRepository:
 class RagDocumentRepository:
     """CRUD for upload-time RAG document + canonical chunk persistence."""
 
-    def __init__(self, database_url: str, db_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        db_path: Optional[Path] = None,
+        *,
+        epoch_fn: Callable[[], int | float] | None = None,
+    ) -> None:
         if database_url.startswith("sqlite:///") and db_path is not None:
             db_path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(database_url, future=True)
+        self._epoch_fn = epoch_fn or time.time
         Base.metadata.create_all(self.engine)
         self._ensure_sqlite_columns()
+        self._validate_external_lease_columns()
+
+    def _now_epoch(self) -> int:
+        return int(self._epoch_fn())
 
     def _ensure_sqlite_columns(self) -> None:
         """Best-effort additive migration for existing Lite SQLite files."""
@@ -178,6 +193,30 @@ class RagDocumentRepository:
             columns = {str(row[1]) for row in rows}
             if rows and "source_path" not in columns:
                 conn.exec_driver_sql("ALTER TABLE rag_documents ADD COLUMN source_path TEXT")
+            if rows and "index_owner" not in columns:
+                conn.exec_driver_sql("ALTER TABLE rag_documents ADD COLUMN index_owner TEXT")
+            if rows and "index_lease_expires" not in columns:
+                conn.exec_driver_sql("ALTER TABLE rag_documents ADD COLUMN index_lease_expires INTEGER")
+            if rows and "index_attempt" not in columns:
+                conn.exec_driver_sql(
+                    "ALTER TABLE rag_documents ADD COLUMN index_attempt INTEGER NOT NULL DEFAULT 0"
+                )
+
+    def _validate_external_lease_columns(self) -> None:
+        if str(self.engine.url).startswith("sqlite"):
+            return
+        schema = inspect(self.engine)
+        if not schema.has_table("rag_documents"):
+            return
+        columns = {str(column["name"]) for column in schema.get_columns("rag_documents")}
+        required = {"index_owner", "index_lease_expires", "index_attempt"}
+        missing = sorted(required - columns)
+        if missing:
+            raise RuntimeError(
+                "Database schema is missing rag_documents lease columns "
+                f"({', '.join(missing)}). Apply "
+                "migrations/postgresql/002_add_rag_index_lease.sql with psql before starting LumenFin."
+            )
 
     def find_ready_by_hash(self, *, tenant_id: str, content_hash: str) -> dict[str, Any] | None:
         with Session(self.engine) as session:
@@ -222,6 +261,9 @@ class RagDocumentRepository:
                 chunk_count=0,
                 contexts_json="[]",
                 source_path=source_path,
+                index_owner=None,
+                index_lease_expires=None,
+                index_attempt=0,
                 created_at=now,
                 updated_at=now,
             )
@@ -253,6 +295,8 @@ class RagDocumentRepository:
                         chunk_count=0,
                         contexts_json="[]",
                         source_path=source_path,
+                        index_owner=None,
+                        index_lease_expires=None,
                         updated_at=now,
                     )
                 )
@@ -271,17 +315,36 @@ class RagDocumentRepository:
         *,
         document_id: str,
         tenant_id: str,
+        index_owner: str,
+        lease_seconds: int,
     ) -> tuple[dict[str, Any] | None, bool]:
-        """Database CAS from pending to indexing so duplicate workers cannot both write."""
+        """Atomically claim pending or expired indexing work with a fencing generation."""
+        now_epoch = self._now_epoch()
         with Session(self.engine) as session:
             result = session.execute(
                 update(RagDocument)
                 .where(
                     RagDocument.document_id == document_id,
                     RagDocument.tenant_id == tenant_id,
-                    RagDocument.index_status == "pending",
+                    or_(
+                        RagDocument.index_status == "pending",
+                        and_(
+                            RagDocument.index_status == "indexing",
+                            or_(
+                                RagDocument.index_lease_expires.is_(None),
+                                RagDocument.index_lease_expires < now_epoch,
+                            ),
+                        ),
+                    ),
                 )
-                .values(index_status="indexing", updated_at=utc_now())
+                .values(
+                    index_status="indexing",
+                    index_owner=index_owner,
+                    index_lease_expires=now_epoch + lease_seconds,
+                    index_attempt=RagDocument.index_attempt + 1,
+                    error=None,
+                    updated_at=utc_now(),
+                )
             )
             if result.rowcount == 1:
                 session.commit()
@@ -292,6 +355,131 @@ class RagDocumentRepository:
             if row is None or row.tenant_id != tenant_id:
                 return None, False
             return self._doc_to_dict(row), False
+
+    def renew_index_lease(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+        index_owner: str,
+        index_attempt: int,
+        lease_seconds: int,
+    ) -> bool:
+        now_epoch = self._now_epoch()
+        with Session(self.engine) as session:
+            result = session.execute(
+                update(RagDocument)
+                .where(
+                    RagDocument.document_id == document_id,
+                    RagDocument.tenant_id == tenant_id,
+                    RagDocument.index_status == "indexing",
+                    RagDocument.index_owner == index_owner,
+                    RagDocument.index_attempt == index_attempt,
+                    RagDocument.index_lease_expires >= now_epoch,
+                )
+                .values(index_lease_expires=now_epoch + lease_seconds, updated_at=utc_now())
+            )
+            session.commit()
+            return result.rowcount == 1
+
+    def owns_active_index_claim(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+        index_owner: str,
+        index_attempt: int,
+    ) -> bool:
+        now_epoch = self._now_epoch()
+        with Session(self.engine) as session:
+            row = session.scalar(
+                select(RagDocument.document_id).where(
+                    RagDocument.document_id == document_id,
+                    RagDocument.tenant_id == tenant_id,
+                    RagDocument.index_status == "indexing",
+                    RagDocument.index_owner == index_owner,
+                    RagDocument.index_attempt == index_attempt,
+                    RagDocument.index_lease_expires >= now_epoch,
+                )
+            )
+            return row is not None
+
+    def finalize_index_ready(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+        index_owner: str,
+        index_attempt: int,
+        filename: str,
+        content_hash: str,
+        contexts: list[dict[str, Any]],
+        chunk_count: int,
+        source_path: str | None,
+    ) -> bool:
+        now_epoch = self._now_epoch()
+        now = utc_now()
+        with Session(self.engine) as session:
+            result = session.execute(
+                update(RagDocument)
+                .where(
+                    RagDocument.document_id == document_id,
+                    RagDocument.tenant_id == tenant_id,
+                    RagDocument.content_hash == content_hash,
+                    RagDocument.index_status == "indexing",
+                    RagDocument.index_owner == index_owner,
+                    RagDocument.index_attempt == index_attempt,
+                    RagDocument.index_lease_expires >= now_epoch,
+                )
+                .values(
+                    filename=filename,
+                    index_status="ready",
+                    error=None,
+                    indexed_at=now,
+                    chunk_count=chunk_count,
+                    contexts_json=json.dumps(contexts, ensure_ascii=False),
+                    source_path=source_path,
+                    index_owner=None,
+                    index_lease_expires=None,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+            return result.rowcount == 1
+
+    def finalize_index_failed(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+        index_owner: str,
+        index_attempt: int,
+        error: str,
+    ) -> bool:
+        now_epoch = self._now_epoch()
+        with Session(self.engine) as session:
+            result = session.execute(
+                update(RagDocument)
+                .where(
+                    RagDocument.document_id == document_id,
+                    RagDocument.tenant_id == tenant_id,
+                    RagDocument.index_status == "indexing",
+                    RagDocument.index_owner == index_owner,
+                    RagDocument.index_attempt == index_attempt,
+                    RagDocument.index_lease_expires >= now_epoch,
+                )
+                .values(
+                    index_status="failed",
+                    error=error,
+                    chunk_count=0,
+                    contexts_json="[]",
+                    index_owner=None,
+                    index_lease_expires=None,
+                    updated_at=utc_now(),
+                )
+            )
+            session.commit()
+            return result.rowcount == 1
 
     def upsert_document(
         self,
@@ -439,6 +627,9 @@ class RagDocumentRepository:
             "chunk_count": row.chunk_count,
             "contexts": json.loads(row.contexts_json or "[]"),
             "source_path": row.source_path,
+            "index_owner": row.index_owner,
+            "index_lease_expires": row.index_lease_expires,
+            "index_attempt": row.index_attempt,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }

@@ -13,6 +13,10 @@ $psqlUrl = $env:MAS_DATABASE_URL `
 psql $psqlUrl `
     -v ON_ERROR_STOP=1 `
     -f migrations/postgresql/001_add_workflow_checkpoint_revision.sql
+
+psql $psqlUrl `
+    -v ON_ERROR_STOP=1 `
+    -f migrations/postgresql/002_add_rag_index_lease.sql
 ```
 
 `MAS_DATABASE_URL` uses SQLAlchemy's `postgresql+psycopg://` scheme, while `psql`
@@ -20,4 +24,5 @@ accepts the libpq `postgresql://` (or `postgres://`) scheme. The replacement cha
 only the driver scheme; credentials, host, port, and database name are preserved.
 
 The migration is safe to run repeatedly. Startup fails with an actionable error if an
-existing non-SQLite `workflow_checkpoints` table does not contain `revision`.
+existing non-SQLite `workflow_checkpoints` table does not contain `revision`, or if
+`rag_documents` is missing the indexing lease columns.

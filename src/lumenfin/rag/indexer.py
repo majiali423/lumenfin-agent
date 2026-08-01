@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import Any, Literal, TypedDict
+from uuid import uuid4
 
 from ..database import RagDocumentRepository
 from ..document_ingest import parse_upload_documents
@@ -76,10 +77,14 @@ class DocumentIndexer:
         rag_store: VectorStore | None,
         repository: RagDocumentRepository,
         tenant_id: str = "default",
+        lease_seconds: int = 300,
     ) -> None:
         self.rag_store = rag_store
         self.repository = repository
         self.tenant_id = tenant_id or "default"
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        self.lease_seconds = lease_seconds
 
     def enqueue_file(self, path: Path, *, tenant_id: str | None = None) -> IndexReceipt:
         """Register a pending index job without embedding (async path)."""
@@ -152,9 +157,12 @@ class DocumentIndexer:
                 "contexts": list(record.get("contexts") or []),
                 "embed_calls": 0,
             }
+        index_owner = uuid4().hex
         record, claimed = self.repository.claim_pending_document(
             document_id=document_id,
             tenant_id=tenant,
+            index_owner=index_owner,
+            lease_seconds=self.lease_seconds,
         )
         if record is None:
             return {
@@ -170,18 +178,27 @@ class DocumentIndexer:
             }
         if not claimed:
             return _receipt_for_persisted_record(record)
+        index_attempt = int(record["index_attempt"])
 
         source_path = record.get("source_path")
         if not source_path:
-            return self._fail(record, "missing source_path for pending document")
+            return self._fail(
+                record, "missing source_path for pending document",
+                index_owner=index_owner, index_attempt=index_attempt,
+            )
 
         file_path = Path(str(source_path))
         if not file_path.exists():
-            return self._fail(record, f"source file missing: {file_path}")
+            return self._fail(
+                record, f"source file missing: {file_path}",
+                index_owner=index_owner, index_attempt=index_attempt,
+            )
 
         filename = record["filename"] or file_path.name
         digest = str(record.get("content_hash") or content_hash_file(file_path))
         try:
+            if not self._renew(document_id, tenant, index_owner, index_attempt):
+                return self._lease_lost(record)
             contexts = parse_upload_documents(file_path)
             contexts = [_stabilize_context(ctx, source_document_id=document_id) for ctx in contexts]
             chunks: list[dict[str, Any]] = []
@@ -190,6 +207,8 @@ class DocumentIndexer:
                     chunks.append(chunk)
 
             embed_calls = 0
+            if not self._renew(document_id, tenant, index_owner, index_attempt):
+                return self._lease_lost(record)
             if self.rag_store is not None:
                 stats = self.rag_store.index_chunks(
                     chunks,
@@ -200,22 +219,29 @@ class DocumentIndexer:
                 )
                 embed_calls = int(stats.get("embed_calls") or 0)
 
+            if not self._renew(document_id, tenant, index_owner, index_attempt):
+                return self._lease_lost(record)
             self.repository.replace_chunks(
                 source_document_id=document_id,
                 tenant_id=tenant,
                 chunks=chunks,
                 content_hash=digest,
             )
-            self.repository.upsert_document(
+            if not self._renew(document_id, tenant, index_owner, index_attempt):
+                return self._lease_lost(record)
+            finalized = self.repository.finalize_index_ready(
                 document_id=document_id,
                 tenant_id=tenant,
+                index_owner=index_owner,
+                index_attempt=index_attempt,
                 filename=filename,
                 content_hash=digest,
-                index_status="ready",
                 contexts=contexts,
                 chunk_count=len(chunks),
                 source_path=str(file_path),
             )
+            if not finalized:
+                return self._lease_lost(record)
             return {
                 "document_id": document_id,
                 "tenant_id": tenant,
@@ -228,7 +254,9 @@ class DocumentIndexer:
                 "embed_calls": embed_calls,
             }
         except Exception as exc:
-            return self._fail(record, str(exc))
+            return self._fail(
+                record, str(exc), index_owner=index_owner, index_attempt=index_attempt
+            )
 
     def index_file(self, path: Path, *, tenant_id: str | None = None) -> IndexReceipt:
         """Synchronous path: enqueue then process immediately."""
@@ -293,9 +321,41 @@ class DocumentIndexer:
             document_ids=document_ids,
         )
 
-    def _fail(self, record: dict[str, Any], error: str) -> IndexReceipt:
+    def _renew(
+        self,
+        document_id: str,
+        tenant_id: str,
+        index_owner: str,
+        index_attempt: int,
+    ) -> bool:
+        return self.repository.renew_index_lease(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            index_owner=index_owner,
+            index_attempt=index_attempt,
+            lease_seconds=self.lease_seconds,
+        )
+
+    def _lease_lost(self, record: dict[str, Any]) -> IndexReceipt:
+        current = self.repository.get_document(
+            str(record["document_id"]), tenant_id=str(record["tenant_id"])
+        ) or record
+        receipt = _receipt_for_persisted_record(current)
+        receipt["error"] = "lease_lost"
+        return receipt
+
+    def _fail(
+        self,
+        record: dict[str, Any],
+        error: str,
+        *,
+        index_owner: str,
+        index_attempt: int,
+    ) -> IndexReceipt:
         document_id = str(record["document_id"])
         tenant = str(record["tenant_id"])
+        if not self._renew(document_id, tenant, index_owner, index_attempt):
+            return self._lease_lost(record)
         cleanup_errors: list[str] = []
         if self.rag_store is not None:
             try:
@@ -315,17 +375,15 @@ class DocumentIndexer:
         final_error = error
         if cleanup_errors:
             final_error = f"{error}; cleanup errors: {'; '.join(cleanup_errors)}"
-        self.repository.upsert_document(
+        finalized = self.repository.finalize_index_failed(
             document_id=document_id,
             tenant_id=tenant,
-            filename=str(record.get("filename") or ""),
-            content_hash=str(record.get("content_hash") or ""),
-            index_status="failed",
-            contexts=[],
-            chunk_count=0,
+            index_owner=index_owner,
+            index_attempt=index_attempt,
             error=final_error,
-            source_path=record.get("source_path"),
         )
+        if not finalized:
+            return self._lease_lost(record)
         return {
             "document_id": document_id,
             "tenant_id": tenant,

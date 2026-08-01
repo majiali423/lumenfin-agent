@@ -78,9 +78,11 @@ class _BarrierClaimRepository(RagDocumentRepository):
         super().__init__(*args, **kwargs)
         self._claim_barrier = Barrier(2)
 
-    def claim_pending_document(self, *, document_id: str, tenant_id: str):
+    def claim_pending_document(self, *, document_id: str, tenant_id: str, **kwargs):
         self._claim_barrier.wait(timeout=10)
-        return super().claim_pending_document(document_id=document_id, tenant_id=tenant_id)
+        return super().claim_pending_document(
+            document_id=document_id, tenant_id=tenant_id, **kwargs
+        )
 
 
 class _RecordingVectorStore:
@@ -179,9 +181,12 @@ class _FailureInjectingRepository(RagDocumentRepository):
         return super().replace_chunks(**kwargs)
 
     def upsert_document(self, **kwargs):
-        if self.fail_ready and kwargs.get("index_status") == "ready":
-            raise RuntimeError("injected ready update failure")
         return super().upsert_document(**kwargs)
+
+    def finalize_index_ready(self, **kwargs) -> bool:
+        if self.fail_ready:
+            raise RuntimeError("injected ready update failure")
+        return super().finalize_index_ready(**kwargs)
 
     def delete_chunks(self, **kwargs) -> int:
         if self.fail_delete:

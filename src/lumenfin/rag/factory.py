@@ -39,7 +39,12 @@ def build_document_indexer(
 ) -> DocumentIndexer:
     store = rag_store if rag_store is not None else build_rag_store(config)
     repo = repository or RagDocumentRepository(config.database_url, db_path=config.db_path)
-    return DocumentIndexer(rag_store=store, repository=repo, tenant_id=config.rag_tenant_id)
+    return DocumentIndexer(
+        rag_store=store,
+        repository=repo,
+        tenant_id=config.rag_tenant_id,
+        lease_seconds=config.rag_index_lease_seconds,
+    )
 
 
 def build_hybrid_retriever(
