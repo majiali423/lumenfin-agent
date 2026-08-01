@@ -276,11 +276,19 @@ def create_app(
             raise HTTPException(status_code=413, detail=str(exc)) from exc
         effective_tenant = tenant_id or app_config.rag_tenant_id
         if async_mode:
-            receipts = service.enqueue_document_paths(saved_paths, tenant_id=effective_tenant)
+            receipts = await run_in_threadpool(
+                service.enqueue_document_paths,
+                saved_paths,
+                tenant_id=effective_tenant,
+            )
             for item in receipts:
                 if item["status"] != "pending":
                     continue
-                queued = service.enqueue_index_job(item["document_id"], tenant_id=effective_tenant)
+                queued = await run_in_threadpool(
+                    service.enqueue_index_job,
+                    item["document_id"],
+                    tenant_id=effective_tenant,
+                )
                 if not queued:
                     background_tasks.add_task(
                         service.process_document_index,
@@ -288,7 +296,11 @@ def create_app(
                         tenant_id=effective_tenant,
                     )
         else:
-            receipts = service.index_document_paths(saved_paths, tenant_id=effective_tenant)
+            receipts = await run_in_threadpool(
+                service.index_document_paths,
+                saved_paths,
+                tenant_id=effective_tenant,
+            )
         return DocumentIndexResponse(
             tenant_id=effective_tenant,
             documents=[
