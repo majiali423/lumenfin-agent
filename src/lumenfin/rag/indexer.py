@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 from typing import Any, Literal, TypedDict
-from uuid import uuid4
 
 from ..database import RagDocumentRepository
 from ..document_ingest import parse_upload_documents
@@ -34,6 +33,11 @@ def content_hash_bytes(payload: bytes) -> str:
 
 def content_hash_file(path: Path) -> str:
     return content_hash_bytes(path.read_bytes())
+
+
+def canonical_document_id(tenant_id: str, content_hash: str) -> str:
+    identity = hashlib.sha256(f"{tenant_id}\0{content_hash}".encode("utf-8")).hexdigest()
+    return f"doc-{identity}"
 
 
 def summarize_index_receipts(receipts: list[IndexReceipt]) -> dict[str, Any]:
@@ -98,17 +102,26 @@ class DocumentIndexer:
                 "embed_calls": 0,
             }
 
-        document_id = f"doc-{uuid4().hex[:12]}"
-        self.repository.upsert_document(
+        document_id = canonical_document_id(tenant, digest)
+        record, owns_processing = self.repository.register_pending_document(
             document_id=document_id,
             tenant_id=tenant,
             filename=filename,
             content_hash=digest,
-            index_status="pending",
-            contexts=[],
-            chunk_count=0,
             source_path=str(file_path),
         )
+        if not owns_processing:
+            return {
+                "document_id": record["document_id"],
+                "tenant_id": tenant,
+                "filename": record["filename"],
+                "content_hash": digest,
+                "status": "skipped_duplicate",
+                "chunk_count": int(record.get("chunk_count") or 0),
+                "error": None,
+                "contexts": list(record.get("contexts") or []),
+                "embed_calls": 0,
+            }
         return {
             "document_id": document_id,
             "tenant_id": tenant,
@@ -138,6 +151,34 @@ class DocumentIndexer:
                 "embed_calls": 0,
             }
         if record.get("index_status") == "ready":
+            return {
+                "document_id": record["document_id"],
+                "tenant_id": tenant,
+                "filename": record["filename"],
+                "content_hash": record["content_hash"],
+                "status": "skipped_duplicate",
+                "chunk_count": int(record.get("chunk_count") or 0),
+                "error": None,
+                "contexts": list(record.get("contexts") or []),
+                "embed_calls": 0,
+            }
+        record, claimed = self.repository.claim_pending_document(
+            document_id=document_id,
+            tenant_id=tenant,
+        )
+        if record is None:
+            return {
+                "document_id": document_id,
+                "tenant_id": tenant,
+                "filename": "",
+                "content_hash": "",
+                "status": "failed",
+                "chunk_count": 0,
+                "error": "document not found",
+                "contexts": [],
+                "embed_calls": 0,
+            }
+        if not claimed:
             return {
                 "document_id": record["document_id"],
                 "tenant_id": tenant,

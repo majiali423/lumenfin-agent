@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from sqlalchemy import Integer, Text, create_engine, delete, select
+from sqlalchemy import Integer, Text, create_engine, delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
@@ -198,6 +199,100 @@ class RagDocumentRepository:
                 return None
             return self._doc_to_dict(row)
 
+    def register_pending_document(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+        filename: str,
+        content_hash: str,
+        source_path: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically register a canonical document; return (record, owns_processing)."""
+        now = utc_now()
+        with Session(self.engine) as session:
+            row = RagDocument(
+                document_id=document_id,
+                tenant_id=tenant_id,
+                filename=filename,
+                content_hash=content_hash,
+                index_status="pending",
+                error=None,
+                indexed_at=None,
+                chunk_count=0,
+                contexts_json="[]",
+                source_path=source_path,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(row)
+            try:
+                session.commit()
+                return self._doc_to_dict(row), True
+            except IntegrityError:
+                session.rollback()
+
+            existing = session.get(RagDocument, document_id)
+            if existing is None:
+                raise RuntimeError(f"Canonical RAG document disappeared during registration: {document_id}")
+            if existing.tenant_id != tenant_id or existing.content_hash != content_hash:
+                raise RuntimeError(f"Canonical RAG document identity collision: {document_id}")
+            if existing.index_status == "failed":
+                result = session.execute(
+                    update(RagDocument)
+                    .where(
+                        RagDocument.document_id == document_id,
+                        RagDocument.tenant_id == tenant_id,
+                        RagDocument.content_hash == content_hash,
+                        RagDocument.index_status == "failed",
+                    )
+                    .values(
+                        filename=filename,
+                        index_status="pending",
+                        error=None,
+                        chunk_count=0,
+                        contexts_json="[]",
+                        source_path=source_path,
+                        updated_at=now,
+                    )
+                )
+                if result.rowcount == 1:
+                    session.commit()
+                    refreshed = session.get(RagDocument, document_id)
+                    assert refreshed is not None
+                    return self._doc_to_dict(refreshed), True
+                session.rollback()
+                existing = session.get(RagDocument, document_id)
+                assert existing is not None
+            return self._doc_to_dict(existing), False
+
+    def claim_pending_document(
+        self,
+        *,
+        document_id: str,
+        tenant_id: str,
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Database CAS from pending to indexing so duplicate workers cannot both write."""
+        with Session(self.engine) as session:
+            result = session.execute(
+                update(RagDocument)
+                .where(
+                    RagDocument.document_id == document_id,
+                    RagDocument.tenant_id == tenant_id,
+                    RagDocument.index_status == "pending",
+                )
+                .values(index_status="indexing", updated_at=utc_now())
+            )
+            if result.rowcount == 1:
+                session.commit()
+                row = session.get(RagDocument, document_id)
+                return (self._doc_to_dict(row) if row is not None else None), True
+            session.rollback()
+            row = session.get(RagDocument, document_id)
+            if row is None or row.tenant_id != tenant_id:
+                return None, False
+            return self._doc_to_dict(row), False
+
     def upsert_document(
         self,
         *,
@@ -264,7 +359,12 @@ class RagDocumentRepository:
     ) -> None:
         now = utc_now()
         with Session(self.engine) as session:
-            session.execute(delete(RagChunk).where(RagChunk.source_document_id == source_document_id))
+            session.execute(
+                delete(RagChunk).where(
+                    RagChunk.source_document_id == source_document_id,
+                    RagChunk.tenant_id == tenant_id,
+                )
+            )
             for chunk in chunks:
                 session.add(
                     RagChunk(
