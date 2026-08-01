@@ -165,6 +165,21 @@ def _apple_markdown(path: Path) -> Path:
     return path
 
 
+def _nvidia_markdown(path: Path) -> Path:
+    path.write_text(
+        "\n".join(
+            [
+                "# NVIDIA FY2025 Diligence Notes",
+                "",
+                "NVIDIA reported revenue of 130 billion in FY2025.",
+                "Data center demand remains strong while supply constraints remain a risk.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 class RagProductionIndexTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.root = ROOT / "test_artifacts" / f"rag-prod-{uuid4().hex[:8]}"
@@ -466,6 +481,53 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
         self.assertEqual({hit["tenant_id"] for hit in hits_b}, {"tenant-b"})
         self.assertEqual(repo.list_chunks(tenant_id="tenant-a"), [])
         self.assertTrue(repo.list_chunks(tenant_id="tenant-b"))
+
+    def test_different_content_tenants_match_serial_baseline(self) -> None:
+        paths = {
+            "tenant-a": _apple_markdown(self.root / "apple-a.md"),
+            "tenant-b": _nvidia_markdown(self.root / "nvidia-b.md"),
+        }
+        concurrent_store = _RecordingVectorStore()
+        concurrent_repo = RagDocumentRepository(self.config.database_url, db_path=self.config.db_path)
+        concurrent_indexer = DocumentIndexer(rag_store=concurrent_store, repository=concurrent_repo)
+
+        def index_and_retrieve(tenant: str) -> tuple[dict, set[str]]:
+            receipt = concurrent_indexer.index_file(paths[tenant], tenant_id=tenant)
+            hits = concurrent_store.vector_search("financial risk", tenant_id=tenant)
+            return receipt, {str(hit["text"]) for hit in hits}
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent = dict(
+                zip(paths, pool.map(index_and_retrieve, paths), strict=True)
+            )
+
+        serial_root = self.root / "serial-baseline"
+        serial_config = build_test_config(serial_root)
+        serial_repo = RagDocumentRepository(serial_config.database_url, db_path=serial_config.db_path)
+        serial_store = _RecordingVectorStore()
+        serial_indexer = DocumentIndexer(rag_store=serial_store, repository=serial_repo)
+        serial: dict[str, tuple[dict, set[str]]] = {}
+        for tenant, path in paths.items():
+            receipt = serial_indexer.index_file(path, tenant_id=tenant)
+            hits = serial_store.vector_search("financial risk", tenant_id=tenant)
+            serial[tenant] = (receipt, {str(hit["text"]) for hit in hits})
+
+        for tenant in paths:
+            concurrent_receipt, concurrent_texts = concurrent[tenant]
+            serial_receipt, serial_texts = serial[tenant]
+            self.assertEqual(concurrent_receipt["status"], "ready")
+            self.assertEqual(concurrent_receipt["document_id"], serial_receipt["document_id"])
+            self.assertEqual(concurrent_receipt["chunk_count"], serial_receipt["chunk_count"])
+            self.assertEqual(concurrent_texts, serial_texts)
+            self.assertTrue(concurrent_texts)
+        self.assertEqual(
+            concurrent_store.vector_search(
+                "NVIDIA",
+                tenant_id="tenant-a",
+                source_document_ids=[concurrent["tenant-b"][0]["document_id"]],
+            ),
+            [],
+        )
 
     def test_persistence_rejects_cross_tenant_document_and_chunk_mutation(self) -> None:
         path = _apple_markdown(self.root / "tenant-boundary.md")
