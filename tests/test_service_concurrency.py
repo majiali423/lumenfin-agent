@@ -5,7 +5,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from threading import Barrier, Lock, get_ident
+from threading import Barrier, Event, Lock, get_ident
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -299,6 +299,48 @@ class ServiceConcurrencyIsolationTestCase(unittest.TestCase):
         self.assertEqual(job["status"], "failed")
         self.assertIn("Checkpoint conflict", job["error_message"])
         self.assertIsNone(job["result"])
+
+    def test_response_packages_its_committed_checkpoint_revision(self) -> None:
+        service = self._build_concurrent_service(
+            "response-checkpoint-snapshot",
+            LocalFallbackLLMClient(),
+        )
+        thread_id = "response-checkpoint-snapshot"
+        first_packaging = Event()
+        release_first = Event()
+        original_package = service._package_response
+
+        def pause_first_package(*args, **kwargs):
+            query = args[1]
+            if "Apple" in query:
+                first_packaging.set()
+                self.assertTrue(release_first.wait(timeout=10))
+            return original_package(*args, **kwargs)
+
+        service._package_response = pause_first_package
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_future = pool.submit(
+                service.analyze,
+                "Analyze Apple FY2025 profitability and R&D intensity.",
+                thread_id,
+                False,
+            )
+            self.assertTrue(first_packaging.wait(timeout=10))
+            second = service.analyze(
+                "Analyze NVIDIA FY2025 profitability and R&D intensity.",
+                thread_id,
+                False,
+            )
+            release_first.set()
+            first = first_future.result(timeout=10)
+
+        self.assertEqual(first["checkpoint"]["revision"] + 1, second["checkpoint"]["revision"])
+        self.assertEqual(first["checkpoint"]["state"]["companies"], first["result"]["companies"])
+        self.assertEqual(first["checkpoint"]["state"]["companies"], ["Apple"])
+        self.assertEqual(second["checkpoint"]["state"]["companies"], ["NVIDIA"])
+        stored = service.get_checkpoint(thread_id)
+        self.assertEqual(stored["revision"], second["checkpoint"]["revision"])
+        self.assertEqual(stored["state"]["companies"], ["NVIDIA"])
 
 
 if __name__ == "__main__":
