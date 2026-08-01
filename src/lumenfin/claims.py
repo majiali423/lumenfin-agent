@@ -1653,8 +1653,21 @@ def _verify_numeric(
             if hit.period:
                 input_periods.append(parse_period_identity(hit.period))
             else:
-                local_ids = _extract_period_identities_from_text(hit.text or "")
-                input_periods.append(local_ids[0] if local_ids else PeriodIdentity("unknown"))
+                input_span = _find_number_span(
+                    hit.text or "",
+                    float(input_value),
+                    unit="billion_usd",
+                    metric_name=str(input_name),
+                )
+                if input_span is None:
+                    input_periods.append(PeriodIdentity("unknown"))
+                else:
+                    input_start = input_span[0]
+                    input_end = _number_token_end(hit.text or "", input_start)
+                    input_periods.append(
+                        _nearest_period_identity(hit.text or "", input_start, input_end)
+                        or PeriodIdentity("unknown")
+                    )
         claim_id = parse_period_identity(claim.period) if claim.period else PeriodIdentity("unknown")
         if claim_id.kind != "unknown":
             for item in input_periods:
