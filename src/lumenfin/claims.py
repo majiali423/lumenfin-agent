@@ -488,6 +488,89 @@ def _extract_period_identities_from_text(text: str) -> list[PeriodIdentity]:
     return found
 
 
+def _period_identity_spans(text: str) -> list[tuple[PeriodIdentity, int, int]]:
+    """Return explicit fiscal/date period identities with their text spans."""
+    found: list[tuple[PeriodIdentity, int, int]] = []
+    upper = text.upper()
+    patterns = (
+        r"\bQ\s*([1-4])\s*(20\d{2})\b|\b(20\d{2})\s*Q\s*([1-4])\b",
+        r"\bFY\s*(20\d{2})\b|\bFISCAL\s+YEAR\s*(20\d{2})\b",
+        r"\b(20\d{2})-(\d{2})-(\d{2})\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, upper):
+            found.append((parse_period_identity(match.group(0)), match.start(), match.end()))
+    found.sort(key=lambda item: item[1])
+    return found
+
+
+def _local_context_bounds(text: str, number_start: int, number_end: int) -> tuple[int, int]:
+    """Find sentence/table-row boundaries around one numeric span."""
+    boundaries = [0]
+    for match in re.finditer(r"[\r\n;|]+|(?<=[.!?])\s+(?=[A-Z\u4e00-\u9fff])", text or ""):
+        boundaries.extend((match.start(), match.end()))
+    boundaries.append(len(text or ""))
+    left = max((point for point in boundaries if point <= number_start), default=0)
+    right = min((point for point in boundaries if point >= number_end), default=len(text or ""))
+    return left, right
+
+
+def _local_context_for_number(text: str, number_start: int, number_end: int) -> str:
+    """Return the sentence or table row that owns a target numeric span."""
+    left, right = _local_context_bounds(text or "", number_start, number_end)
+    return (text or "")[left:right].strip()
+
+
+def _match_period_near_number(
+    claim_period: str | None,
+    text: str,
+    number_start: int,
+    number_end: int,
+    fallback_period: str | None,
+) -> PeriodMatch:
+    left, right = _local_context_bounds(text, number_start, number_end)
+    local = text[left:right]
+    spans = _period_identity_spans(local)
+    claim_id = parse_period_identity(claim_period)
+    fallback_id = parse_period_identity(fallback_period)
+    if spans:
+        center = ((number_start - left) + (number_end - left)) / 2.0
+        ranked = sorted(
+            ((abs(((start + end) / 2.0) - center), identity) for identity, start, end in spans),
+            key=lambda item: item[0],
+        )
+        nearest_distance = ranked[0][0]
+        nearest = [identity for distance, identity in ranked if distance == nearest_distance]
+        if len({(item.kind, item.year, item.quarter, getattr(item, "date_value", None)) for item in nearest}) > 1:
+            return PeriodMatch("ambiguous", False, "text")
+        selected = nearest[0]
+        if fallback_id.kind != "unknown" and not _period_identities_compatible(selected, fallback_id):
+            return PeriodMatch("metadata_conflict", False, "text+evidence.period")
+        if _period_identities_compatible(claim_id, selected):
+            return PeriodMatch("text_match", True, "text")
+        return PeriodMatch("mismatch", False, "text")
+    return match_period(claim_period, fallback_period, "")
+
+
+def _nearest_period_identity(
+    text: str, number_start: int, number_end: int
+) -> PeriodIdentity | None:
+    left, right = _local_context_bounds(text, number_start, number_end)
+    spans = _period_identity_spans(text[left:right])
+    if not spans:
+        return None
+    center = ((number_start - left) + (number_end - left)) / 2.0
+    ranked = sorted(
+        ((abs(((start + end) / 2.0) - center), identity) for identity, start, end in spans),
+        key=lambda item: item[0],
+    )
+    if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+        first, second = ranked[0][1], ranked[1][1]
+        if not _period_identities_compatible(first, second):
+            return None
+    return ranked[0][1]
+
+
 def _periods_compatible(claim_period: str | None, evidence_period: str | None, text: str) -> bool:
     return match_period(claim_period, evidence_period, text).matched
 
@@ -737,6 +820,11 @@ def _find_number_span(
     return best[0], best[1], best[2], best[3]
 
 
+def _number_token_end(text: str, start: int) -> int:
+    match = re.match(r"[-+]?\s*[\d,.]+", (text or "")[start:])
+    return start + (len(match.group(0)) if match else 1)
+
+
 
 def match_numeric_evidence(
     evidence: EvidenceRef,
@@ -756,21 +844,30 @@ def match_numeric_evidence(
 
     text = evidence.text or ""
     period_type = getattr(evidence, "period_type", None)
-    # For formula claims, defer text-window period checks to each input span.
-    period_result = match_period(
-        period,
-        evidence.period,
-        "" if formula_inputs else text,
-        period_type=period_type,
-    )
-    if not formula_inputs:
-        # Still surface metadata/text conflicts on the full evidence text.
-        text_period = match_period(period, evidence.period, text, period_type=period_type)
-        if text_period.status == "mismatch":
-            period_result = text_period
-    if period_result.status == "mismatch":
+    hit: tuple[int, float, str | None, str] | None = None
+    if formula_inputs:
+        # Formula periods are owned by individual input spans, never top-level metadata alone.
+        period_result = PeriodMatch("not_required", True, None)
+    elif evidence.has_structured_fields:
+        period_result = match_period(period, evidence.period, "", period_type=period_type)
+    else:
+        hit = _find_number_span(text, float(value), unit=unit, metric_name=metric_name)
+        if hit is None:
+            return EvidenceMatch(
+                False, None, False, False, False, None, None, "none", "number_not_found"
+            )
+        number_end = _number_token_end(text, hit[0])
+        period_result = _match_period_near_number(
+            period, text, hit[0], number_end, evidence.period
+        )
+    if period_result.status in {"mismatch", "metadata_conflict", "ambiguous"}:
+        reason = {
+            "mismatch": "period_mismatch",
+            "metadata_conflict": "period_metadata_conflict",
+            "ambiguous": "period_ambiguous",
+        }[period_result.status]
         return EvidenceMatch(
-            False, None, False, False, False, None, None, "none", "period_mismatch"
+            False, None, False, False, False, None, None, "none", reason
         )
     if period_result.status == "unknown":
         return EvidenceMatch(
@@ -965,8 +1062,10 @@ def match_numeric_evidence(
                     "formula_input_incomplete",
                 )
             idx, _, conversion, span = hit
-            local_text = text[max(0, idx - 80) : idx + 80]
-            local_period = match_local_period(period, local_text, evidence.period, period_type)
+            number_end = _number_token_end(text, idx)
+            local_period = _match_period_near_number(
+                period, text, idx, number_end, evidence.period
+            )
             if local_period.status == "unknown":
                 return EvidenceMatch(
                     False,
@@ -991,9 +1090,19 @@ def match_numeric_evidence(
                     "none",
                     "formula_input_period_mismatch",
                 )
-            local_ids = _extract_period_identities_from_text(local_text)
-            if local_ids:
-                input_periods.append(local_ids[0])
+            if local_period.status == "ambiguous":
+                return EvidenceMatch(
+                    False, None, False, False, False, None, span, "none",
+                    "formula_input_period_ambiguous",
+                )
+            if local_period.status == "metadata_conflict":
+                return EvidenceMatch(
+                    False, None, False, False, False, None, span, "none",
+                    "period_metadata_conflict",
+                )
+            local_identity = _nearest_period_identity(text, idx, number_end)
+            if local_identity is not None:
+                input_periods.append(local_identity)
             elif evidence.period:
                 input_periods.append(parse_period_identity(evidence.period))
             else:
@@ -1049,7 +1158,7 @@ def match_numeric_evidence(
             "formula_inputs_bound",
         )
 
-    hit = _find_number_span(text, float(value), unit=unit, metric_name=metric_name)
+    hit = hit or _find_number_span(text, float(value), unit=unit, metric_name=metric_name)
     if hit is None:
         return EvidenceMatch(
             False, None, False, period_ok, False, None, None, "none", "number_not_found"
