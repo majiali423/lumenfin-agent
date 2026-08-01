@@ -5,6 +5,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +14,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.checkpoint_store import WorkflowCheckpointRepository, infer_last_node
+from lumenfin.database import Base
 from lumenfin.llm import LocalFallbackLLMClient
 from lumenfin.service import LumenFinAnalysisService
 from tests.support.fakes import FakeMarketDataClient
@@ -20,6 +22,29 @@ from tests.test_graph_routing import build_test_config
 
 
 class CheckpointPersistenceTestCase(unittest.TestCase):
+    def test_postgresql_missing_revision_fails_fast_with_migration_path(self) -> None:
+        engine = Mock()
+        engine.url = "postgresql+psycopg://db.example/lumenfin"
+        schema = Mock()
+        schema.has_table.return_value = True
+        schema.get_columns.return_value = [{"name": "thread_id"}, {"name": "updated_at"}]
+
+        with patch.object(Base.metadata, "create_all"), patch(
+            "lumenfin.checkpoint_store.inspect",
+            return_value=schema,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"workflow_checkpoints\.revision.*001_add_workflow_checkpoint_revision\.sql.*psql",
+            ):
+                WorkflowCheckpointRepository(engine)
+
+    def test_postgresql_revision_migration_is_repeatable(self) -> None:
+        migration = ROOT / "migrations" / "postgresql" / "001_add_workflow_checkpoint_revision.sql"
+        sql = migration.read_text(encoding="utf-8")
+        self.assertIn("ADD COLUMN IF NOT EXISTS revision", sql)
+        self.assertIn("INTEGER NOT NULL DEFAULT 1", sql)
+
     def test_same_base_revision_allows_one_writer_and_latest_can_retry(self) -> None:
         root = ROOT / "test_artifacts" / f"checkpoint-cas-{uuid4().hex[:8]}"
         config = build_test_config(root)

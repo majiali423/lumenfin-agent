@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import inspect, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,6 +33,7 @@ class WorkflowCheckpointRepository:
         self.engine = engine
         Base.metadata.create_all(self.engine)
         self._ensure_sqlite_revision_column()
+        self._validate_external_revision_column()
 
     def _ensure_sqlite_revision_column(self) -> None:
         if not str(self.engine.url).startswith("sqlite"):
@@ -45,6 +46,20 @@ class WorkflowCheckpointRepository:
                     "ALTER TABLE workflow_checkpoints "
                     "ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
                 )
+
+    def _validate_external_revision_column(self) -> None:
+        if str(self.engine.url).startswith("sqlite"):
+            return
+        schema = inspect(self.engine)
+        if not schema.has_table("workflow_checkpoints"):
+            return
+        columns = {str(column["name"]) for column in schema.get_columns("workflow_checkpoints")}
+        if "revision" not in columns:
+            raise RuntimeError(
+                "Database schema is missing workflow_checkpoints.revision. "
+                "Apply migrations/postgresql/001_add_workflow_checkpoint_revision.sql "
+                "with psql before starting LumenFin."
+            )
 
     @classmethod
     def from_database_url(cls, database_url: str, db_path=None) -> "WorkflowCheckpointRepository":
