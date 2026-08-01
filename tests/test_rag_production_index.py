@@ -9,9 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Event, Lock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.orm import Session
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +22,7 @@ if str(SRC) not in sys.path:
 
 from lumenfin.api.app import create_app
 from lumenfin.agents import AgentRuntime
-from lumenfin.database import RagChunk, RagDocument, RagDocumentRepository
+from lumenfin.database import Base, RagChunk, RagDocument, RagDocumentRepository
 from lumenfin.graph import LumenFinAgentSystem
 from lumenfin.knowledge_store import InMemoryKnowledgeStore
 from lumenfin.llm import LocalFallbackLLMClient
@@ -768,6 +769,170 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
         stored = repo.get_document(receipt["document_id"], tenant_id="tenant-a")
         self.assertIsNotNone(stored)
         self.assertIsNone(repo.get_document(receipt["document_id"], tenant_id="tenant-b"))
+
+
+class RagIndexLeaseTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = ROOT / "test_artifacts" / f"rag-lease-{uuid4().hex[:8]}"
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.config = build_test_config(self.root)
+        self.epoch = 100
+        self.repo = RagDocumentRepository(
+            self.config.database_url, db_path=self.config.db_path, epoch_fn=lambda: self.epoch
+        )
+        self.path = _apple_markdown(self.root / "lease.md")
+        self.store = _RecordingVectorStore()
+        self.indexer = DocumentIndexer(
+            rag_store=self.store, repository=self.repo, lease_seconds=10
+        )
+
+    def tearDown(self) -> None:
+        self.repo.engine.dispose()
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _pending(self) -> dict:
+        receipt = self.indexer.enqueue_file(self.path, tenant_id="tenant-a")
+        self.assertEqual(receipt["status"], "pending")
+        return receipt
+
+    def _claim(self, document_id: str, owner: str) -> tuple[dict, bool]:
+        return self.repo.claim_pending_document(
+            document_id=document_id,
+            tenant_id="tenant-a",
+            index_owner=owner,
+            lease_seconds=10,
+        )
+
+    def _finalize_ready(self, pending: dict, owner: str, attempt: int) -> bool:
+        return self.repo.finalize_index_ready(
+            document_id=pending["document_id"],
+            tenant_id="tenant-a",
+            index_owner=owner,
+            index_attempt=attempt,
+            filename=pending["filename"],
+            content_hash=pending["content_hash"],
+            contexts=[],
+            chunk_count=0,
+            source_path=str(self.path),
+        )
+
+    def test_active_lease_cannot_be_stolen_and_only_owner_can_finalize(self) -> None:
+        pending = self._pending()
+        claimed_a, owns_a = self._claim(pending["document_id"], "owner-a")
+        self.assertTrue(owns_a)
+        self.assertEqual(claimed_a["index_attempt"], 1)
+        self.epoch = 105
+
+        observed, owns_b = self._claim(pending["document_id"], "owner-b")
+
+        self.assertFalse(owns_b)
+        self.assertEqual(observed["index_status"], "indexing")
+        self.assertEqual(observed["index_owner"], "owner-a")
+        self.assertEqual(observed["index_attempt"], 1)
+        self.assertTrue(self._finalize_ready(pending, "owner-a", 1))
+
+    def test_expired_lease_is_reclaimed_and_stale_finalize_is_rejected(self) -> None:
+        pending = self._pending()
+        _, owns_a = self._claim(pending["document_id"], "owner-a")
+        self.assertTrue(owns_a)
+        self.epoch = 111
+        claimed_b, owns_b = self._claim(pending["document_id"], "owner-b")
+
+        self.assertTrue(owns_b)
+        self.assertEqual(claimed_b["index_owner"], "owner-b")
+        self.assertEqual(claimed_b["index_attempt"], 2)
+        self.assertFalse(self._finalize_ready(pending, "owner-a", 1))
+        self.assertFalse(
+            self.repo.finalize_index_failed(
+                document_id=pending["document_id"], tenant_id="tenant-a",
+                index_owner="owner-a", index_attempt=1, error="stale failure",
+            )
+        )
+        stored = self.repo.get_document(pending["document_id"], tenant_id="tenant-a")
+        self.assertEqual((stored["index_owner"], stored["index_attempt"]), ("owner-b", 2))
+
+    def test_stale_worker_cannot_cleanup_new_owner_data(self) -> None:
+        pending = self._pending()
+        claimed_a, _ = self._claim(pending["document_id"], "owner-a")
+        self.epoch = 111
+        _, owns_b = self._claim(pending["document_id"], "owner-b")
+        self.assertTrue(owns_b)
+        chunk = {
+            "chunk_id": "lease-chunk", "document_id": "lease-context",
+            "filename": "lease.md", "page": 1, "text": "new owner data",
+            "companies": ["Apple"], "chunk_type": "narrative", "char_count": 14,
+        }
+        self.store.index_chunks(
+            [chunk], tenant_id="tenant-a", source_document_id=pending["document_id"],
+            content_hash=pending["content_hash"], replace_existing=True,
+        )
+        self.repo.replace_chunks(
+            source_document_id=pending["document_id"], tenant_id="tenant-a",
+            chunks=[chunk], content_hash=pending["content_hash"],
+        )
+
+        stale = self.indexer._fail(
+            claimed_a, "old worker failure", index_owner="owner-a", index_attempt=1
+        )
+
+        self.assertEqual(stale["error"], "lease_lost")
+        self.assertTrue(self.store.vector_search("new", tenant_id="tenant-a"))
+        self.assertTrue(self.repo.list_chunks(tenant_id="tenant-a"))
+        self.assertEqual(
+            self.repo.get_document(pending["document_id"], tenant_id="tenant-a")["index_owner"],
+            "owner-b",
+        )
+        self.assertTrue(self._finalize_ready(pending, "owner-b", 2))
+
+    def test_stale_indexing_is_recovered_to_one_ready_document(self) -> None:
+        pending = self._pending()
+        self._claim(pending["document_id"], "abandoned")
+        self.epoch = 111
+
+        recovered = self.indexer.process_pending(pending["document_id"], tenant_id="tenant-a")
+
+        self.assertEqual(recovered["status"], "ready")
+        stored = self.repo.get_document(pending["document_id"], tenant_id="tenant-a")
+        self.assertEqual(stored["index_status"], "ready")
+        self.assertIsNone(stored["index_owner"])
+        self.assertIsNone(stored["index_lease_expires"])
+        self.assertEqual(stored["index_attempt"], 2)
+        documents, chunks, failed = _repository_counts(self.repo)
+        self.assertEqual((documents, failed), (1, 0))
+        self.assertEqual(chunks, recovered["chunk_count"])
+
+    def test_sqlite_old_rag_table_gets_lease_columns(self) -> None:
+        legacy_path = self.root / "legacy.db"
+        engine = create_engine(f"sqlite:///{legacy_path.as_posix()}")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE rag_documents (document_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, "
+                "filename TEXT NOT NULL, content_hash TEXT NOT NULL, index_status TEXT NOT NULL, "
+                "error TEXT, indexed_at TEXT, chunk_count INTEGER NOT NULL DEFAULT 0, "
+                "contexts_json TEXT NOT NULL DEFAULT '[]', source_path TEXT, "
+                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+            )
+        engine.dispose()
+
+        migrated = RagDocumentRepository(f"sqlite:///{legacy_path.as_posix()}", db_path=legacy_path)
+        columns = {column["name"] for column in inspect(migrated.engine).get_columns("rag_documents")}
+        self.assertTrue({"index_owner", "index_lease_expires", "index_attempt"}.issubset(columns))
+        migrated.engine.dispose()
+
+    def test_postgresql_lease_migration_and_fail_fast_message(self) -> None:
+        migration = ROOT / "migrations" / "postgresql" / "002_add_rag_index_lease.sql"
+        sql = migration.read_text(encoding="utf-8")
+        self.assertEqual(sql.upper().count("ADD COLUMN IF NOT EXISTS"), 3)
+        schema = Mock()
+        schema.has_table.return_value = True
+        schema.get_columns.return_value = [{"name": "document_id"}, {"name": "index_status"}]
+        with patch.object(Base.metadata, "create_all"), patch(
+            "lumenfin.database.inspect", return_value=schema
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, r"rag_documents.*002_add_rag_index_lease\.sql.*psql"
+            ):
+                RagDocumentRepository("postgresql+psycopg://user:password@localhost/lumenfin")
 
 
 class SyncOnRunCompatTestCase(unittest.TestCase):
