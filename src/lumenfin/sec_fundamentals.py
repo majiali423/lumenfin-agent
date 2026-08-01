@@ -448,9 +448,50 @@ def fetch_sec_companyfacts_fundamentals(
         elif prefer_fiscal_year is not None:
             period_alignment = "fallback_latest"
 
+        source_url = _FACTS_URL.format(cik=cik)
+
+        def _record_provenance(tag: str | None, meta: dict[str, Any]) -> dict[str, Any]:
+            record_year = _item_fiscal_year(meta)
+            record_period = f"FY{record_year}" if record_year is not None else None
+            record_bits = [
+                "sec",
+                cik,
+                str(tag or "unknown-tag"),
+                str(meta.get("accn") or "unknown-accession"),
+                str(meta.get("end") or "unknown-end"),
+            ]
+            return {
+                "source": "sec_companyfacts",
+                "provider": "sec",
+                "confidence": "high",
+                "period": record_period,
+                "period_type": "annual",
+                "period_source": "provider_record",
+                "period_alignment": "exact",
+                "citation": source_url,
+                "source_record_id": ":".join(record_bits),
+            }
+
+        fundamental_provenance = {
+            "revenue": _record_provenance(revenue_tag, revenue_meta),
+        }
+        if operating_income is not None:
+            fundamental_provenance["operating_income"] = _record_provenance(op_tag, op_meta)
+        if r_and_d is not None:
+            fundamental_provenance["r_and_d"] = _record_provenance(rd_tag, rd_meta)
+        if ebitda is not None and op_hit is not None and depr_hit is not None:
+            ebitda_prov = _record_provenance(op_tag, op_meta)
+            ebitda_prov["source_record_id"] = (
+                f"{ebitda_prov['source_record_id']}+"
+                f"sec:{cik}:{depr_hit[1]}:{depr_hit[2].get('accn') or 'unknown-accession'}:"
+                f"{depr_hit[2].get('end') or 'unknown-end'}"
+            )
+            fundamental_provenance["ebitda"] = ebitda_prov
+
         return {
             "market_data": market_data,
             "structured_source": "sec_companyfacts",
+            "fundamental_provenance": fundamental_provenance,
             "fundamentals_meta": {
                 "provider": "sec_edgar",
                 "symbol": symbol,
@@ -469,7 +510,7 @@ def fetch_sec_companyfacts_fundamentals(
                     "r_and_d": rd_tag,
                     "ebitda_approx": ebitda_note,
                 },
-                "source_url": _FACTS_URL.format(cik=cik),
+                "source_url": source_url,
             },
             "supply_chain": {
                 "risk_level": "unknown",

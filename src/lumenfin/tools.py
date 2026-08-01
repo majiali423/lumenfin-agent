@@ -283,6 +283,7 @@ def retrieve_company_payload(
             merged_md, filled = _merge_document_market_data_with_live(doc_md, live_md)
             result["market_data"] = merged_md
         provenance = dict(document_payload.get("fundamental_provenance") or {})
+        live_provenance = live.get("fundamental_provenance") or {}
         live_source = str(live.get("structured_source") or "sec_companyfacts")
         live_period = None
         live_meta = live.get("fundamentals_meta") or {}
@@ -294,10 +295,14 @@ def retrieve_company_payload(
             if get_fundamental(result.get("market_data") or {}, key) is None:
                 continue
             if key in filled or not doc_md or get_fundamental(doc_md, key) is None:
-                provenance[key] = {
+                provider_prov = live_provenance.get(key) if isinstance(live_provenance, dict) else None
+                provenance[key] = dict(provider_prov) if isinstance(provider_prov, dict) else {
                     "source": live_source,
-                    "confidence": "high",
-                    "period": live_period,
+                    "confidence": None,
+                    "period": None,
+                    "period_source": None,
+                    "period_alignment": None,
+                    "source_record_id": None,
                 }
         for key in _AST_INPUT_KEYS:
             if key in provenance:
@@ -305,8 +310,11 @@ def retrieve_company_payload(
             if get_fundamental(doc_md, key) is not None:
                 provenance[key] = {
                     "source": "document_extracted",
-                    "confidence": "high",
-                    "period": live_period,
+                    "confidence": None,
+                    "period": None,
+                    "period_source": None,
+                    "period_alignment": None,
+                    "source_record_id": None,
                 }
         if provenance:
             result["fundamental_provenance"] = provenance
@@ -534,6 +542,19 @@ def _payload_from_documents(
                 "period_type": period_type,
                 "period_end": meta.get("period_end"),
                 "period_source": meta.get("period_source") or meta.get("provider"),
+                "period_alignment": meta.get("period_alignment"),
+                "citation": meta.get("citation") or doc.get("citation") or doc.get("filename"),
+                "source_record_id": (
+                    meta.get("source_record_id")
+                    or meta.get("provider_record_id")
+                    or doc.get("source_record_id")
+                    or doc.get("table_id")
+                    or (
+                        f"document:{doc.get('document_id')}:{base}"
+                        if doc.get("document_id")
+                        else None
+                    )
+                ),
             }
 
         if excerpt:

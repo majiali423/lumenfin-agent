@@ -80,6 +80,10 @@ class EvidenceRef:
     value: float | None = None
     unit: str | None = None
     confidence: str | None = None
+    period_source: str | None = None
+    period_alignment: str | None = None
+    source_record_id: str | None = None
+    citation_trusted: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -157,6 +161,10 @@ def claims_from_state(state: dict[str, Any]) -> list[Claim]:
                         "value",
                         "unit",
                         "confidence",
+                        "period_source",
+                        "period_alignment",
+                        "source_record_id",
+                        "citation_trusted",
                     )
                     if key in ref
                 }
@@ -321,6 +329,51 @@ class PeriodIdentity:
 
 _PERIOD_TYPE_TOKENS = frozenset({"annual", "quarter", "ttm", "latest", "model"})
 _ACCEPTABLE_PERIOD_STATUS = frozenset({"exact", "text_match", "not_required"})
+_FACTUAL_PERIOD_SOURCES = frozenset(
+    {
+        "sec_companyfacts",
+        "provider_record",
+        "document_text",
+        "table_header",
+        "structured_table",
+        "filing_fact",
+    }
+)
+_ASSUMED_PERIOD_SOURCES = frozenset(
+    {
+        "query",
+        "query_assumption",
+        "upload_filename",
+        "issuer_convention",
+        "model",
+        "latest",
+        "annual",
+        "quarter",
+        "unknown",
+    }
+)
+_ASSUMED_PERIOD_ALIGNMENTS = frozenset(
+    {"assumed_from_query", "fallback_latest", "upload_labeled", "unspecified", "unknown"}
+)
+
+
+def is_factual_period_provenance(
+    *,
+    period: str | None,
+    period_source: str | None,
+    period_alignment: str | None,
+) -> bool:
+    """Return whether upstream explicitly bound a concrete period to a factual source."""
+    identity = parse_period_identity(period)
+    source = str(period_source or "").strip().casefold()
+    alignment = str(period_alignment or "").strip().casefold()
+    if identity.kind == "unknown" or not source:
+        return False
+    if source in _ASSUMED_PERIOD_SOURCES or source not in _FACTUAL_PERIOD_SOURCES:
+        return False
+    if alignment in _ASSUMED_PERIOD_ALIGNMENTS:
+        return False
+    return True
 
 
 def parse_period_identity(value: str | None) -> PeriodIdentity:
@@ -812,6 +865,18 @@ def match_numeric_evidence(
                 "none",
                 "citation_missing",
             )
+        if not evidence.citation_trusted and not (evidence.source_record_id or "").strip():
+            return EvidenceMatch(
+                False,
+                float(evidence.value),
+                True,
+                period_ok,
+                True,
+                None,
+                None,
+                "none",
+                "source_record_missing",
+            )
         return EvidenceMatch(
             True,
             float(evidence.value),
@@ -1074,6 +1139,10 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
         value: float | None = None,
         unit: str | None = None,
         confidence: str | None = None,
+        period_source: str | None = None,
+        period_alignment: str | None = None,
+        source_record_id: str | None = None,
+        citation_trusted: bool = False,
     ) -> None:
         if not citation or evidence_id in seen:
             return
@@ -1097,17 +1166,37 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
                 value=value,
                 unit=unit,
                 confidence=confidence,
+                period_source=period_source,
+                period_alignment=period_alignment,
+                source_record_id=source_record_id,
+                citation_trusted=citation_trusted,
             )
         )
 
     for index, hit in enumerate((state.get("rag_evidence") or {}).get(company) or []):
-        citation = str(hit.get("citation") or hit.get("source") or f"rag:{company}:{index}")
+        supplied_citation = hit.get("citation") or hit.get("source")
+        citation = str(supplied_citation or f"rag:{company}:{index}")
+        hit_period = str(hit.get("period") or "") or None
+        hit_period_source = str(hit.get("period_source") or "") or None
+        hit_period_alignment = str(hit.get("period_alignment") or "") or None
+        hit_record = str(hit.get("source_record_id") or hit.get("provider_record_id") or "") or None
+        trusted_citation = bool(supplied_citation)
+        if hit_period and not is_factual_period_provenance(
+            period=hit_period,
+            period_source=hit_period_source,
+            period_alignment=hit_period_alignment,
+        ):
+            hit_period = None
         add(
             evidence_id=f"ev_rag_{company}_{index}",
             citation=citation,
             source_type=str(hit.get("source_type") or "rag"),
             text=str(hit.get("text") or hit.get("snippet") or ""),
-            period=str(hit.get("period") or "") or None,
+            period=hit_period,
+            period_source=hit_period_source,
+            period_alignment=hit_period_alignment,
+            source_record_id=hit_record,
+            citation_trusted=trusted_citation,
         )
 
     payload = (state.get("retrieved_docs") or {}).get(company) or {}
@@ -1131,20 +1220,37 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
                 field_prov = {}
             field_period = str(field_prov.get("period") or "") or None
             field_period_type = str(field_prov.get("period_type") or "") or None
+            field_period_source = str(field_prov.get("period_source") or "") or None
+            field_period_alignment = str(field_prov.get("period_alignment") or "") or None
+            source_record_id = str(
+                field_prov.get("source_record_id") or field_prov.get("provider_record_id") or ""
+            ) or None
+            supplied_citation = str(field_prov.get("citation") or "") or None
             if field_period and field_period.lower() in _PERIOD_TYPE_TOKENS:
                 field_period_type = field_period_type or field_period.lower()
                 field_period = None
-            fallback_period = period
-            if fallback_period and str(fallback_period).lower() in _PERIOD_TYPE_TOKENS:
-                fallback_period = None
-            field_period = field_period or fallback_period
-            field_source = str(field_prov.get("source") or structured or "fundamentals")
-            field_conf = str(field_prov.get("confidence") or "high")
+            record_proof = bool(supplied_citation or source_record_id)
+            if not record_proof or not is_factual_period_provenance(
+                period=field_period,
+                period_source=field_period_source,
+                period_alignment=field_period_alignment,
+            ):
+                field_period = None
+            field_source = str(field_prov.get("source") or "fundamentals")
+            field_conf = (
+                str(field_prov["confidence"])
+                if field_prov.get("confidence") is not None
+                else None
+            )
             source_type = field_source if field_source != "none" else "fundamentals"
             display = f"{company} {label} was {float(raw)} billion USD."
+            display_citation = (
+                supplied_citation
+                or f"lumenfin:{source_type}:{company}:{field_period or 'unknown'}:{key}"
+            )
             add(
                 evidence_id=f"ev_fund_{company}_{key}_{field_period or 'unknown'}",
-                citation=f"lumenfin:{source_type}:{company}:{field_period or period}:{key}",
+                citation=display_citation,
                 source_type=source_type,
                 text=display,
                 period=field_period,
@@ -1153,6 +1259,10 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
                 value=float(raw),
                 unit="billion_usd",
                 confidence=field_conf,
+                period_source=field_period_source,
+                period_alignment=field_period_alignment,
+                source_record_id=source_record_id,
+                citation_trusted=bool(supplied_citation),
             )
 
     supply = payload.get("supply_chain") or {}
@@ -1177,7 +1287,11 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
             citation=citation,
             source_type=str(doc.get("source_type") or "document"),
             text=str(doc.get("excerpt") or doc.get("text") or ""),
-            period=period,
+            period=str(doc.get("period") or "") or None,
+            period_source=str(doc.get("period_source") or "") or None,
+            period_alignment=str(doc.get("period_alignment") or "") or None,
+            source_record_id=str(doc.get("source_record_id") or "") or None,
+            citation_trusted=bool(doc.get("citation") or doc.get("filename")),
         )
 
     scores = (state.get("risk_scores") or {}).get(company) or {}
@@ -1493,6 +1607,18 @@ def _verify_numeric(
             )
         )
     if not refs and not usable:
+        if pool and claim.period:
+            relevant = [
+                ref
+                for ref in pool
+                if ref.evidence_id.startswith("ev_fund_")
+                and (
+                    (formula_inputs and ref.metric_name in formula_inputs)
+                    or (not formula_inputs and ref.metric_name == claim.metric_name)
+                )
+            ]
+            if relevant and any(ref.period is None for ref in relevant):
+                reason = "formula_input_period_unknown" if formula_inputs else "period_unknown"
         claim.verification = "rejected"
         claim.verify_reason = f"No evidence text contains the metric inputs ({reason})."
         claim.evidence_refs = []

@@ -141,6 +141,9 @@ class ExtractedAmount:
     confidence: str
     period_hint: str | None = None
     is_normalized: bool = False
+    period: str | None = None
+    period_source: str | None = None
+    period_alignment: str | None = None
 
 
 _TRUSTED_NORM_SOURCES = frozenset(
@@ -271,6 +274,20 @@ def detect_period_hint(text: str) -> str | None:
     return None
 
 
+def detect_concrete_period(text: str) -> str | None:
+    """Extract one unambiguous concrete period from a local metric context."""
+    candidates: list[str] = []
+    for pattern in (
+        r"\bFY\s*20\d{2}\b",
+        r"\bQ[1-4]\s*20\d{2}\b",
+        r"\b20\d{2}\s*Q[1-4]\b",
+        r"\b20\d{2}-\d{2}-\d{2}\b",
+    ):
+        candidates.extend(match.group(0) for match in re.finditer(pattern, text or "", re.I))
+    unique = list(dict.fromkeys(item.upper().replace("FY ", "FY") for item in candidates))
+    return unique[0] if len(unique) == 1 else None
+
+
 def _looks_already_normalized(value: float, scale: str | None) -> bool:
     """Deprecated: do not use shape heuristics for normalization state."""
     del value, scale
@@ -285,6 +302,9 @@ def normalize_extracted_amount(
     normalization_source: str,
     period_hint: str | None = None,
     already_normalized: bool = False,
+    period: str | None = None,
+    period_source: str | None = None,
+    period_alignment: str | None = None,
 ) -> ExtractedAmount:
     """Project one raw statement amount exactly once.
 
@@ -309,6 +329,9 @@ def normalize_extracted_amount(
             confidence="low",
             period_hint=period_hint,
             is_normalized=False,
+            period=period,
+            period_source=period_source,
+            period_alignment=period_alignment,
         )
 
     if already_normalized and scale in {"million", "thousand", "billion", None}:
@@ -322,6 +345,9 @@ def normalize_extracted_amount(
             confidence="high" if source in _TRUSTED_NORM_SOURCES else "low",
             period_hint=period_hint,
             is_normalized=True,
+            period=period,
+            period_source=period_source,
+            period_alignment=period_alignment,
         )
 
     if scale == "million":
@@ -363,6 +389,9 @@ def normalize_extracted_amount(
         confidence=confidence,
         period_hint=period_hint,
         is_normalized=True,
+        period=period,
+        period_source=period_source,
+        period_alignment=period_alignment,
     )
 
 
@@ -493,6 +522,7 @@ def _parse_raw_metric_number(
     """
     local_currency = detect_statement_currency(context) or document_currency
     local_period = detect_period_hint(context) or period_hint
+    concrete_period = detect_concrete_period(context)
     for num_match in re.finditer(r"[-$]?\s*([0-9][0-9,\.]+)", context):
         raw = num_match.group(1).replace(",", "")
         try:
@@ -537,6 +567,9 @@ def _parse_raw_metric_number(
             currency=local_currency,
             normalization_source=source,
             period_hint=local_period,
+            period=concrete_period,
+            period_source="document_text" if concrete_period else None,
+            period_alignment="exact" if concrete_period else None,
         )
     return None
 

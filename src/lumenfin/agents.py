@@ -510,7 +510,14 @@ class AgentRuntime:
                     "source": "document_extracted",
                     "confidence": meta.get("confidence"),
                     "normalization_source": meta.get("normalization_source"),
-                    "period": meta.get("period_hint"),
+                    "period": meta.get("period"),
+                    "period_type": meta.get("period_type") or meta.get("period_hint"),
+                    "period_source": meta.get("period_source"),
+                    "period_alignment": meta.get("period_alignment"),
+                    "citation": meta.get("citation"),
+                    "source_record_id": (
+                        meta.get("source_record_id") or meta.get("provider_record_id")
+                    ),
                 }
                 applied_abs = True
             # Prefer document label only when upload alone provided the AST spine.
