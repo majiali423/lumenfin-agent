@@ -40,6 +40,113 @@ def build_offline_system(config=None) -> LumenFinAgentSystem:
 
 
 class OfflineSystemTestCase(unittest.TestCase):
+    def test_upload_file_persistence_does_not_block_lightweight_request(self) -> None:
+        cases = [
+            (
+                "/api/v1/analyze-upload",
+                {"query": "Analyze Apple FY2025.", "thread_id": "save-upload", "export_artifacts": "false"},
+            ),
+            ("/api/v1/documents/index", {"tenant_id": "save-tenant"}),
+        ]
+
+        for route, form_data in cases:
+            with self.subTest(route=route):
+                tmp_root = ROOT / "test_artifacts" / f"api-save-concurrency-{uuid4().hex[:8]}"
+                app = create_app(
+                    build_test_config(tmp_root),
+                    llm_client=LocalFallbackLLMClient(),
+                    market_data_client=FakeMarketDataClient(),
+                )
+                save_entered = Event()
+                release_save = Event()
+                lightweight_done = Event()
+                observed = {"lightweight_before_release": False}
+                loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
+                gate_holder: dict[str, asyncio.Event] = {}
+
+                def blocked_save(_service, files):
+                    self.assertTrue(files)
+                    save_entered.set()
+                    self.assertTrue(release_save.wait(timeout=10))
+                    return [str(tmp_root / "saved.txt")]
+
+                def fake_analyze(_service, *args, **kwargs):
+                    thread_id = kwargs.get("thread_id") or "save-upload"
+                    return {
+                        "thread_id": thread_id,
+                        "query": kwargs.get("query", ""),
+                        "llm_backend": "local-fallback",
+                        "workflow_status": "completed",
+                        "checkpoint": None,
+                        "provider_health": {},
+                        "result": {
+                            "thread_id": thread_id,
+                            "workflow_status": "completed",
+                            "final_report": "done",
+                            "audit_log": [],
+                            "run_telemetry": {},
+                            "llm_backend": "local-fallback",
+                        },
+                        "artifacts": {},
+                    }
+
+                def fake_index(_service, paths, **kwargs):
+                    return [
+                        {
+                            "document_id": "doc-save",
+                            "tenant_id": kwargs.get("tenant_id") or "save-tenant",
+                            "filename": "saved.txt",
+                            "content_hash": "hash-save",
+                            "status": "ready",
+                            "chunk_count": 1,
+                            "error": None,
+                            "contexts": [],
+                            "embed_calls": 1,
+                        }
+                    ]
+
+                def controller() -> None:
+                    self.assertTrue(save_entered.wait(timeout=10))
+                    loop_holder["loop"].call_soon_threadsafe(gate_holder["gate"].set)
+                    observed["lightweight_before_release"] = lightweight_done.wait(timeout=2)
+                    release_save.set()
+
+                async def scenario() -> tuple[httpx.Response, httpx.Response]:
+                    transport = httpx.ASGITransport(app=app)
+                    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                        loop_holder["loop"] = asyncio.get_running_loop()
+                        gate_holder["gate"] = asyncio.Event()
+
+                        async def lightweight_request() -> httpx.Response:
+                            await gate_holder["gate"].wait()
+                            response = await client.get("/api/v1/config")
+                            lightweight_done.set()
+                            return response
+
+                        lightweight_task = asyncio.create_task(lightweight_request())
+                        upload_task = asyncio.create_task(
+                            client.post(
+                                route,
+                                data=form_data,
+                                files={"files": ("notes.txt", b"Apple revenue FY2025 was 100 billion.", "text/plain")},
+                            )
+                        )
+                        return await upload_task, await lightweight_task
+
+                controller_thread = Thread(target=controller, daemon=True)
+                controller_thread.start()
+                with (
+                    patch.object(LumenFinAnalysisService, "save_uploaded_files", blocked_save),
+                    patch.object(LumenFinAnalysisService, "analyze", fake_analyze),
+                    patch.object(LumenFinAnalysisService, "index_document_paths", fake_index),
+                ):
+                    upload_response, lightweight_response = asyncio.run(scenario())
+                controller_thread.join(timeout=10)
+
+                self.assertTrue(observed["lightweight_before_release"])
+                self.assertEqual(lightweight_response.status_code, 200)
+                self.assertEqual(upload_response.status_code, 200, upload_response.text)
+
     def test_upload_analysis_does_not_block_lightweight_request(self) -> None:
         tmp_root = ROOT / "test_artifacts" / f"api-upload-concurrency-{uuid4().hex[:8]}"
         app = create_app(
