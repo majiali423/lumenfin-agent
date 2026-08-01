@@ -228,6 +228,15 @@ class AdversarialClaimBindingTestCase(unittest.TestCase):
                     "market_data": market,
                     "fundamentals_meta": meta
                     or {"fiscal_year": 2024, "period": "FY2024", "period_end": "2024-06-30"},
+                    "fundamental_provenance": {
+                        key: {
+                            "source": "document_extracted", "confidence": "high",
+                            "period": "FY2024", "period_source": "document_text",
+                            "period_alignment": "exact", "citation": f"document://{company}/{key}",
+                            "source_record_id": f"document:{company}:FY2024:{key}",
+                        }
+                        for key in market
+                    },
                     "source_documents": [],
                 }
             },
@@ -393,7 +402,8 @@ class AdversarialClaimBindingTestCase(unittest.TestCase):
             entity="Microsoft",
             citation="mix.pdf#p1",
             source_type="rag",
-            text="FY2024 operating income 109.433. FY2023 revenue 220.0.",
+            text=("FY2024 operating income was 109.433 billion USD. "
+                  "FY2023 revenue was 220.0 billion USD."),
             period="FY2024",
         )
         match = match_numeric_evidence(
@@ -791,6 +801,7 @@ class Phase21StructuredBindingTestCase(unittest.TestCase):
             value=20.0,
             unit="billion_usd",
             confidence="high",
+            source_record_id="sec:Microsoft:FY2024:revenue",
         )
         match = match_numeric_evidence(
             ref,
@@ -817,6 +828,7 @@ class Phase21StructuredBindingTestCase(unittest.TestCase):
             value=50.0,
             unit="billion_usd",
             confidence="high",
+            source_record_id="sec:Microsoft:FY2024:r_and_d",
         )
         rd = EvidenceRef(
             evidence_id="ev_fund_Microsoft_r_and_d_FY2024",
@@ -829,6 +841,7 @@ class Phase21StructuredBindingTestCase(unittest.TestCase):
             value=50.0,
             unit="billion_usd",
             confidence="high",
+            source_record_id="sec:Microsoft:FY2024:revenue",
         )
         m_rev = match_numeric_evidence(
             rev, entity="Microsoft", metric_name="revenue", value=50.0, unit="billion_usd", period="FY2024"
@@ -855,6 +868,7 @@ class Phase21StructuredBindingTestCase(unittest.TestCase):
             value=245.122,
             unit="billion_usd",
             confidence="high",
+            source_record_id="sec:Microsoft:FY2024:revenue",
         )
         self.assertTrue(
             match_numeric_evidence(
@@ -1152,6 +1166,7 @@ class Phase2FinalClosingTestCase(unittest.TestCase):
             value=245.122,
             unit="billion_usd",
             confidence="high",
+            source_record_id="sec:Microsoft:FY2024:revenue",
         )
         try:
             ref = EvidenceRef(period=None, period_type="annual", **kwargs)
@@ -1182,6 +1197,7 @@ class Phase2FinalClosingTestCase(unittest.TestCase):
             value=245.122,
             unit="billion_usd",
             confidence="high",
+            source_record_id="sec:Microsoft:FY2024:revenue",
         )
         try:
             ref = EvidenceRef(period_type="annual", **kwargs)
@@ -1252,6 +1268,7 @@ class Phase2FinalClosingTestCase(unittest.TestCase):
             value=245.122,
             unit="billion_usd",
             confidence="high",
+            source_record_id="sec:Microsoft:FY2024:revenue",
         )
         self.assertTrue(
             match_numeric_evidence(
@@ -1479,7 +1496,7 @@ class Phase2PeriodIdentityTestCase(unittest.TestCase):
             formula_inputs={"operating_income": 109.433, "revenue": 245.122},
         )
         self.assertFalse(match.matched)
-        self.assertIn("formula_input_period_mismatch", match.reason)
+        self.assertIn("period_metadata_conflict", match.reason)
 
     def test_formula_annual_and_quarter_mix_rejected(self) -> None:
         from lumenfin.claims import EvidenceRef, match_numeric_evidence

@@ -46,6 +46,15 @@ class ClaimBindingTests(unittest.TestCase):
                         "r_and_d": 10.0,
                     },
                     "fundamentals_meta": {"fiscal_year": 2025},
+                    "fundamental_provenance": {
+                        key: {
+                            "source": "provider_record", "confidence": "high",
+                            "period": "FY2025", "period_source": "provider_record",
+                            "period_alignment": "exact", "citation": f"sec://nvda/{key}",
+                            "source_record_id": f"sec:nvda:FY2025:{key}",
+                        }
+                        for key in ("revenue", "ebitda", "operating_income", "r_and_d")
+                    },
                     "supply_chain": {
                         "risk_level": "medium",
                         "signals": ["PDF mentions supply chain risk."],
@@ -57,7 +66,7 @@ class ClaimBindingTests(unittest.TestCase):
                 "NVIDIA": [
                     {
                         "citation": "nvda_fy2025_10k_sec.pdf#p12",
-                        "text": "NVIDIA revenue was 100.0 billion USD and EBITDA was 50.0 billion.",
+                        "text": "FY2025 NVIDIA revenue was 100.0 billion USD and EBITDA was 50.0 billion.",
                         "source_type": "rag",
                         "period": "FY2025",
                     }
@@ -159,7 +168,16 @@ class ClaimBindingTests(unittest.TestCase):
                         "operating_income": 109.4,
                         "r_and_d": 29.5,
                     },
-                    "fundamentals_meta": {"upload_present": True},
+                    "fundamental_provenance": {
+                        key: {
+                            "source": "document_extracted", "confidence": "high",
+                            "period": "FY2024", "period_source": "document_text",
+                            "period_alignment": "exact", "citation": f"msft.pdf#table-{key}",
+                            "source_record_id": f"document:msft:{key}",
+                        }
+                        for key in ("revenue", "operating_income", "r_and_d")
+                    },
+                    "fundamentals_meta": {"fiscal_year": 2024, "upload_present": True},
                     "supply_chain": {"risk_level": "low", "signals": []},
                     "source_documents": [],
                 }
@@ -190,7 +208,7 @@ class ClaimBindingTests(unittest.TestCase):
             if c.claim_type == "numeric" and c.metric_name in {"operating_margin", "r_and_d_intensity"}
         }
         self.assertEqual(by_metric["operating_margin"].verification, "verified")
-        self.assertIn("document_extracted", by_metric["operating_margin"].primary_citation)
+        self.assertIn("msft.pdf", by_metric["operating_margin"].primary_citation)
         self.assertEqual(by_metric["r_and_d_intensity"].verification, "verified")
         inv = [c for c in claims if c.claim_type == "investment_conclusion"]
         self.assertEqual(inv[0].verification, "verified")
