@@ -324,6 +324,7 @@ class PeriodIdentity:
     kind: str
     year: int | None = None
     quarter: int | None = None
+    date_value: str | None = None
     raw: str | None = None
 
 
@@ -390,7 +391,9 @@ def parse_period_identity(value: str | None) -> PeriodIdentity:
         year = int(date_match.group(1))
         month = int(date_match.group(2))
         quarter = (month - 1) // 3 + 1
-        return PeriodIdentity("date", year=year, quarter=quarter, raw=raw)
+        return PeriodIdentity(
+            "date", year=year, quarter=quarter, date_value=date_match.group(0), raw=raw
+        )
 
     q_match = re.search(
         r"(?:^|\b)(?:Q\s*([1-4])\s*(20\d{2})|(20\d{2})\s*Q\s*([1-4]))(?:\b|$)",
@@ -435,17 +438,14 @@ def _period_identities_compatible(left: PeriodIdentity, right: PeriodIdentity) -
         return False
     if left.year is None or right.year is None or left.year != right.year:
         return False
-    annual = {"fiscal_year", "calendar_year"}
-    if left.kind in annual and right.kind in annual:
+    if left.kind != right.kind:
+        return False
+    if left.kind in {"fiscal_year", "calendar_year"}:
         return True
     if left.kind == "quarter" and right.kind == "quarter":
         return left.quarter == right.quarter
     if left.kind == "date" and right.kind == "date":
-        return left.quarter == right.quarter
-    # date may align to quarter of same year/quarter number
-    if {left.kind, right.kind} <= {"date", "quarter"}:
-        return left.quarter == right.quarter
-    # annual vs quarter/date is never the same identity
+        return bool(left.date_value and left.date_value == right.date_value)
     return False
 
 
@@ -482,6 +482,7 @@ def _extract_period_identities_from_text(text: str) -> list[PeriodIdentity]:
                 "date",
                 year=year,
                 quarter=(month - 1) // 3 + 1,
+                date_value=match.group(0),
                 raw=match.group(0),
             )
         )
