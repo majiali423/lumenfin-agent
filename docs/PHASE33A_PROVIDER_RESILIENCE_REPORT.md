@@ -100,5 +100,6 @@ Example (desensitized):
 
 ## 29–31. Git / risks
 
-- Worktree commits created after this report; see HEAD after commit
+- **HEAD:** `db8df6f0a29e91c757697e7315b05fb9c03eb790`
+- Worktree clean after commit
 - Remaining risks: SEC still has a parallel custom retry loop; dual-API Docker compose stub profile not required for this deterministic PASS; per-process bulkheads are implemented as helpers but not yet wired into every market-data path; Phase 3.2B docker regression deferred; no live DeepSeek/DashScope smoke; not exactly-once; not production-ready
