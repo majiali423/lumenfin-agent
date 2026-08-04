@@ -134,8 +134,12 @@ infrastructure code was modified.
 | `.github/workflows/test.yml` | `workflow_dispatch` | Extended cross-repo FinAgentBench gate (was per-push; demoted so cross-repo checkout does not block every commit) |
 
 Local equivalents of every `ci.yml` step were executed on Windows before the
-freeze and all passed. The GitHub-hosted run status must be observed on the
-first push; the README badge reflects that real status and is not asserted here.
+freeze and all passed.
+
+Observed GitHub run: workflow `ci`, run `30905055570`, commit
+`2839c1c223a2be6589c6b349d270129a74c37dc2` — **success**. The only commit after
+that point records this CI result in this report; no code, test, workflow, or
+demo behavior changed after the verified run.
 
 ## 11. Demo
 
