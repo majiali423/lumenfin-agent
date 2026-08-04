@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import statistics
 import sys
 import time
@@ -348,9 +349,14 @@ def run_duplicate_jobs(settings: IntegrationSettings, log_dir: Path) -> dict[str
         record = None
         while time.monotonic() < deadline:
             record = dbutil.fetch_document(settings.database_url, document_id, tenant)
-            if record and record["index_status"] == "ready" and redis_util.queue_depth(
-                settings.redis_url, settings.redis_index_queue
-            ) == 0:
+            depths = redis_util.observe_queue(settings.redis_url, settings.redis_index_queue)
+            if (
+                record
+                and record["index_status"] == "ready"
+                and depths.get("pending", 0) == 0
+                and depths.get("processing", 0) == 0
+                and depths.get("dead_letter", 0) == 0
+            ):
                 break
             time.sleep(0.5)
         out["final_status"] = None if record is None else record["index_status"]
@@ -384,7 +390,9 @@ def run_duplicate_jobs(settings: IntegrationSettings, log_dir: Path) -> dict[str
             and out["chunk_count"] > 0
             and out["vector_count"] == out["chunk_count"]
             and out["duplicate_vector_count"] == 0
-            and out["queue_final"]["depth"] == 0
+            and out["queue_final"]["pending"] == 0
+            and out["queue_final"]["processing"] == 0
+            and out["queue_final"]["dead_letter"] == 0
         ):
             out["status"] = "pass"
         else:
@@ -396,20 +404,22 @@ def run_duplicate_jobs(settings: IntegrationSettings, log_dir: Path) -> dict[str
 
 
 def run_lease_recovery(settings: IntegrationSettings, log_dir: Path) -> dict[str, Any]:
+    """Kill worker A after reserve+claim; Worker B must auto-reclaim without manual enqueue."""
     out: dict[str, Any] = {
         "status": "fail",
         "timeline": [],
         "stale_claim_recovered": 0,
+        "manual_redelivery": False,
+        "queue_final": None,
         "errors": [],
     }
     try:
-        # Only worker A first, armed to pause after claim.
+        redis_util.purge_queue(settings.redis_url, settings.redis_index_queue)
         docker_ops.stop_service(settings, "index-worker-b", kill=True)
         docker_ops.stop_service(settings, "index-worker-a", kill=True)
         hooks.reset_dir(hooks.INDEX_PAUSE)
         hooks.arm(hooks.INDEX_PAUSE)
         docker_ops.up_workers(settings, "index-worker-a")
-        # Confirm the pause-enabled worker actually started.
         deadline_start = time.monotonic() + 60
         while time.monotonic() < deadline_start:
             info = docker_ops.service_inspect(settings, "index-worker-a")
@@ -418,7 +428,9 @@ def run_lease_recovery(settings: IntegrationSettings, log_dir: Path) -> dict[str
                 break
             time.sleep(0.5)
         else:
-            raise RuntimeError(f"index-worker-a failed to start: {docker_ops.logs(settings, 'index-worker-a', tail=80)}")
+            raise RuntimeError(
+                f"index-worker-a failed to start: {docker_ops.logs(settings, 'index-worker-a', tail=80)}"
+            )
 
         content = _sample_doc("crash.md", "Microsoft", f"Microsoft crash recovery {uuid4().hex}\n")[1]
         tenant = f"tenant-crash-{uuid4().hex[:8]}"
@@ -428,35 +440,34 @@ def run_lease_recovery(settings: IntegrationSettings, log_dir: Path) -> dict[str
             tenant_id=tenant,
             async_mode=True,
         )
+        if indexed.status_code != 200:
+            raise RuntimeError(f"upload failed: {indexed.body}")
         document_id = indexed.body["documents"][0]["document_id"]
+
         claimed_path = hooks.wait_for_claimed(hooks.INDEX_PAUSE, timeout_seconds=90)
         claimed = json.loads(claimed_path.read_text(encoding="utf-8"))
         record = dbutil.fetch_document(settings.database_url, document_id, tenant)
+        depths = redis_util.observe_queue(settings.redis_url, settings.redis_index_queue)
         out["timeline"].append(
             {
-                "event": "worker_a_claimed",
+                "event": "worker_a_reserved_and_claimed",
                 "ts": time.time(),
                 "record": record,
                 "claimed": claimed,
+                "queue": depths,
             }
         )
+        if depths.get("pending", 0) != 0 or depths.get("processing", 0) < 1:
+            raise RuntimeError(f"expected message in processing only: {depths}")
         if not record or record["index_status"] != "indexing" or record["index_attempt"] != 1:
             raise RuntimeError(f"unexpected claim state: {record}")
+        if not record.get("index_owner"):
+            raise RuntimeError("index_owner empty after claim")
 
-        # Kill A without graceful _fail cleanup; do not release pause.
         docker_ops.stop_service(settings, "index-worker-a", kill=True)
-        out["timeline"].append({"event": "worker_a_killed", "ts": time.time()})
+        out["timeline"].append({"event": "worker_a_killed", "ts": time.time(), "manual_redelivery": False})
 
-        # Before lease expiry, B must not steal even if work is re-delivered.
         docker_ops.up_workers(settings, "index-worker-b")
-        redis_util.enqueue_index_job(
-            settings.redis_url,
-            settings.redis_index_queue,
-            document_id=document_id,
-            tenant_id=tenant,
-            count=1,
-        )
-        # Stay safely inside the active lease window.
         lease_expires = int(record["index_lease_expires"] or 0)
         remaining = max(0.0, lease_expires - time.time() - 1.0)
         if remaining > 0:
@@ -466,26 +477,34 @@ def run_lease_recovery(settings: IntegrationSettings, log_dir: Path) -> dict[str
         if mid and mid.get("index_attempt") != 1:
             raise RuntimeError(f"lease stolen before expiry: {mid}")
 
-        # After expiry, at-least-once re-delivery lets B claim and finish.
-        _wait_lease_expired(lease_expires, pad_seconds=0.75)
-        redis_util.enqueue_index_job(
-            settings.redis_url,
-            settings.redis_index_queue,
-            document_id=document_id,
-            tenant_id=tenant,
-            count=1,
-        )
-        deadline = time.monotonic() + 90
+        # Wait for Redis reclaim idle + DB lease expiry. Do NOT enqueue again.
+        _wait_lease_expired(lease_expires, pad_seconds=1.0)
+        time.sleep(max(1.0, float(os.getenv("MAS_REDIS_RECLAIM_IDLE_SECONDS", "5"))))
+        deadline = time.monotonic() + 120
         recovered = None
         while time.monotonic() < deadline:
             recovered = dbutil.fetch_document(settings.database_url, document_id, tenant)
-            if recovered and recovered["index_status"] == "ready" and recovered["index_attempt"] == 2:
+            depths = redis_util.observe_queue(settings.redis_url, settings.redis_index_queue)
+            if (
+                recovered
+                and recovered["index_status"] == "ready"
+                and recovered["index_attempt"] == 2
+                and depths.get("pending", 0) == 0
+                and depths.get("processing", 0) == 0
+                and depths.get("dead_letter", 0) == 0
+            ):
                 break
             time.sleep(0.5)
-        out["timeline"].append({"event": "after_recovery", "ts": time.time(), "record": recovered})
+        out["timeline"].append(
+            {
+                "event": "after_auto_recovery",
+                "ts": time.time(),
+                "record": recovered,
+                "queue": redis_util.observe_queue(settings.redis_url, settings.redis_index_queue),
+            }
+        )
         out["final_record"] = recovered
         out["chunk_count"] = int(recovered.get("chunk_count") or 0) if recovered else 0
-        # Milvus standalone can lag briefly after upsert; poll for vector visibility.
         vector_count = 0
         deadline_vectors = time.monotonic() + 30
         while time.monotonic() < deadline_vectors:
@@ -502,6 +521,7 @@ def run_lease_recovery(settings: IntegrationSettings, log_dir: Path) -> dict[str
         out["document_count"] = dbutil.count_documents(
             settings.database_url, tenant_id=tenant, content_hash=content_hash_bytes(content)
         )
+        out["queue_final"] = redis_util.observe_queue(settings.redis_url, settings.redis_index_queue)
         if (
             recovered
             and recovered["index_status"] == "ready"
@@ -511,18 +531,163 @@ def run_lease_recovery(settings: IntegrationSettings, log_dir: Path) -> dict[str
             and out["document_count"] == 1
             and out["chunk_count"] > 0
             and out["vector_count"] == out["chunk_count"]
+            and out["queue_final"]["pending"] == 0
+            and out["queue_final"]["processing"] == 0
+            and out["queue_final"]["dead_letter"] == 0
+            and out["manual_redelivery"] is False
         ):
             out["stale_claim_recovered"] = 1
             out["status"] = "pass"
         else:
             out["errors"].append("lease recovery assertions failed")
-        # Keep B running for later scenarios; disarm pause for future claims on A.
         hooks.disarm(hooks.INDEX_PAUSE)
         docker_ops.up_workers(settings, "index-worker-a", "index-worker-b")
     except Exception as exc:  # noqa: BLE001
         out["errors"].append(str(exc))
         hooks.disarm(hooks.INDEX_PAUSE)
+        try:
+            docker_ops.up_workers(settings, "index-worker-a", "index-worker-b")
+        except Exception as restore_exc:  # noqa: BLE001
+            out["errors"].append(f"worker restore failed: {restore_exc}")
     (log_dir / "lease_recovery.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
+    return out
+
+
+def run_dead_letter(settings: IntegrationSettings, log_dir: Path) -> dict[str, Any]:
+    out: dict[str, Any] = {"status": "fail", "errors": [], "dead_letters": []}
+    try:
+        from lumenfin.queueing import RedisQueueManager
+
+        docker_ops.up_workers(settings, "index-worker-a", "index-worker-b")
+        redis_util.purge_queue(settings.redis_url, settings.redis_index_queue)
+        queue = RedisQueueManager(
+            settings.redis_url,
+            settings.redis_index_queue,
+            max_attempts=3,
+            reclaim_idle_seconds=5,
+        )
+        message_id = queue.enqueue(
+            {
+                "type": "rag_index",
+                "document_id": f"doc-missing-{uuid4().hex[:8]}",
+                "tenant_id": f"tenant-dlq-{uuid4().hex[:8]}",
+            }
+        )
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            depths = queue.depths()
+            if depths["dead_letter"] >= 1 and depths["pending"] == 0 and depths["processing"] == 0:
+                break
+            time.sleep(0.5)
+        letters = queue.list_dead_letters(limit=10)
+        out["dead_letters"] = letters
+        out["queue_final"] = queue.depths()
+        out["seed_message_id"] = message_id
+        letter = next(
+            (item for item in letters if item.get("message_id") == message_id),
+            letters[0] if letters else None,
+        )
+        if (
+            letter
+            and int(letter.get("attempt") or 0) >= 3
+            and letter.get("last_error")
+            and letter.get("failed_at")
+            and out["queue_final"]["pending"] == 0
+            and out["queue_final"]["processing"] == 0
+            and out["queue_final"]["dead_letter"] >= 1
+        ):
+            out["status"] = "pass"
+        else:
+            out["errors"].append("dead-letter assertions failed")
+    except Exception as exc:  # noqa: BLE001
+        out["errors"].append(str(exc))
+    (log_dir / "dead_letter.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
+    return out
+
+
+def run_ack_idempotency(settings: IntegrationSettings, log_dir: Path) -> dict[str, Any]:
+    out: dict[str, Any] = {"status": "fail", "errors": []}
+    try:
+        from lumenfin.queueing import RedisQueueManager
+
+        queue = RedisQueueManager(settings.redis_url, f"{settings.redis_index_queue}-acktest")
+        queue.purge()
+        message_id = queue.enqueue({"hello": "world"})
+        reserved = queue.reserve(timeout_seconds=2, worker_id="ack-tester")
+        assert reserved is not None
+        first = queue.ack(reserved.message_id, "ack-tester")
+        second = queue.ack(reserved.message_id, "ack-tester")
+        out.update(
+            {
+                "message_id": message_id,
+                "first_ack": first,
+                "second_ack": second,
+                "depths": queue.depths(),
+            }
+        )
+        if first is True and second is False and out["depths"]["processing"] == 0:
+            out["status"] = "pass"
+        else:
+            out["errors"].append("ack idempotency assertions failed")
+        queue.purge()
+    except Exception as exc:  # noqa: BLE001
+        out["errors"].append(str(exc))
+    (log_dir / "ack_idempotency.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
+    return out
+
+
+def run_redis_restart(settings: IntegrationSettings, log_dir: Path) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "status": "fail",
+        "disconnect_count": 1,
+        "reconnect_count": 0,
+        "job_completed_after_reconnect": 0,
+        "errors": [],
+    }
+    try:
+        docker_ops.up_workers(settings, "index-worker-a", "index-worker-b")
+        redis_util.purge_queue(settings.redis_url, settings.redis_index_queue)
+        # Workers should be idle-waiting, then Redis disappears temporarily.
+        docker_ops.stop_service(settings, "redis", kill=True)
+        time.sleep(2)
+        docker_ops.start_service(settings, "redis")
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                redis_util.observe_queue(settings.redis_url, settings.redis_index_queue)
+                out["reconnect_count"] = 1
+                break
+            except Exception:
+                time.sleep(0.5)
+        # Ensure workers are alive after Redis returns (restart:no containers may exit).
+        docker_ops.up_workers(settings, "index-worker-a", "index-worker-b")
+        content = _sample_doc("redis-restart.md", "Apple", f"Apple redis restart {uuid4().hex}\n")[1]
+        tenant = f"tenant-redis-{uuid4().hex[:8]}"
+        indexed = http_client.multipart_index(
+            f"{settings.api_a_url}/api/v1/documents/index",
+            files=[("redis-restart.md", content)],
+            tenant_id=tenant,
+            async_mode=True,
+        )
+        if indexed.status_code != 200:
+            raise RuntimeError(f"upload failed after redis restart: {indexed.body}")
+        document_id = indexed.body["documents"][0]["document_id"]
+        deadline = time.monotonic() + 120
+        record = None
+        while time.monotonic() < deadline:
+            record = dbutil.fetch_document(settings.database_url, document_id, tenant)
+            if record and record["index_status"] == "ready":
+                out["job_completed_after_reconnect"] = 1
+                break
+            time.sleep(0.5)
+        out["final_record"] = record
+        if out["reconnect_count"] == 1 and out["job_completed_after_reconnect"] == 1:
+            out["status"] = "pass"
+        else:
+            out["errors"].append("redis restart recovery assertions failed")
+    except Exception as exc:  # noqa: BLE001
+        out["errors"].append(str(exc))
+    (log_dir / "redis_restart.json").write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     return out
 
 

@@ -101,11 +101,15 @@ def main() -> int:
         "duplicate_document_count": 0,
         "duplicate_vector_count": 0,
         "stale_claim_recovered": 0,
+        "manual_redelivery": False,
         "stale_finalize_rejected": 0,
         "stale_cleanup_rejected": 0,
         "tenant_leakage_count": 0,
         "orphan_chunk_count": 0,
         "orphan_vector_count": 0,
+        "dead_letter_count": 0,
+        "ack_idempotent": False,
+        "redis_reconnect_job_completed": 0,
         "unexpected_error_count": 0,
         "scenario_status": {},
         "artifacts_dir": str(run_dir),
@@ -185,10 +189,11 @@ def main() -> int:
         summary["duplicate_vector_count"] = dup.get("duplicate_vector_count", 0)
         summary["unexpected_error_count"] += len(dup.get("errors") or [])
 
-        print("P0-5 lease recovery after worker kill...")
+        print("P0-5 lease recovery after worker kill (auto reclaim, no manual redelivery)...")
         lease = scenarios.run_lease_recovery(settings, run_dir)
         summary["scenario_status"]["lease_recovery"] = lease
         summary["stale_claim_recovered"] = lease.get("stale_claim_recovered", 0)
+        summary["manual_redelivery"] = bool(lease.get("manual_redelivery"))
         summary["unexpected_error_count"] += len(lease.get("errors") or [])
 
         print("P0-6 stale worker fencing...")
@@ -203,6 +208,26 @@ def main() -> int:
         summary["scenario_status"]["tenant_isolation"] = tenant
         summary["tenant_leakage_count"] = tenant.get("tenant_leakage_count", 0)
         summary["unexpected_error_count"] += len(tenant.get("errors") or [])
+
+        print("P0-8 dead-letter after max attempts...")
+        dead = scenarios.run_dead_letter(settings, run_dir)
+        summary["scenario_status"]["dead_letter"] = dead
+        summary["dead_letter_count"] = int((dead.get("queue_final") or {}).get("dead_letter") or 0)
+        summary["unexpected_error_count"] += len(dead.get("errors") or [])
+
+        print("P0-9 ACK idempotency...")
+        ack = scenarios.run_ack_idempotency(settings, run_dir)
+        summary["scenario_status"]["ack_idempotency"] = ack
+        summary["ack_idempotent"] = ack.get("status") == "pass"
+        summary["unexpected_error_count"] += len(ack.get("errors") or [])
+
+        print("P1 Redis restart recovery...")
+        redis_restart = scenarios.run_redis_restart(settings, run_dir)
+        summary["scenario_status"]["redis_restart"] = redis_restart
+        summary["redis_reconnect_job_completed"] = int(
+            redis_restart.get("job_completed_after_reconnect") or 0
+        )
+        summary["unexpected_error_count"] += len(redis_restart.get("errors") or [])
 
         if not args.skip_load:
             print("P1 limited load...")
@@ -259,12 +284,17 @@ def main() -> int:
             "duplicate_document_count",
             "duplicate_vector_count",
             "stale_claim_recovered",
+            "manual_redelivery",
             "stale_finalize_rejected",
             "stale_cleanup_rejected",
             "tenant_leakage_count",
             "orphan_chunk_count",
             "orphan_vector_count",
+            "dead_letter_count",
+            "ack_idempotent",
+            "redis_reconnect_job_completed",
             "unexpected_error_count",
+            "redis_queue",
             "blocked",
             "artifacts_dir",
         ) if k in summary}, indent=2))

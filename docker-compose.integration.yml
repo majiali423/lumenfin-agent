@@ -7,7 +7,7 @@
 name: lumenfin-it
 
 x-app-env: &app-env
-  APP_ENV: test
+  APP_ENV: integration
   DATA_MODE: demo
   ALLOW_LOCAL_FALLBACK: "true"
   MAS_HOST: 0.0.0.0
@@ -19,6 +19,9 @@ x-app-env: &app-env
   MAS_REDIS_URL: redis://redis:6379/0
   MAS_REDIS_QUEUE_NAME: finance-analysis-it
   MAS_REDIS_INDEX_QUEUE_NAME: ${MAS_REDIS_INDEX_QUEUE_NAME:-rag-document-index-it}
+  MAS_REDIS_JOB_MAX_ATTEMPTS: ${MAS_REDIS_JOB_MAX_ATTEMPTS:-3}
+  MAS_REDIS_RECLAIM_IDLE_SECONDS: ${MAS_REDIS_RECLAIM_IDLE_SECONDS:-5}
+  MAS_REDIS_RETRY_BACKOFF_SECONDS: ${MAS_REDIS_RETRY_BACKOFF_SECONDS:-1}
   MAS_MILVUS_URI: http://milvus:19530
   MAS_MILVUS_COLLECTION: ${MAS_MILVUS_COLLECTION:-lumenfin_chunks_it}
   MAS_MILVUS_ISOLATE: "false"
@@ -37,6 +40,7 @@ x-app-env: &app-env
   DEEPSEEK_API_KEY: ""
   DASHSCOPE_API_KEY: ""
   PYTHONPATH: /app/src
+  PYTHONUNBUFFERED: "1"
 
 services:
   postgres:

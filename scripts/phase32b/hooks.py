@@ -44,10 +44,19 @@ def wait_for_ready_files(path: Path, *, count: int, timeout_seconds: float = 30.
 
 
 def wait_for_claimed(path: Path, *, timeout_seconds: float = 60.0) -> Path:
+    import json
+
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         claimed = sorted(path.glob("claimed-*.json"))
-        if claimed:
-            return claimed[0]
+        for candidate in claimed:
+            try:
+                text = candidate.read_text(encoding="utf-8").strip()
+                if not text:
+                    continue
+                json.loads(text)
+                return candidate
+            except (OSError, json.JSONDecodeError):
+                continue
         time.sleep(0.05)
     raise TimeoutError(f"Timed out waiting for claim marker in {path}")
