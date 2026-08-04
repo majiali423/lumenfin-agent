@@ -1,88 +1,132 @@
 # LumenFin
 
-**A Trustworthy Financial Research Agent**
-
-LumenFin turns a research query and optional SEC filings into an evidence-backed
-diligence report. It combines issuer-only entity resolution, SEC / market
-financial grounding, claim → evidence binding and an independent FinAgentBench
+**Evidence-grounded multi-agent financial diligence** — LangGraph orchestration,
+structured grounding, claim→evidence binding, and an independent FinAgentBench
 reliability gate.
 
-Release candidate: `0.1.0rc1` | FinRun schema: `1.0` | FinAgentBench pin:
-`v0.1.0-rc.1`
-Project status: **Release Candidate / Internal Portfolio Release**
+[![CI](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
 
-[Docs index](docs/README.md) | [Architecture](docs/FINAL_ARCHITECTURE.md) |
-[Limitations](docs/PRODUCTION_LIMITATIONS.md) |
-[Demo guide](docs/DEMO_GUIDE.md)
+Release candidate: **`0.1.0rc2`** | FinRun schema: `1.0` | FinAgentBench pin:
+`v0.1.0-rc.1`
+
+LumenFin is a **portfolio release candidate** validated under controlled
+multi-process and deterministic fault-injection conditions. These results are
+**not** a certification of unrestricted production readiness.
+
+[Docs](docs/README.md) · [Architecture](docs/FINAL_ARCHITECTURE.md) ·
+[Limitations](docs/PRODUCTION_LIMITATIONS.md) · [Demo](docs/DEMO_GUIDE.md) ·
+[Release report](docs/PORTFOLIO_RELEASE_REPORT.md)
 
 ---
 
-## Why this project
+## 1. One-line positioning
+
+Turn a research query (and optional filings) into a **checkable** diligence
+report that fails closed when data is missing — then prove reliability with an
+external FinRun gate.
+
+## 2. Core problem
 
 Typical financial RAG demos often:
 
-- pull peer companies out of a 10-K body;
-- compute ratios from unsupported numbers;
+- promote peers out of a 10-K body into issuer scope;
+- invent ratios without structured inputs;
 - emit fluent claims without citations;
-- invent precision when data is missing;
-- look correct when only the final answer is judged.
+- look “correct” when only the final paragraph is judged.
 
-LumenFin is built to make those failure modes visible and fail closed.
+LumenFin makes those failure modes **visible** and **fail-closed**.
 
-## Key capabilities
+## 3. System architecture (two paths)
 
-- SEC 10-K / Company Facts and live market snapshots
-- Issuer-only entity resolution and multi-company isolation
-- Hybrid RAG with structured financial facts
-- Verified claim objects bound to evidence before synthesis
-- Fail-closed `incomplete_data` when fundamentals are absent
-- Request-scoped runtime (concurrent issuer isolation)
-- FinRun export evaluated by FinAgentBench
-
-## Architecture
+### Agent / evidence path
 
 ```text
-Query
-  → LangGraph orchestration
-  → Retrieval / tools / hybrid RAG
-  → Issuer financial grounding
-  → Claim binder
-  → Report synthesizer
-  → FinRun export → FinAgentBench
+Query / PDF
+→ LangGraph orchestration
+→ SEC / Yahoo / hybrid RAG
+→ structured financial grounding
+→ claim builder
+→ evidence binder
+→ verified-only synthesis
+→ FinRun
+→ FinAgentBench
 ```
 
-```mermaid
-flowchart LR
-  Q[Query] --> O[Orchestration]
-  O --> R[Retrieval]
-  R --> G[Financial Grounding]
-  G --> C[Claim + Evidence]
-  C --> S[Synthesizer]
-  S --> F[FinRun]
-  F --> B[FinAgentBench]
+### Runtime / infrastructure path
+
+```text
+Client
+→ API instance(s)
+→ PostgreSQL checkpoint / job / RAG metadata
+→ Redis reliable queues (pending / processing / DLQ)
+→ index worker(s)
+→ Milvus Server
+→ provider resilience layer
 ```
 
 Details: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)
 
-## Reliability results
+## 4. Trusted financial analysis chain
 
-Observed on the current controlled RC pack (not a universal accuracy claim):
+- Issuer-only entity resolution and multi-company isolation
+- SEC companyfacts / Yahoo fundamentals with provenance
+- Hybrid RAG (keyword + vector) with page citations when uploads exist
+- Typed claims bound to evidence before synthesis
+- `incomplete_data` when fundamentals are absent (no forged numerics)
 
-| Gate | Result |
+## 5. Engineering reliability
+
+| Concern | Design |
+|---------|--------|
+| Persistence | PostgreSQL-first (SQLite only for `test` / explicit dev opt-in) |
+| Queues | Redis pending → processing → dead-letter; reclaim without manual redelivery |
+| Workers | Index lease + attempt fencing; kill → automatic reclaim |
+| Providers | Single retry owner, deadline, Retry-After, jitter, degraded fallback, per-process bulkhead |
+| Tenancy | RAG data-plane tenant-aware logical isolation ([boundary](docs/MULTI_TENANCY_BOUNDARY.md)) |
+
+## 6. Validated results (separate gates)
+
+Do **not** merge these into one “accuracy” number.
+
+| Gate | What it measures | Result |
+|------|------------------|--------|
+| **Unit regression** | Offline Python tests | **453 passed, 1 skipped** |
+| **Infrastructure integration** | Phase 3.2B multi-process Docker | **PASS** (`20260804T095357Z`) |
+| Worker-kill manual redelivery | Must stay false | **false** |
+| Tenant leakage | Cross-tenant RAG read | **0** |
+| Orphan chunks / vectors | Index compensation | **0 / 0** |
+| **Provider fault validation** | Phase 3.3A + Docker dual-API | **PASS** (`docker_20260804T100817Z`) |
+| Dual-API logical / physical calls | Stub reconciliation | **20 / 25** |
+| Provider unexpected failures | Scenario G | **0** |
+| **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational) |
+| Mutation detection | Wrong entity/number/citation/risk | **4/4** |
+
+Evidence: [PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
+[PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
+[RC reliability](reports/current/LumenFin_RC_Final_Reliability_Report.md) ·
+[Compatibility](reports/current/Joint_Compatibility_Report.md)
+
+## 7. Three demo narratives
+
+| Demo | Story |
 |------|--------|
-| Live RC pack | 8/8 PASS |
-| Completed-case FAB mean | 92.97 |
-| Entity / numeric / evidence floors | 100 / 100 / 100 |
-| Mutation detection | 4/4 |
-| Offline unit tests | 267 PASS, 1 skipped |
+| **A** Trusted normal analysis | Issuer scope, grounded claims, citations, FinRun export |
+| **B** Isolation & error detection | Multi-company isolation; mutation 4/4; tenant leakage 0 |
+| **C** Fail-closed | Missing fundamentals → `incomplete_data`; no forged numerics |
 
-Evidence: [reports/current/LumenFin_RC_Final_Reliability_Report.md](reports/current/LumenFin_RC_Final_Reliability_Report.md) |
-[reports/current/Joint_Compatibility_Report.md](reports/current/Joint_Compatibility_Report.md)
+```powershell
+python scripts/run_portfolio_demo.py
+```
 
-## Quick start
+Interview walkthrough: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
 
-Supported environment: **Python 3.12** (CI). Local 3.11 may work but is not
-the release pin. Prefer the lockfile install path below.
+Optional Docker recovery story (not in default demo): worker A killed →
+automatic reclaim → worker B attempt=2 → ready
+([Phase 3.2B](docs/PHASE32B_INTEGRATION_REPORT.md)).
+
+## 8. Quick start
+
+Supported CI Python: **3.12**. Prefer the lockfile path.
 
 ```powershell
 python -m venv .venv
@@ -90,79 +134,49 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e . --no-deps
 copy .env.example .env
 .\.venv\Scripts\python scripts\run_tests.py
+.\.venv\Scripts\python scripts\run_portfolio_demo.py
 ```
 
-Offline reliability demo (sibling FinAgentBench repo):
-
-```powershell
-cd ..\finagentbench-demo
-python scripts\run_offline_demo.py
-python scripts\validate_cross_repo.py --profile ci
-```
-
-Live configuration needs `DEEPSEEK_API_KEY`, optional DashScope embedding key,
-and `SEC_USER_AGENT` outside `dev`/`test`. See
+Live providers need keys in `.env` (never commit them). See
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-Supported validation commands:
-[docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md).
+FinAgentBench (optional sibling / published tag):
+[majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)
 
-Full live RC pack (requires live providers; do not confuse infra failure with
-Agent failure):
+## 9. Boundaries
 
-```powershell
-cd ..\finagentbench-demo
-python scripts\run_rc_validation.py --help
-python scripts\run_rc_validation.py --dry-run
-python scripts\run_rc_validation.py
-```
+- Portfolio RC / controlled deployment candidate — **not** unrestricted production-ready
+- At-least-once queues — **not** exactly-once
+- Per-process bulkhead — **not** cross-process global rate limit
+- Live provider smoke: **skipped** in current release evidence
+- Not investment advice; human review required
+- PyMuPDF license limits public image redistribution
 
-## Example workflow: NVIDIA 10-K
+Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
+
+## 10. Documentation map
+
+| Doc | Purpose |
+|-----|---------|
+| [docs/README.md](docs/README.md) | Doc index |
+| [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md) | Agent + runtime architecture |
+| [docs/MULTI_TENANCY_BOUNDARY.md](docs/MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope |
+| [docs/PORTFOLIO_RELEASE_REPORT.md](docs/PORTFOLIO_RELEASE_REPORT.md) | Freeze evidence |
+| [CHANGELOG.md](CHANGELOG.md) | Version history |
+| [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | Supported commands |
+
+## Repository layout
 
 ```text
-Query: Analyze NVIDIA using the uploaded FY2025 10-K
-  → companies == ["NVIDIA"]
-  → SEC grounding fills AST-computable fundamentals
-  → verified claims with evidence
-  → report citations / provenance
-  → FinAgentBench issuer gate
+src/lumenfin/     Agent runtime, grounding, claims, FinRun, RAG, providers
+tests/            Offline regression
+scripts/          Tests, demos, Phase 3.2B/3.3A harnesses
+docs/             Architecture and release docs
+reports/current/  Authoritative RC evidence packs
 ```
-
-Interview demos A/B/C: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
-
-## Repository structure
-
-```text
-src/lumenfin/          Agent runtime, grounding, claims, FinRun, RAG
-tests/                 Unit and reliability regression tests
-tests/fixtures/sec/    Minimized manifested SEC extracts
-scripts/               Supported tests, diagnostics and fixture builders
-docs/                  Current architecture and guides
-reports/current/       Authoritative RC evidence
-reports/history/       Superseded engineering evidence
-tools/archived_audits/ Unsupported historical runners
-mcp_layer/             Optional MCP boundary (not production PDF RAG)
-fixtures/stress/       Small synthetic stress PDFs
-```
-
-## Limitations
-
-- Ready for **controlled** production deployment only
-- Local recommended runtime: PostgreSQL via Docker Compose
-- Unit-test backend: SQLite (`APP_ENV=test`)
-- Production/integration: PostgreSQL required (SQLite fail-fast)
-- Dev SQLite requires explicit `MAS_ALLOW_SQLITE_DEV=true`
-- Milvus Lite is not HA multi-tenant infrastructure
-- External LLM / embedding / SEC / Yahoo availability and quotas apply
-- Not an automated investment or legal decision system
-- No public license grant yet; repository is internal/portfolio-oriented
-- PyMuPDF (AGPL/commercial terms) blocks public Docker image redistribution
-  until an explicit compliance decision is made
-
-Full boundary: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 
 ## License / disclaimer
 
 No public open-source license has been selected. Research output is for
 engineering evaluation only and is **not investment advice**.
-Third-party and SEC fixture notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

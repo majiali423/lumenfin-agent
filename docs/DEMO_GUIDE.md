@@ -3,6 +3,28 @@
 Use the offline demo first. Live demos require configured providers and should
 never print API keys.
 
+## Portfolio demo (default entrypoint)
+
+Deterministic, offline, no API key, non-zero exit on failure:
+
+```powershell
+python scripts/run_portfolio_demo.py
+```
+
+Covers three narratives in one run:
+
+| Demo | Story | Assertion |
+|------|-------|-----------|
+| A | Trusted normal analysis | issuer-only scope, grounded claims, evaluator score, FinRun-exportable state |
+| B | Isolation + error detection | Apple/Microsoft only; wrong number / wrong entity / missing citation / missing risk all rejected (4/4) |
+| C | Fail-closed | forced missing SEC+Yahoo → `incomplete_data`, zero numeric claims |
+
+The demo also prints validated references (Phase 3.2B run, Phase 3.3A Docker
+run, tenant leakage 0) and the optional Docker recovery story:
+`worker A killed → automatic reclaim → worker B attempt=2 → ready`
+([Phase 3.2B evidence](PHASE32B_INTEGRATION_REPORT.md)). The full Docker stack
+is **not** started by the default demo.
+
 ## Report length mode (UI / API)
 
 Optional explicit `output_format`: `research_report` (default) |
@@ -97,8 +119,9 @@ unavailable private-company financial dataset.
 ## Recommended interview order
 
 1. 30-second system spine from `FINAL_ARCHITECTURE.md`
-2. Offline mutation demo
-3. NVIDIA grounded success
+2. `python scripts/run_portfolio_demo.py` (A/B/C in one run)
+3. NVIDIA grounded success (live, optional)
 4. Multi-company isolation
 5. Fail-closed negative control
-6. End with `PRODUCTION_LIMITATIONS.md`
+6. Runtime reliability: Phase 3.2B worker-kill recovery + Phase 3.3A dual-API
+7. End with `PRODUCTION_LIMITATIONS.md`
