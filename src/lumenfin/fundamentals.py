@@ -12,9 +12,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import os
+
+from .provider_resilience import (
+    ProviderCallContext,
+    ProviderCallPolicy,
+    acquire_provider_slot,
+    call_with_policy,
+    classify_provider_exception,
+)
 from .provider_retry import (
     append_provider_error,
-    call_with_transient_retry,
     classify_exception,
 )
 
@@ -24,8 +32,10 @@ _REVENUE_KEYS = ("Total Revenue", "Operating Revenue", "Revenue")
 _EBITDA_KEYS = ("EBITDA", "Normalized EBITDA")
 _OP_INCOME_KEYS = ("Operating Income", "EBIT")
 _RD_KEYS = ("Research And Development", "Research & Development")
-_YAHOO_RETRIES = 3
-_YAHOO_BACKOFF_SEC = 0.5
+_YAHOO_MAX_ATTEMPTS = max(1, int(os.getenv("MAS_MARKET_DATA_MAX_ATTEMPTS", "3")))
+_YAHOO_BACKOFF_SEC = float(os.getenv("MAS_MARKET_DATA_BACKOFF_SECONDS", "0.5"))
+_MARKET_MAX_INFLIGHT = max(1, int(os.getenv("MAS_MARKET_DATA_MAX_INFLIGHT_PER_PROCESS", "8")))
+_ACQUIRE_TIMEOUT = float(os.getenv("MAS_PROVIDER_ACQUIRE_TIMEOUT_SECONDS", "5"))
 
 # Hard ceiling for annual revenue on the LumenFin billion-USD scale.
 # Even mega-cap retailers/oil majors are typically well below this; values above
@@ -142,8 +152,14 @@ def fetch_yahoo_fundamentals(
     ticker: str,
     *,
     errors: list[dict[str, Any]] | None = None,
+    call_context: ProviderCallContext | None = None,
+    max_attempts: int | None = None,
 ) -> dict[str, Any] | None:
-    """Return market_data dict + metadata, or None if insufficient rows."""
+    """Return market_data dict + metadata, or None if insufficient rows.
+
+    Retry owner: ``call_with_policy`` around ``_load_yahoo_income`` only.
+    Empty frames / missing symbols are permanent (no retry).
+    """
     symbol = (ticker or "").strip().upper()
     if not symbol or symbol in {"?", "N/A"}:
         return None
@@ -160,29 +176,50 @@ def fetch_yahoo_fundamentals(
         )
         return None
 
+    attempts = max(1, int(max_attempts if max_attempts is not None else _YAHOO_MAX_ATTEMPTS))
+    policy = ProviderCallPolicy(
+        provider="yahoo",
+        operation="load_income",
+        max_attempts=attempts,
+        base_backoff_seconds=_YAHOO_BACKOFF_SEC,
+        max_backoff_seconds=max(_YAHOO_BACKOFF_SEC * 8, 8.0),
+        jitter_ratio=0.2,
+    )
+    context = call_context or ProviderCallContext.create()
+    if context.trace_sink is None:
+        context.trace_sink = []
+    before = len(context.trace_sink)
     attempts_used = 0
+    release = None
     try:
+        release = acquire_provider_slot(
+            "market-data",
+            max_inflight=_MARKET_MAX_INFLIGHT,
+            context=context,
+            acquire_timeout_seconds=_ACQUIRE_TIMEOUT,
+        )
+
         def _fetch_income() -> Any:
             nonlocal attempts_used
             attempts_used += 1
             return _load_yahoo_income(symbol)
 
-        income = call_with_transient_retry(
-            _fetch_income,
-            max_retries=_YAHOO_RETRIES,
-            backoff_seconds=_YAHOO_BACKOFF_SEC,
-        )
+        income = call_with_policy(_fetch_income, policy=policy, context=context)
     except Exception as exc:  # noqa: BLE001
+        attempts_used = max(attempts_used, len(context.trace_sink) - before, 1)
         logger.warning("Yahoo fundamentals fetch failed for %s: %s", symbol, exc)
         append_provider_error(
             errors,
             provider="yahoo",
             symbol=symbol,
-            error_class=classify_exception(exc),
+            error_class=classify_provider_exception(exc),
             message=str(exc),
-            attempts=max(attempts_used, 1),
+            attempts=attempts_used,
         )
         return None
+    finally:
+        if release is not None:
+            release()
 
     try:
         if income is None or getattr(income, "empty", True):

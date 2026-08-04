@@ -391,7 +391,14 @@ def retrieve_company_payload(
         if include_appendix:
             result["appendix"] = dict(payload["appendix"])
         if provider_errors:
+            # Sample fallback must not hide live provider failure.
             result["provider_errors"] = list(provider_errors)
+            result["degraded"] = True
+            result["data_fallback"] = "sample_db"
+            meta = dict(result.get("fundamentals_meta") or {})
+            meta["degraded"] = True
+            meta["data_fallback"] = "sample_db"
+            result["fundamentals_meta"] = meta
         result = _annotate_fallback(result, provider="sample_db", filled_keys=filled)
         return _finalize_company_payload(result)
 
