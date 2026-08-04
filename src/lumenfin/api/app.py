@@ -40,7 +40,7 @@ def _package_version() -> str:
     try:
         return metadata.version("lumenfin-agent")
     except metadata.PackageNotFoundError:
-        return "0.1.0rc1"
+        return "0.1.0rc2"
 
 
 @asynccontextmanager

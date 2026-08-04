@@ -77,8 +77,12 @@ dev opt-in only; it is not a distributed strongly consistent checkpoint service.
 | `MAS_EMBEDDING_DIMENSION` | `384` | Must match provider/database |
 | `MAS_RAG_REQUIRE_READY` | `false` | Fail when referenced documents are not ready |
 
-Milvus Lite is single-machine infrastructure. Do not share one Lite file among
-independent API/CLI/worker processes.
+Milvus Lite is single-machine, single-writer infrastructure for local/dev runs.
+Do not share one Lite file among independent API/CLI/worker processes. Validated
+multi-process runs (Phase 3.2B / 3.3A) use **Milvus Server** over the Compose
+network with `MAS_MILVUS_URI=http://milvus:19530`; tenant filtering is pushed
+down to Milvus metadata (see
+[MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md)).
 
 ## Cross-repository release gate
 

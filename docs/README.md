@@ -8,7 +8,9 @@
 | [CONFIGURATION.md](CONFIGURATION.md) | Environment variables and fail-closed defaults |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Install and validation commands |
 | [VALIDATION_COMMANDS.md](VALIDATION_COMMANDS.md) | Supported offline / live / mutation commands |
-| [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Controlled deployment boundary |
+| [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Portfolio RC boundary |
+| [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope and gaps |
+| [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Release freeze evidence |
 | [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline demo and live A/B/C interview flow |
 
 ## Engineering evidence
@@ -28,7 +30,7 @@ release gate.
 | Doc | Purpose |
 |-----|---------|
 | [architecture_decisions.md](architecture_decisions.md) | Durable design decisions |
-| [RAG_MILVUS.md](RAG_MILVUS.md) | Hybrid RAG / Milvus Lite |
+| [RAG_MILVUS.md](RAG_MILVUS.md) | Hybrid RAG / Milvus Lite (dev) and Milvus Server (multi-process) |
 | [TICKER_RESOLVE.md](TICKER_RESOLVE.md) | Ticker / company resolution |
 | [HITL_CLARIFICATION.md](HITL_CLARIFICATION.md) | Clarification pause / resume |
 | [INPUT_GUARDRAIL.md](INPUT_GUARDRAIL.md) | Input and upload guards |

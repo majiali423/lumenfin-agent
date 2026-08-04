@@ -1,6 +1,6 @@
 [project]
 name = "lumenfin-agent"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 description = "LumenFin: evidence-grounded multi-agent financial diligence built with LangGraph."
 requires-python = ">=3.11"
 dependencies = [
