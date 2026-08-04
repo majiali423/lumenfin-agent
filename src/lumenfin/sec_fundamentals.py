@@ -5,20 +5,31 @@ Uses the public XBRL companyfacts JSON:
 
 Requires a descriptive User-Agent (SEC fair-access policy).
 Provenance label: structured_source=sec_companyfacts.
+
+Retry owner: ``call_with_policy`` only (no nested SEC retry loop).
 """
 from __future__ import annotations
 
 import logging
-import time
+import os
 from typing import Any
 
 import httpx
 
+from .provider_resilience import (
+    InvalidProviderResponseError,
+    ProviderCallContext,
+    ProviderCallPolicy,
+    acquire_provider_slot,
+    call_with_policy,
+    classify_provider_exception,
+    get_shared_http_client,
+)
 from .provider_retry import (
+    TRANSIENT_HTTP_STATUS,
     append_provider_error,
     classify_exception,
     classify_http_status,
-    is_transient_error_class,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,18 +52,19 @@ _DEPR_TAGS = (
     "DepreciationAndAmortization",
 )
 
-_HTTP_RETRIES = 3
-_HTTP_BACKOFF_SEC = 0.5
+_HTTP_MAX_ATTEMPTS = max(1, int(os.getenv("MAS_MARKET_DATA_MAX_ATTEMPTS", "3")))
+_HTTP_BACKOFF_SEC = float(os.getenv("MAS_MARKET_DATA_BACKOFF_SECONDS", "0.5"))
+_HTTP_TIMEOUT_SEC = float(os.getenv("MAS_SEC_TIMEOUT_SECONDS", "45"))
+_MARKET_MAX_INFLIGHT = max(1, int(os.getenv("MAS_MARKET_DATA_MAX_INFLIGHT_PER_PROCESS", "8")))
+_ACQUIRE_TIMEOUT = float(os.getenv("MAS_PROVIDER_ACQUIRE_TIMEOUT_SECONDS", "5"))
 
 
 def _user_agent() -> str:
-    import os
-
     contact = os.getenv("SEC_USER_AGENT", "").strip()
     if contact:
         return contact
     app_env = os.getenv("APP_ENV", "dev").strip().lower()
-    if app_env not in {"dev", "test"}:
+    if app_env not in {"dev", "test", "integration"}:
         raise RuntimeError(
             "SEC_USER_AGENT is required outside dev/test so SEC requests include "
             "an operator contact per fair-access guidance."
@@ -70,6 +82,20 @@ def _headers() -> dict[str, str]:
     }
 
 
+def _resolve_sec_client(client: httpx.Client | None) -> tuple[httpx.Client, bool]:
+    """Return (client, owns_client). Shared process client is never closed here."""
+    if client is not None:
+        return client, False
+    return (
+        get_shared_http_client(
+            "sec-edgar",
+            timeout=_HTTP_TIMEOUT_SEC,
+            headers=_headers(),
+        ),
+        False,
+    )
+
+
 def _get_json_with_retries(
     http: httpx.Client,
     url: str,
@@ -78,80 +104,84 @@ def _get_json_with_retries(
     errors: list[dict[str, Any]] | None = None,
     provider: str = "sec_edgar",
     symbol: str = "",
+    call_context: ProviderCallContext | None = None,
+    max_attempts: int | None = None,
 ) -> dict[str, Any] | None:
-    """Fetch SEC JSON with bounded retries for transient provider failures only."""
-    last_error: Exception | None = None
-    last_class = "error"
-    attempts_used = 0
-    for attempt in range(_HTTP_RETRIES):
-        attempts_used = attempt + 1
-        try:
-            resp = http.get(url)
-            if allow_404 and resp.status_code == 404:
-                append_provider_error(
-                    errors,
-                    provider=provider,
-                    symbol=symbol,
-                    error_class="not_found",
-                    message=f"HTTP 404 for {url}",
-                    attempts=attempts_used,
-                )
-                return None
-            if resp.status_code in {408, 425, 429, 500, 502, 503, 504}:
-                error_class = classify_http_status(resp.status_code)
-                last_class = error_class
-                last_error = httpx.HTTPStatusError(
-                    f"HTTP {resp.status_code}",
-                    request=resp.request,
-                    response=resp,
-                )
-                if attempt < _HTTP_RETRIES - 1 and is_transient_error_class(error_class):
-                    time.sleep(_HTTP_BACKOFF_SEC * (2**attempt))
-                    continue
-                append_provider_error(
-                    errors,
-                    provider=provider,
-                    symbol=symbol,
-                    error_class=error_class,
-                    message=str(last_error),
-                    attempts=attempts_used,
-                )
-                return None
-            resp.raise_for_status()
-            payload = resp.json()
-            return payload if isinstance(payload, dict) else None
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            last_class = classify_exception(exc)
-            if attempt < _HTTP_RETRIES - 1 and is_transient_error_class(last_class):
-                time.sleep(_HTTP_BACKOFF_SEC * (2**attempt))
-                continue
-            append_provider_error(
-                errors,
-                provider=provider,
-                symbol=symbol,
-                error_class=last_class,
-                message=str(exc),
-                attempts=attempts_used,
-            )
-            logger.warning(
-                "SEC JSON fetch failed after %s attempts for %s (%s): %s",
-                attempts_used,
-                url,
-                last_class,
-                last_error,
-            )
-            return None
-    append_provider_error(
-        errors,
+    """Fetch SEC JSON. Retry owner is ``call_with_policy`` only."""
+    attempts = max(1, int(max_attempts if max_attempts is not None else _HTTP_MAX_ATTEMPTS))
+    policy = ProviderCallPolicy(
         provider=provider,
-        symbol=symbol,
-        error_class=last_class,
-        message=str(last_error) if last_error else "unknown SEC fetch failure",
-        attempts=attempts_used or _HTTP_RETRIES,
+        operation="http_get",
+        max_attempts=attempts,
+        connect_timeout_seconds=min(5.0, _HTTP_TIMEOUT_SEC),
+        read_timeout_seconds=_HTTP_TIMEOUT_SEC,
+        write_timeout_seconds=_HTTP_TIMEOUT_SEC,
+        pool_timeout_seconds=min(5.0, _HTTP_TIMEOUT_SEC),
+        base_backoff_seconds=_HTTP_BACKOFF_SEC,
+        max_backoff_seconds=max(_HTTP_BACKOFF_SEC * 8, 8.0),
+        jitter_ratio=0.2,
     )
-    logger.warning("SEC JSON fetch failed after %s attempts for %s: %s", _HTTP_RETRIES, url, last_error)
-    return None
+    context = call_context or ProviderCallContext.create()
+    if context.trace_sink is None:
+        context.trace_sink = []
+    before = len(context.trace_sink)
+
+    def _once() -> dict[str, Any]:
+        remaining = context.remaining_seconds()
+        timeout = policy.httpx_timeout(remaining_seconds=remaining)
+        resp = http.get(url, timeout=timeout)
+        if allow_404 and resp.status_code == 404:
+            raise httpx.HTTPStatusError(
+                f"HTTP 404 for {url}",
+                request=resp.request,
+                response=resp,
+            )
+        if resp.status_code in TRANSIENT_HTTP_STATUS:
+            raise httpx.HTTPStatusError(
+                f"HTTP {resp.status_code}",
+                request=resp.request,
+                response=resp,
+            )
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise InvalidProviderResponseError("SEC JSON payload is not an object")
+        return payload
+
+    release = None
+    try:
+        release = acquire_provider_slot(
+            "market-data",
+            max_inflight=_MARKET_MAX_INFLIGHT,
+            context=context,
+            acquire_timeout_seconds=_ACQUIRE_TIMEOUT,
+        )
+        return call_with_policy(_once, policy=policy, context=context)
+    except Exception as exc:  # noqa: BLE001
+        attempts_used = max(1, len(context.trace_sink) - before)
+        if isinstance(exc, httpx.HTTPStatusError):
+            error_class = classify_http_status(exc.response.status_code)
+        else:
+            error_class = classify_provider_exception(exc)
+        append_provider_error(
+            errors,
+            provider=provider,
+            symbol=symbol,
+            error_class=error_class,
+            message=str(exc),
+            attempts=attempts_used,
+        )
+        logger.warning(
+            "SEC JSON fetch failed after %s attempts for %s (%s): %s",
+            attempts_used,
+            url,
+            error_class,
+            exc,
+        )
+        return None
+    finally:
+        if release is not None:
+            release()
 
 
 def resolve_cik(
@@ -311,6 +341,7 @@ def fetch_sec_companyfacts_fundamentals(
     client: httpx.Client | None = None,
     errors: list[dict[str, Any]] | None = None,
     prefer_fiscal_year: int | None = None,
+    call_context: ProviderCallContext | None = None,
 ) -> dict[str, Any] | None:
     """Return LumenFin market_data payload from SEC companyfacts, or None."""
     symbol = (ticker or "").strip().upper()
@@ -325,8 +356,7 @@ def fetch_sec_companyfacts_fundamentals(
             message="Non-US exchange suffix; SEC companyfacts not applicable.",
         )
         return None
-    owns_client = client is None
-    http = client or httpx.Client(timeout=45.0, headers=_headers())
+    http, owns_client = _resolve_sec_client(client)
     try:
         prior_errors = len(errors or [])
         cik = resolve_cik(symbol, client=http, errors=errors)
@@ -347,6 +377,7 @@ def fetch_sec_companyfacts_fundamentals(
             errors=errors,
             provider="sec_edgar",
             symbol=symbol,
+            call_context=call_context,
         )
         if facts is None:
             return None

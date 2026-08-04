@@ -151,7 +151,7 @@ class SecFundamentalsTests(unittest.TestCase):
 
         with (
             patch("lumenfin.sec_fundamentals.resolve_cik", return_value="0001045810"),
-            patch("lumenfin.sec_fundamentals.time.sleep", return_value=None),
+            patch("lumenfin.provider_resilience.time.sleep", return_value=None),
         ):
             payload = fetch_sec_companyfacts_fundamentals("NVDA", client=mock_client)
 

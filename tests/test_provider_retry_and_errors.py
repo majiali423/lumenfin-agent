@@ -98,7 +98,7 @@ class YahooFundamentalsRetryTestCase(unittest.TestCase):
 
         with (
             patch("lumenfin.fundamentals._load_yahoo_income", side_effect=fake_load),
-            patch("lumenfin.provider_retry.time.sleep", return_value=None),
+            patch("lumenfin.provider_resilience.time.sleep", return_value=None),
         ):
             payload = fetch_yahoo_fundamentals("ORCL", errors=errors)
 
@@ -112,7 +112,7 @@ class YahooFundamentalsRetryTestCase(unittest.TestCase):
         errors: list[dict] = []
         with (
             patch("lumenfin.fundamentals._load_yahoo_income", return_value=empty),
-            patch("lumenfin.provider_retry.time.sleep", return_value=None),
+            patch("lumenfin.provider_resilience.time.sleep", return_value=None),
         ):
             payload = fetch_yahoo_fundamentals("OPENAI", errors=errors)
         self.assertIsNone(payload)
@@ -130,7 +130,7 @@ class SecTransientOnlyRetryTestCase(unittest.TestCase):
         errors: list[dict] = []
         with (
             patch("lumenfin.sec_fundamentals.resolve_cik", return_value="0000320193"),
-            patch("lumenfin.sec_fundamentals.time.sleep", return_value=None),
+            patch("lumenfin.provider_resilience.time.sleep", return_value=None),
         ):
             payload = fetch_sec_companyfacts_fundamentals("AAPL", client=mock_client, errors=errors)
         self.assertIsNone(payload)
