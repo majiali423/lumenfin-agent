@@ -56,7 +56,12 @@ def main() -> int:
         return 0
 
     while True:
-        payload = queue.dequeue(timeout_seconds=args.timeout)
+        try:
+            payload = queue.dequeue(timeout_seconds=args.timeout)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Worker dequeue error: {exc}")
+            time.sleep(1.0)
+            continue
         if payload is None:
             time.sleep(0.1)
             continue

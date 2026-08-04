@@ -31,14 +31,22 @@ def work_forever() -> None:
         raise RuntimeError("MAS_REDIS_URL is required to start the Redis worker.")
     queue = RedisQueueManager(config.redis_url, config.redis_queue_name)
     while True:
-        payload = queue.dequeue(timeout_seconds=5)
+        try:
+            payload = queue.dequeue(timeout_seconds=5)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Analysis worker dequeue error: {exc}")
+            continue
         if not payload:
             continue
-        execute_analysis_job(
-            job_id=payload["job_id"],
-            query=payload["query"],
-            thread_id=payload["thread_id"],
-            export_artifacts=payload.get("export_artifacts", True),
-            document_paths=payload.get("document_paths", []),
-            output_format=payload.get("output_format"),
-        )
+        try:
+            execute_analysis_job(
+                job_id=payload["job_id"],
+                query=payload["query"],
+                thread_id=payload["thread_id"],
+                export_artifacts=payload.get("export_artifacts", True),
+                document_paths=payload.get("document_paths", []),
+                output_format=payload.get("output_format"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Analysis worker job error: {exc}")
+            continue
