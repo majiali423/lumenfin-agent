@@ -1,14 +1,20 @@
-# Phase 3.3A dual-API provider resilience overlay.
+# Phase 3.3A dual-API provider resilience overlay on top of integration compose.
 # Usage:
-#   docker compose -f docker-compose.integration.yml -f docker-compose.phase33a.yml up -d provider-stub api-a api-b
-# Prefer scripts/run_phase33a_dual_api_scenario_g.py for OS-process dual API on developer machines.
+#   docker compose -f docker-compose.integration.yml -f docker-compose.phase33a.yml up -d ...
+#   python scripts/run_phase33a_dual_api_docker.py
+#
+# Reuses the same postgres/redis/milvus/etcd/minio stack as Phase 3.2B.
+# api-a / api-b talk to provider-stub via Docker DNS (not host localhost).
 
 services:
   provider-stub:
     build: .
+    hostname: provider-stub
     command: ["python", "scripts/provider_stub/server.py", "--host", "0.0.0.0", "--port", "18090"]
     ports:
       - "${PROVIDER_STUB_PORT:-18090}:18090"
+    environment:
+      PYTHONUNBUFFERED: "1"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18090/health')"]
       interval: 5s
@@ -16,6 +22,7 @@ services:
       retries: 20
 
   api-a:
+    hostname: api-a
     environment:
       DEEPSEEK_API_KEY: stub-key
       DEEPSEEK_BASE_URL: http://provider-stub:18090/v1
@@ -25,11 +32,22 @@ services:
       ALLOW_LOCAL_FALLBACK: "true"
       MAS_ANALYSIS_DEADLINE_SECONDS: "20"
       MAS_LLM_MAX_INFLIGHT_PER_PROCESS: "4"
+      MAS_EMBEDDING_PROVIDER: deterministic
+      MAS_FETCH_LIVE_FUNDAMENTALS: "false"
+      MAS_FETCH_SEC_FUNDAMENTALS: "false"
+      DASHSCOPE_API_KEY: ""
     depends_on:
       provider-stub:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
 
   api-b:
+    hostname: api-b
     environment:
       DEEPSEEK_API_KEY: stub-key
       DEEPSEEK_BASE_URL: http://provider-stub:18090/v1
@@ -39,6 +57,16 @@ services:
       ALLOW_LOCAL_FALLBACK: "true"
       MAS_ANALYSIS_DEADLINE_SECONDS: "20"
       MAS_LLM_MAX_INFLIGHT_PER_PROCESS: "4"
+      MAS_EMBEDDING_PROVIDER: deterministic
+      MAS_FETCH_LIVE_FUNDAMENTALS: "false"
+      MAS_FETCH_SEC_FUNDAMENTALS: "false"
+      DASHSCOPE_API_KEY: ""
     depends_on:
       provider-stub:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
         condition: service_healthy

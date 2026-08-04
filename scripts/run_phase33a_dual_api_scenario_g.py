@@ -133,7 +133,29 @@ def _fault_plan() -> list[tuple[str, str]]:
     return plan
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Phase 3.3A dual-API Scenario G")
+    parser.add_argument(
+        "--mode",
+        choices=("process", "docker"),
+        default="process",
+        help="process=local OS subprocesses (default); docker=real containers via run_phase33a_dual_api_docker.py",
+    )
+    args, unknown = parser.parse_known_args(argv)
+    if args.mode == "docker":
+        # Explicit Docker mode only — never silently fall back to OS processes.
+        import run_phase33a_dual_api_docker as docker_runner
+
+        # Forward remaining args to the Docker runner (e.g. --keep).
+        return docker_runner.main()
+    if unknown:
+        print(f"Ignoring unknown args in process mode: {unknown}", file=sys.stderr)
+    return _run_process_mode()
+
+
+def _run_process_mode() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = OUTPUT_DIR / f"dual_api_{stamp}"
