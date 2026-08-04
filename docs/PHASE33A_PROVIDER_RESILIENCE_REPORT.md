@@ -11,7 +11,7 @@ certification. Not exactly-once.
 |-------|-------|
 | Test date (UTC) | 2026-08-04 |
 | Closure base HEAD (pushed) | `2c90f85` |
-| Closure patch HEAD | `4e0e43b` |
+| Closure patch HEAD | `b12e9ab` |
 | Suite A–G deterministic | **pass** (`scripts/run_phase33a_provider_resilience.py`) |
 | Dual-API Scenario G | **pass** (`scripts/run_phase33a_dual_api_scenario_g.py`, dual OS processes) |
 | Offline unit tests | **453 passed, 1 skipped** (`scripts/run_tests.py`) |
