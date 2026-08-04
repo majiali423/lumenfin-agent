@@ -84,6 +84,8 @@ class HealthResponse(BaseModel):
     market_provider_ok: bool = False
     embedding_provider: str = "deterministic"
     rag_enabled: bool = True
+    pid: Optional[int] = None
+    worker_id: Optional[str] = None
 
 
 class SubmitJobRequest(BaseModel):

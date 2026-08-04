@@ -168,6 +168,9 @@ class LumenFinAnalysisService:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
         base_checkpoint = self.checkpoint_repo.get(actual_thread_id)
         expected_revision = int(base_checkpoint["revision"]) if base_checkpoint else 0
+        from .integration_hooks import maybe_barrier_after_checkpoint_read
+
+        maybe_barrier_after_checkpoint_read(actual_thread_id, expected_revision)
         system = self._system_for(actual_thread_id)
         tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
         document_contexts: list[dict] = []

@@ -179,6 +179,14 @@ class DocumentIndexer:
         if not claimed:
             return _receipt_for_persisted_record(record)
         index_attempt = int(record["index_attempt"])
+        from ..integration_hooks import maybe_pause_after_index_claim
+
+        maybe_pause_after_index_claim(
+            document_id=document_id,
+            tenant_id=tenant,
+            index_owner=index_owner,
+            index_attempt=index_attempt,
+        )
 
         source_path = record.get("source_path")
         if not source_path:

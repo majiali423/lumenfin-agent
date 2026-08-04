@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from importlib import metadata
 from pathlib import Path
 
@@ -86,11 +87,21 @@ def create_app(
     def root() -> RedirectResponse:
         return RedirectResponse(url="/static/index.html")
 
+    @app.middleware("http")
+    async def _worker_identity_headers(request, call_next):
+        response = await call_next(request)
+        worker_id = (os.getenv("MAS_WORKER_ID") or "").strip()
+        if worker_id:
+            response.headers["X-Worker-Id"] = worker_id
+            response.headers["X-Worker-Pid"] = str(os.getpid())
+        return response
+
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         backend = "deepseek" if app_config.llm.api_key else "local-fallback"
         market_client = service.providers.market_data.client
         market_probe = probe_market_provider(market_client)
+        worker_id = (os.getenv("MAS_WORKER_ID") or "").strip() or None
         return HealthResponse(
             status="ok",
             llm_backend=backend,
@@ -99,6 +110,8 @@ def create_app(
             market_provider_ok=bool(market_probe.get("ok")),
             embedding_provider=app_config.embedding_provider,
             rag_enabled=app_config.rag_enabled,
+            pid=os.getpid() if app_config.app_env in {"dev", "test"} else None,
+            worker_id=worker_id if app_config.app_env in {"dev", "test"} else None,
         )
 
     @app.get("/api/v1/config")
@@ -155,6 +168,7 @@ def create_app(
                 "workflow_status": checkpoint.get("workflow_status"),
                 "last_node": checkpoint.get("last_node"),
                 "clarification_questions": checkpoint.get("clarification_questions"),
+                "revision": checkpoint.get("revision"),
                 "created_at": checkpoint.get("created_at"),
                 "updated_at": checkpoint.get("updated_at"),
             }

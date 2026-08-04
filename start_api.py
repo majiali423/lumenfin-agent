@@ -18,7 +18,11 @@ from lumenfin.stdio import configure_stdio_utf8
 
 def main() -> None:
     configure_stdio_utf8()
-    apply_showcase_rag_env(overwrite=False)
+    # Integration / test stacks set full RAG env explicitly; skip showcase fill-ins.
+    import os
+
+    if (os.getenv("APP_ENV") or "").strip().lower() != "test":
+        apply_showcase_rag_env(overwrite=False)
     config = AppConfig.from_env()
     app = create_app(config)
     uvicorn.run(app, host=config.host, port=config.port)

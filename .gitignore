@@ -35,6 +35,7 @@ data/**
 .env
 .env.*
 !.env.example
+!.env.integration.example
 .venv/
 
 # Full SEC downloads and local fixture caches
