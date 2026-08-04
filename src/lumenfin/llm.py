@@ -6,12 +6,21 @@ import os
 import time
 from copy import copy
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any
 
 import httpx
 
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
-from .provider_retry import is_transient_exception
+from .provider_resilience import (
+    InvalidProviderResponseError,
+    ProviderCallContext,
+    ProviderCallPolicy,
+    call_with_policy,
+    classify_provider_exception,
+    close_shared_http_clients,
+    get_shared_http_client,
+    is_retryable_provider_exception,
+)
 from .tools import KNOWN_ALIASES, alias_mentioned
 
 logger = logging.getLogger(__name__)
@@ -48,15 +57,16 @@ class LLMSettings:
         api_key = raw_key.strip() if raw_key and raw_key.strip() else None
         base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
         model = (os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash").strip()
+        # Prefer MAS_LLM_MAX_ATTEMPTS when set; DEEPSEEK_MAX_RETRIES remains total attempts.
+        attempts_raw = os.getenv("MAS_LLM_MAX_ATTEMPTS") or os.getenv("DEEPSEEK_MAX_RETRIES") or "3"
         timeout_str = os.getenv("DEEPSEEK_TIMEOUT_SECONDS") or "45"
-        retries_str = os.getenv("DEEPSEEK_MAX_RETRIES") or "3"
         backoff_str = os.getenv("DEEPSEEK_RETRY_BACKOFF_SECONDS") or "0.5"
         return cls(
             api_key=api_key,
             base_url=base_url,
             model=model,
             timeout_seconds=float(timeout_str),
-            max_retries=max(1, int(retries_str)),
+            max_retries=max(1, int(attempts_raw)),
             retry_backoff_seconds=max(0.0, float(backoff_str)),
         )
 
@@ -94,12 +104,70 @@ class BaseLLMClient:
 
 
 class DeepSeekChatClient(BaseLLMClient):
-    backend_name = "deepseek"
+    """DeepSeek HTTP chat client.
 
-    def __init__(self, settings: LLMSettings) -> None:
+    Retry owner: ``call_with_policy`` inside ``chat`` (single layer only).
+    Transport: process-local shared ``httpx.Client``.
+    """
+
+    backend_name = "deepseek"
+    _CLIENT_KEY = "deepseek-chat"
+
+    def __init__(
+        self,
+        settings: LLMSettings,
+        *,
+        http_client: httpx.Client | None = None,
+        call_context: ProviderCallContext | None = None,
+    ) -> None:
         super().__init__()
         self.settings = settings
         self.model_name = settings.model
+        self._http_client = http_client
+        self._owns_client = http_client is None
+        self._call_context = call_context
+        self.extra_headers: dict[str, str] = {}
+        self.last_attempts = 0
+        self.last_trace: list[dict[str, Any]] = []
+
+    def bind_call_context(self, context: ProviderCallContext | None) -> None:
+        self._call_context = context
+
+    def _client(self, timeout: httpx.Timeout | float) -> httpx.Client:
+        if self._http_client is not None:
+            return self._http_client
+        return get_shared_http_client(self._CLIENT_KEY, timeout=timeout)
+
+    def close(self) -> None:
+        # Shared process client is closed via close_shared_http_clients().
+        if self._http_client is not None and self._owns_client and not self._http_client.is_closed:
+            self._http_client.close()
+
+    def fork_usage(self) -> "DeepSeekChatClient":
+        forked = DeepSeekChatClient(
+            self.settings,
+            http_client=self._http_client,
+            call_context=None,
+        )
+        forked._usage_totals = {"prompt_tokens": 0, "completion_tokens": 0}
+        forked._usage_mark = {"prompt_tokens": 0, "completion_tokens": 0}
+        forked._owns_client = False
+        forked.extra_headers = dict(self.extra_headers)
+        return forked
+
+    def _policy(self) -> ProviderCallPolicy:
+        return ProviderCallPolicy(
+            provider="deepseek",
+            operation="chat",
+            max_attempts=self.settings.max_retries,
+            connect_timeout_seconds=min(5.0, self.settings.timeout_seconds),
+            read_timeout_seconds=self.settings.timeout_seconds,
+            write_timeout_seconds=self.settings.timeout_seconds,
+            pool_timeout_seconds=min(5.0, self.settings.timeout_seconds),
+            base_backoff_seconds=self.settings.retry_backoff_seconds,
+            max_backoff_seconds=max(self.settings.retry_backoff_seconds * 8, 8.0),
+            jitter_ratio=0.2,
+        )
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 600) -> str:
         url = f"{self.settings.base_url.rstrip('/')}/chat/completions"
@@ -107,6 +175,7 @@ class DeepSeekChatClient(BaseLLMClient):
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
         }
+        headers.update(self.extra_headers)
         payload = {
             "model": self.settings.model,
             "messages": [
@@ -117,37 +186,51 @@ class DeepSeekChatClient(BaseLLMClient):
             "max_tokens": max_tokens,
             "thinking": {"type": "disabled"},
         }
-        last_error: Exception | None = None
-        data: dict | None = None
-        for attempt in range(self.settings.max_retries):
+        policy = self._policy()
+        context = self._call_context or ProviderCallContext.create()
+        if context.trace_sink is None:
+            context.trace_sink = []
+        self.last_trace = context.trace_sink
+
+        def _once() -> tuple[str, dict]:
+            remaining = context.remaining_seconds()
+            timeout = policy.httpx_timeout(remaining_seconds=remaining)
+            client = self._client(timeout)
+            response = client.post(url, headers=headers, json=payload, timeout=timeout)
+            response.raise_for_status()
             try:
-                with httpx.Client(timeout=self.settings.timeout_seconds) as client:
-                    response = client.post(url, headers=headers, json=payload)
-                    response.raise_for_status()
-                    data = response.json()
-                choice = data["choices"][0]
-                visible_content = (choice["message"].get("content") or "").strip()
-                if not visible_content:
-                    finish_reason = str(choice.get("finish_reason") or "unknown")
-                    raise EmptyVisibleCompletionError(
-                        "DeepSeek returned empty visible content "
-                        f"(finish_reason={finish_reason}, attempt={attempt + 1})."
-                    )
-                break
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                if isinstance(exc, EmptyVisibleCompletionError):
-                    if attempt >= self.settings.max_retries - 1:
-                        raise
-                    time.sleep(self.settings.retry_backoff_seconds * (2**attempt))
-                    continue
-                # 401/400/etc. are permanent — do not burn retries.
-                if not is_transient_exception(exc) or attempt >= self.settings.max_retries - 1:
-                    raise
-                time.sleep(self.settings.retry_backoff_seconds * (2**attempt))
-        if data is None:
-            assert last_error is not None
-            raise last_error
+                data = response.json()
+            except json.JSONDecodeError as exc:
+                raise InvalidProviderResponseError(f"malformed JSON: {exc}") from exc
+            choice = data["choices"][0]
+            visible_content = (choice["message"].get("content") or "").strip()
+            if not visible_content:
+                finish_reason = str(choice.get("finish_reason") or "unknown")
+                raise EmptyVisibleCompletionError(
+                    "DeepSeek returned empty visible content "
+                    f"(finish_reason={finish_reason})."
+                )
+            return visible_content, data
+
+        def _retryable(exc: BaseException) -> bool:
+            if isinstance(exc, EmptyVisibleCompletionError):
+                return True
+            return is_retryable_provider_exception(exc)
+
+        before_events = len(context.trace_sink)
+        try:
+            visible_content, data = call_with_policy(
+                _once,
+                policy=policy,
+                context=context,
+                is_retryable=_retryable,
+            )
+        except Exception:
+            self.last_attempts = max(1, len(context.trace_sink) - before_events)
+            self.last_trace = list(context.trace_sink[before_events:])
+            raise
+        self.last_attempts = max(1, len(context.trace_sink) - before_events)
+        self.last_trace = list(context.trace_sink[before_events:])
         usage = data.get("usage", {})
         self._add_usage(
             int(usage.get("prompt_tokens", 0)),
@@ -160,7 +243,6 @@ def _is_company_extract_prompt(prompt_lower: str) -> bool:
     """True only for dedicated company-extraction prompts (not planner structure JSON)."""
     if "公司名称提取" in prompt_lower or "company name extractor" in prompt_lower:
         return True
-    # Legacy unit-test / narrow JSON extractors.
     return "返回 json" in prompt_lower and '"companies"' in prompt_lower and "time_range" not in prompt_lower
 
 
@@ -223,6 +305,11 @@ class ResilientLLMClient(BaseLLMClient):
         self.model_name = getattr(primary, "model_name", self.fallback.model_name)
         self.last_error: str | None = None
         self.used_fallback: bool = primary is None and allow_fallback
+        self.degraded: bool = self.used_fallback
+        self.primary_provider: str | None = primary.backend_name if primary else None
+        self.primary_error_class: str | None = None
+        self.primary_attempts: int = 0
+        self.provider_trace: list[dict[str, Any]] = []
 
     def mark_usage_start(self) -> None:
         self._usage_mark = dict(self._usage_totals)
@@ -246,6 +333,11 @@ class ResilientLLMClient(BaseLLMClient):
             raise RuntimeError("No primary LLM configured and local fallback is disabled.")
         return self.fallback
 
+    def bind_call_context(self, context: ProviderCallContext | None) -> None:
+        bind = getattr(self.primary, "bind_call_context", None)
+        if callable(bind):
+            bind(context)
+
     def fork_usage(self) -> "ResilientLLMClient":
         forked = ResilientLLMClient(
             primary=fork_llm_client(self.primary) if self.primary is not None else None,
@@ -254,7 +346,21 @@ class ResilientLLMClient(BaseLLMClient):
         )
         forked.last_error = None
         forked.used_fallback = self.primary is None and self.allow_fallback
+        forked.degraded = forked.used_fallback
+        forked.primary_error_class = None
+        forked.primary_attempts = 0
+        forked.provider_trace = []
         return forked
+
+    def fallback_audit(self) -> dict[str, Any]:
+        return {
+            "provider": self.primary_provider or "none",
+            "operation": "chat",
+            "used_fallback": self.used_fallback,
+            "degraded": self.degraded,
+            "error_class": self.primary_error_class,
+            "attempts": self.primary_attempts,
+        }
 
     def chat(self, system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 600) -> str:
         if self.primary is None:
@@ -263,6 +369,9 @@ class ResilientLLMClient(BaseLLMClient):
             self.backend_name = self.fallback.backend_name
             self.model_name = self.fallback.model_name
             self.used_fallback = True
+            self.degraded = True
+            self.primary_error_class = "not_configured"
+            self.primary_attempts = 0
             before = dict(self.fallback._usage_totals)
             content = self.fallback.chat(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
             self._sync_usage_from(self.fallback, before)
@@ -274,10 +383,19 @@ class ResilientLLMClient(BaseLLMClient):
             content = self.primary.chat(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
             self._sync_usage_from(self.primary, before)
             self.used_fallback = False
+            self.degraded = False
             self.last_error = None
+            self.primary_error_class = None
+            self.primary_attempts = int(getattr(self.primary, "last_attempts", 1) or 1)
+            self.provider_trace = list(getattr(self.primary, "last_trace", []) or [])
             return content
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"
+            self.primary_error_class = classify_provider_exception(exc)
+            self.primary_attempts = int(getattr(self.primary, "last_attempts", 0) or 0) or int(
+                getattr(getattr(self.primary, "settings", None), "max_retries", 1) or 1
+            )
+            self.provider_trace = list(getattr(self.primary, "last_trace", []) or [])
             if not self.allow_fallback:
                 raise
             logger.warning(
@@ -289,9 +407,22 @@ class ResilientLLMClient(BaseLLMClient):
             self.backend_name = self.fallback.backend_name
             self.model_name = self.fallback.model_name
             self.used_fallback = True
+            self.degraded = True
             before = dict(self.fallback._usage_totals)
             content = self.fallback.chat(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens)
             self._sync_usage_from(self.fallback, before)
+            if self.provider_trace is not None:
+                self.provider_trace.append(
+                    {
+                        "provider": self.primary_provider or self.primary.backend_name,
+                        "operation": "chat",
+                        "status": "fallback",
+                        "used_fallback": True,
+                        "degraded": True,
+                        "error_class": self.primary_error_class,
+                        "attempts": self.primary_attempts,
+                    }
+                )
             return content
 
     def _sync_usage_from(self, client: BaseLLMClient, before: dict[str, int]) -> None:
@@ -327,3 +458,7 @@ def fork_llm_client(client: BaseLLMClient | None) -> BaseLLMClient | None:
     if hasattr(forked, "_usage_mark"):
         forked._usage_mark = {"prompt_tokens": 0, "completion_tokens": 0}
     return forked
+
+
+def shutdown_llm_http_clients() -> None:
+    close_shared_http_clients()

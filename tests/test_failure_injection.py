@@ -94,17 +94,14 @@ class FailureInjectionTestCase(unittest.TestCase):
             "usage": {"prompt_tokens": 3, "completion_tokens": 2},
         }
         mock_http = MagicMock()
-        mock_http.__enter__.return_value.post.side_effect = [httpx.ReadTimeout("temporary"), ok_response]
+        mock_http.post.side_effect = [httpx.ReadTimeout("temporary"), ok_response]
 
-        with (
-            patch("lumenfin.llm.httpx.Client", return_value=mock_http),
-            patch("lumenfin.llm.time.sleep", return_value=None),
-        ):
-            content = DeepSeekChatClient(settings).chat("system", "user")
+        with patch("lumenfin.provider_resilience.time.sleep", return_value=None):
+            content = DeepSeekChatClient(settings, http_client=mock_http).chat("system", "user")
 
         self.assertEqual(content, "ok")
-        self.assertEqual(mock_http.__enter__.return_value.post.call_count, 2)
-        sent_payload = mock_http.__enter__.return_value.post.call_args.kwargs["json"]
+        self.assertEqual(mock_http.post.call_count, 2)
+        sent_payload = mock_http.post.call_args.kwargs["json"]
         self.assertEqual(sent_payload["thinking"], {"type": "disabled"})
 
     def test_deepseek_never_returns_reasoning_content_as_visible_text(self) -> None:
@@ -142,20 +139,17 @@ class FailureInjectionTestCase(unittest.TestCase):
             "usage": {"prompt_tokens": 3, "completion_tokens": 4},
         }
         mock_http = MagicMock()
-        mock_http.__enter__.return_value.post.side_effect = [
+        mock_http.post.side_effect = [
             empty_response,
             visible_response,
         ]
 
-        with (
-            patch("lumenfin.llm.httpx.Client", return_value=mock_http),
-            patch("lumenfin.llm.time.sleep", return_value=None),
-        ):
-            content = DeepSeekChatClient(settings).chat("system", "user")
+        with patch("lumenfin.provider_resilience.time.sleep", return_value=None):
+            content = DeepSeekChatClient(settings, http_client=mock_http).chat("system", "user")
 
         self.assertEqual(content, "Safe visible answer.")
         self.assertNotIn("internal reasoning", content)
-        self.assertEqual(mock_http.__enter__.return_value.post.call_count, 2)
+        self.assertEqual(mock_http.post.call_count, 2)
 
     def test_deepseek_client_does_not_retry_http_401(self) -> None:
         settings = LLMSettings(
@@ -172,16 +166,13 @@ class FailureInjectionTestCase(unittest.TestCase):
         error = httpx.HTTPStatusError("unauthorized", request=request, response=response)
         response.raise_for_status.side_effect = error
         mock_http = MagicMock()
-        mock_http.__enter__.return_value.post.return_value = response
+        mock_http.post.return_value = response
 
-        with (
-            patch("lumenfin.llm.httpx.Client", return_value=mock_http),
-            patch("lumenfin.llm.time.sleep", return_value=None) as sleep,
-        ):
+        with patch("lumenfin.provider_resilience.time.sleep", return_value=None) as sleep:
             with self.assertRaises(httpx.HTTPStatusError):
-                DeepSeekChatClient(settings).chat("system", "user")
+                DeepSeekChatClient(settings, http_client=mock_http).chat("system", "user")
 
-        self.assertEqual(mock_http.__enter__.return_value.post.call_count, 1)
+        self.assertEqual(mock_http.post.call_count, 1)
         sleep.assert_not_called()
 
     def test_market_provider_unauthorized_is_handled_by_agent_runtime(self) -> None:

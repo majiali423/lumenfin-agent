@@ -121,6 +121,12 @@ class AppConfig:
     tool_backend: str
     fetch_live_fundamentals: bool
     fetch_sec_fundamentals: bool
+    analysis_deadline_seconds: float
+    index_job_deadline_seconds: float
+    llm_max_inflight_per_process: int
+    embedding_max_inflight_per_process: int
+    market_data_max_inflight_per_process: int
+    provider_acquire_timeout_seconds: float
 
     def allows_sample_data(self) -> bool:
         return self.data_mode == "demo"
@@ -236,5 +242,17 @@ class AppConfig:
                 .strip()
                 .lower()
                 in {"1", "true", "yes"}
+            ),
+            analysis_deadline_seconds=float(os.getenv("MAS_ANALYSIS_DEADLINE_SECONDS", "120")),
+            index_job_deadline_seconds=float(os.getenv("MAS_INDEX_JOB_DEADLINE_SECONDS", "180")),
+            llm_max_inflight_per_process=_positive_int_env("MAS_LLM_MAX_INFLIGHT_PER_PROCESS", 8),
+            embedding_max_inflight_per_process=_positive_int_env(
+                "MAS_EMBEDDING_MAX_INFLIGHT_PER_PROCESS", 4
+            ),
+            market_data_max_inflight_per_process=_positive_int_env(
+                "MAS_MARKET_DATA_MAX_INFLIGHT_PER_PROCESS", 8
+            ),
+            provider_acquire_timeout_seconds=float(
+                os.getenv("MAS_PROVIDER_ACQUIRE_TIMEOUT_SECONDS", "5")
             ),
         )

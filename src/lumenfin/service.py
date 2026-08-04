@@ -54,10 +54,22 @@ class LumenFinAnalysisService:
                     )
         return self._providers
 
-    def _build_system(self) -> LumenFinAgentSystem:
+    def _build_system(self, *, thread_id: str | None = None) -> LumenFinAgentSystem:
+        from .provider_resilience import ProviderCallContext, summarize_provider_trace
+
         provider_llm_client = self._llm_client or self.providers.llm.client
         llm_client = fork_llm_client(provider_llm_client)
         assert llm_client is not None
+        context = ProviderCallContext.create(
+            request_id=f"req-{uuid4().hex[:12]}",
+            thread_id=thread_id,
+            deadline_seconds=float(self.config.analysis_deadline_seconds),
+        )
+        bind = getattr(llm_client, "bind_call_context", None)
+        if callable(bind):
+            bind(context)
+        # Stash for packaging without module globals.
+        setattr(llm_client, "_provider_call_context", context)
         market_data_client = self._market_data_client or self.providers.market_data.client
         rag_store, document_indexer = self._rag_resources()
         return LumenFinAgentSystem(
@@ -72,7 +84,7 @@ class LumenFinAnalysisService:
         # Execution state (memory, checkpointer, audit log, graph runtime) is
         # request scoped. Only provider clients and the RAG infrastructure are
         # shared; they do not contain per-run FinanceState.
-        return self._build_system()
+        return self._build_system(thread_id=thread_id)
 
     def _rag_resources(self):
         if self._indexer is not None:
@@ -317,6 +329,22 @@ class LumenFinAnalysisService:
             )
         if checkpoint is None:
             checkpoint = self.checkpoint_repo.get(thread_id)
+        llm = system.llm_client
+        provider_degraded = {
+            "provider": getattr(llm, "primary_provider", None) or getattr(llm, "backend_name", None),
+            "operation": "chat",
+            "used_fallback": bool(getattr(llm, "used_fallback", False)),
+            "degraded": bool(getattr(llm, "degraded", False) or getattr(llm, "used_fallback", False)),
+            "error_class": getattr(llm, "primary_error_class", None),
+            "attempts": int(getattr(llm, "primary_attempts", 0) or 0),
+        }
+        context = getattr(llm, "_provider_call_context", None)
+        from .provider_resilience import summarize_provider_trace
+
+        provider_trace = list(getattr(llm, "provider_trace", None) or [])
+        if context is not None and getattr(context, "trace_sink", None):
+            provider_trace = list(context.trace_sink)
+        provider_summary = summarize_provider_trace(provider_trace)
         return {
             "thread_id": thread_id,
             "query": query or (checkpoint or {}).get("query", ""),
@@ -325,6 +353,9 @@ class LumenFinAnalysisService:
             "clarification_questions": result.get("clarification_questions", []),
             "checkpoint": checkpoint,
             "provider_health": self.providers.health_report(),
+            "provider_degraded": provider_degraded,
+            "degraded": bool(provider_degraded.get("degraded")),
+            "provider_call_summary": provider_summary,
             "result": result,
             "artifacts": artifacts,
         }

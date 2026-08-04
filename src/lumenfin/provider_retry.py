@@ -1,6 +1,7 @@
 """Bounded retries for transient external-provider failures."""
 from __future__ import annotations
 
+import random
 import time
 from typing import Any, Callable, TypeVar
 
@@ -56,26 +57,65 @@ def is_transient_exception(exc: BaseException) -> bool:
     return is_transient_error_class(classify_exception(exc))
 
 
+def extract_retry_after_seconds(exc: BaseException) -> float | None:
+    """Parse integer-second Retry-After from httpx HTTPStatusError responses."""
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return None
+    raw = exc.response.headers.get("Retry-After") or exc.response.headers.get("retry-after")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    try:
+        return max(0.0, float(int(text)))
+    except ValueError:
+        return None
+
+
 def call_with_transient_retry(
     fn: Callable[[], T],
     *,
     max_retries: int = 3,
     backoff_seconds: float = 0.5,
     sleep: Callable[[float], None] = time.sleep,
+    max_backoff_seconds: float = 30.0,
+    jitter_ratio: float = 0.0,
+    rng: random.Random | None = None,
+    deadline_monotonic: float | None = None,
+    now: Callable[[], float] = time.monotonic,
 ) -> T:
-    """Retry only timeout / connection / 429 / 5xx-class failures."""
-    last_error: BaseException | None = None
-    attempts = max(1, max_retries)
-    for attempt in range(attempts):
-        try:
-            return fn()
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if not is_transient_exception(exc) or attempt >= attempts - 1:
-                raise
-            sleep(backoff_seconds * (2**attempt))
-    assert last_error is not None
-    raise last_error
+    """Retry only timeout / connection / 429 / 5xx-class failures.
+
+    ``max_retries`` is the total number of attempts including the first call
+    (historical env name ``*_MAX_RETRIES``; prefer documenting as max attempts).
+    """
+    from .provider_resilience import (
+        DeadlineExceededError,
+        ProviderCallContext,
+        ProviderCallPolicy,
+        call_with_policy,
+    )
+
+    policy = ProviderCallPolicy(
+        provider="generic",
+        operation="call",
+        max_attempts=max(1, max_retries),
+        base_backoff_seconds=backoff_seconds,
+        max_backoff_seconds=max_backoff_seconds,
+        jitter_ratio=jitter_ratio,
+        read_timeout_seconds=max_backoff_seconds,
+    )
+    context = ProviderCallContext(
+        request_id="legacy-retry",
+        deadline_monotonic=deadline_monotonic,
+        trace_sink=None,
+        rng=rng if rng is not None else random.Random(0),
+        sleep=sleep,
+        now=now,
+    )
+    try:
+        return call_with_policy(fn, policy=policy, context=context)
+    except DeadlineExceededError:
+        raise
 
 
 def append_provider_error(

@@ -79,6 +79,12 @@ def build_test_config(root: Path) -> AppConfig:
         tool_backend="local",
         fetch_live_fundamentals=False,
         fetch_sec_fundamentals=False,
+        analysis_deadline_seconds=120.0,
+        index_job_deadline_seconds=180.0,
+        llm_max_inflight_per_process=8,
+        embedding_max_inflight_per_process=4,
+        market_data_max_inflight_per_process=8,
+        provider_acquire_timeout_seconds=5.0,
     )
 
 

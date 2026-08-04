@@ -66,6 +66,7 @@ class EmbeddingResilienceTestCase(unittest.TestCase):
             max_retries=3,
             backoff_seconds=0.25,
             sleep=sleeps.append,
+            jitter_ratio=0.0,
         )
         vectors = provider.embed(["Apple supply chain risk"])
         self.assertEqual(len(vectors), 1)

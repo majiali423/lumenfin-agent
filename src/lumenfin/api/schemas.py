@@ -57,6 +57,9 @@ class AnalyzeResponse(BaseModel):
     run_manifest: Optional[dict[str, Any]] = None
     provider_health: Optional[dict[str, Any]] = None
     checkpoint: Optional[dict[str, Any]] = None
+    degraded: bool = False
+    provider_degraded: Optional[dict[str, Any]] = None
+    provider_call_summary: Optional[dict[str, Any]] = None
 
 
 class ClarifyRequest(BaseModel):

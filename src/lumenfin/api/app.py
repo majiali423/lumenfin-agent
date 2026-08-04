@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from importlib import metadata
 from pathlib import Path
 
@@ -11,9 +12,10 @@ from starlette.responses import RedirectResponse
 
 from ..config import AppConfig
 from ..checkpoint_store import CheckpointConflictError
-from ..llm import BaseLLMClient
+from ..llm import BaseLLMClient, shutdown_llm_http_clients
 from ..logging_utils import configure_logging, request_logging_middleware
 from ..market_data import MarketDataClient, probe_market_provider
+from ..provider_resilience import close_shared_http_clients
 from ..reporting import build_run_manifest, load_run_manifest
 from ..service import LumenFinAnalysisService
 from .auth import build_api_key_dependency
@@ -36,6 +38,13 @@ def _package_version() -> str:
         return metadata.version("lumenfin-agent")
     except metadata.PackageNotFoundError:
         return "0.1.0rc1"
+
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    yield
+    shutdown_llm_http_clients()
+    close_shared_http_clients()
 
 
 def create_app(
@@ -65,6 +74,7 @@ def create_app(
         title="LumenFin API",
         version=_package_version(),
         description="Deployable multi-agent finance research and compliance API powered by LangGraph and DeepSeek.",
+        lifespan=_app_lifespan,
     )
     app.middleware("http")(request_logging_middleware)
 
@@ -188,6 +198,9 @@ def create_app(
             run_manifest=run_manifest,
             provider_health=payload.get("provider_health"),
             checkpoint=checkpoint,
+            degraded=bool(payload.get("degraded")),
+            provider_degraded=payload.get("provider_degraded"),
+            provider_call_summary=payload.get("provider_call_summary"),
         )
 
     @app.post("/api/v1/analyze", response_model=AnalyzeResponse)

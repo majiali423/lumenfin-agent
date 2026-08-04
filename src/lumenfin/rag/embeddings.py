@@ -11,6 +11,13 @@ from typing import Any, Callable, Protocol
 import httpx
 
 from ..provider_retry import call_with_transient_retry
+from ..provider_resilience import (
+    InvalidProviderResponseError,
+    ProviderCallContext,
+    ProviderCallPolicy,
+    call_with_policy,
+    get_shared_http_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,24 +150,27 @@ class DashScopeEmbeddingProvider:
 
         def _post() -> httpx.Response:
             if self._client is not None:
-                return self._client.post(url, headers=headers, json=payload)
-            with httpx.Client(timeout=self._timeout) as client:
-                return client.post(url, headers=headers, json=payload)
+                return self._client.post(url, headers=headers, json=payload, timeout=self._timeout)
+            client = get_shared_http_client("dashscope-embeddings", timeout=self._timeout)
+            return client.post(url, headers=headers, json=payload, timeout=self._timeout)
 
         response = _post()
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except Exception as exc:  # noqa: BLE001
+            raise InvalidProviderResponseError(f"malformed embedding JSON: {exc}") from exc
         items = data.get("data") or []
         # OpenAI-compatible responses may be unordered; sort by index.
         ordered = sorted(items, key=lambda item: int(item.get("index", 0)))
         vectors = [list(map(float, item.get("embedding") or [])) for item in ordered]
         if len(vectors) != len(texts):
-            raise RuntimeError(
+            raise InvalidProviderResponseError(
                 f"DashScope embedding count mismatch: got {len(vectors)} for {len(texts)} inputs."
             )
         for vector in vectors:
             if len(vector) != self._dimension:
-                raise RuntimeError(
+                raise InvalidProviderResponseError(
                     f"DashScope embedding dimension mismatch: expected {self._dimension}, "
                     f"got {len(vector)}. Recreate the Milvus collection after changing models."
                 )
@@ -168,7 +178,10 @@ class DashScopeEmbeddingProvider:
 
 
 class ResilientEmbeddingProvider:
-    """Wrap any embedder with transient retry (429/5xx/timeout/connection)."""
+    """Wrap any embedder with transient retry (429/5xx/timeout/connection).
+
+    Retry owner: this wrapper only. Inner providers must not retry.
+    """
 
     def __init__(
         self,
@@ -177,15 +190,20 @@ class ResilientEmbeddingProvider:
         max_retries: int = 3,
         backoff_seconds: float = 0.5,
         sleep: Callable[[float], None] = time.sleep,
+        call_context: ProviderCallContext | None = None,
+        jitter_ratio: float = 0.2,
     ) -> None:
         self._inner = inner
         self.max_retries = max(1, int(max_retries))
         self.backoff_seconds = float(backoff_seconds)
         self._sleep = sleep
+        self._call_context = call_context
+        self.jitter_ratio = float(jitter_ratio)
         self.last_attempts = 0
         self.last_error: str | None = None
         self.last_embed_ms = 0.0
         self.last_embed_chars = 0
+        self.last_trace: list[dict] = []
 
     @property
     def dimension(self) -> int:
@@ -195,35 +213,47 @@ class ResilientEmbeddingProvider:
     def inner(self) -> EmbeddingProvider:
         return self._inner
 
+    def bind_call_context(self, context: ProviderCallContext | None) -> None:
+        self._call_context = context
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         self.last_attempts = 0
         self.last_error = None
         self.last_embed_ms = 0.0
         self.last_embed_chars = sum(len(text or "") for text in texts)
-        attempts = {"n": 0}
         started = time.perf_counter()
+        context = self._call_context or ProviderCallContext.create()
+        if context.trace_sink is None:
+            context.trace_sink = []
+        context.sleep = self._sleep
+        policy = ProviderCallPolicy(
+            provider="embedding",
+            operation="embed",
+            max_attempts=self.max_retries,
+            base_backoff_seconds=self.backoff_seconds,
+            max_backoff_seconds=max(self.backoff_seconds * 8, 8.0),
+            jitter_ratio=self.jitter_ratio,
+            read_timeout_seconds=float(getattr(self._inner, "_timeout", 60.0) or 60.0),
+        )
+        before = len(context.trace_sink)
 
         def _call() -> list[list[float]]:
-            attempts["n"] += 1
             return self._inner.embed(texts)
 
         try:
-            vectors = call_with_transient_retry(
-                _call,
-                max_retries=self.max_retries,
-                backoff_seconds=self.backoff_seconds,
-                sleep=self._sleep,
-            )
-            self.last_attempts = attempts["n"]
+            vectors = call_with_policy(_call, policy=policy, context=context)
+            self.last_attempts = max(1, len(context.trace_sink) - before)
             self.last_embed_ms = round((time.perf_counter() - started) * 1000, 2)
+            self.last_trace = list(context.trace_sink[before:])
             return vectors
         except Exception as exc:
-            self.last_attempts = attempts["n"]
+            self.last_attempts = max(1, len(context.trace_sink) - before)
             self.last_embed_ms = round((time.perf_counter() - started) * 1000, 2)
             self.last_error = str(exc)
+            self.last_trace = list(context.trace_sink[before:])
             logger.warning(
                 "Embedding failed after %s attempt(s): %s",
-                attempts["n"],
+                self.last_attempts,
                 exc,
             )
             raise
