@@ -1,105 +1,169 @@
 # Phase 3.3A Provider Resilience Report
 
 Desensitized validation record for unified provider call policy, request
-deadlines, Retry-After/jitter, fallback degradation, and deterministic fault
-stub evidence. Not a production-ready certification.
+deadlines, Retry-After/jitter, fallback degradation, dual-API multi-process
+fault injection, and embedding failure compensation. Not a production-ready
+certification. Not exactly-once.
 
-## Test metadata
+## Test metadata (closure patch)
 
 | Field | Value |
 |-------|-------|
 | Test date (UTC) | 2026-08-04 |
-| Suite | Phase 3.3A deterministic (`scripts/run_phase33a_provider_resilience.py`) |
-| Suite status | **pass** |
-| Live smoke | **skipped** (`MAS_PHASE33A_LIVE_SMOKE` unset) |
-| Offline unit tests | **437 passed, 1 skipped** (`scripts/run_tests.py`) |
-| Phase 3.2B regression | **not re-run in this session** (prior PASS at Phase 3.2B closure; deferred) |
-| Base commit before work | `a2a1493e1a89550bc6c9c1556c590ca82024cc77` |
+| Closure base HEAD (pushed) | `2c90f85` |
+| Suite A–G deterministic | **pass** (`scripts/run_phase33a_provider_resilience.py`) |
+| Dual-API Scenario G | **pass** (`scripts/run_phase33a_dual_api_scenario_g.py`, dual OS processes) |
+| Offline unit tests | **453 passed, 1 skipped** (`scripts/run_tests.py`) |
+| Phase 3.2B regression (current) | **pass** — run id `20260804T095357Z` |
+| Live smoke | **skipped** (no live key exercise this session) |
 
-## 1. Files added / modified
+Historical Phase 3.3A deterministic PASS (pre-closure) is retained under
+`outputs/phase33a_provider_resilience/`; current evidence is the closure
+re-run plus dual-API and Phase 3.2B regression above.
 
-**Added:** `src/lumenfin/provider_resilience.py`, `scripts/provider_stub/`, `scripts/run_phase33a_provider_resilience.py`, `tests/test_provider_resilience.py`, `docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md`
+---
 
-**Modified:** `llm.py`, `provider_retry.py`, `rag/embeddings.py`, `config.py`, `service.py`, `api/app.py`, `api/schemas.py`, related tests
+## 1. Four provider retry owners (single owner per logical call)
 
-## 2–3. Provider call list and retry owners
+| Provider | Logical entry | Retry owner | Physical transport | Max attempts config |
+|----------|---------------|-------------|--------------------|---------------------|
+| DeepSeek | `DeepSeekChatClient.chat` | `call_with_policy` only | process-local shared `httpx.Client` (`deepseek-chat`) | `MAS_LLM_MAX_ATTEMPTS` / `DEEPSEEK_MAX_RETRIES` (total attempts) |
+| DashScope | `ResilientEmbeddingProvider.embed` | `call_with_policy` only (inner DashScope does not retry) | shared/injected `httpx.Client` | `MAS_EMBEDDING_MAX_ATTEMPTS` / `MAS_EMBEDDING_MAX_RETRIES` |
+| SEC | `_get_json_with_retries` / `fetch_sec_companyfacts_fundamentals` | `call_with_policy` only (custom loop removed) | shared `httpx.Client` (`sec-edgar`) + required User-Agent | `MAS_MARKET_DATA_MAX_ATTEMPTS` (default 3) |
+| Yahoo | `fetch_yahoo_fundamentals` → `_load_yahoo_income` | `call_with_policy` only | yfinance loader (not raw HTTP) | `MAS_MARKET_DATA_MAX_ATTEMPTS` (default 3) |
 
-| Provider | Operation | Retry owner |
-|----------|-----------|-------------|
-| DeepSeek | chat | `DeepSeekChatClient` → `call_with_policy` (single layer) |
-| DashScope | embed | `ResilientEmbeddingProvider` → `call_with_policy`; DashScope itself does not retry |
-| SEC | HTTP JSON | still custom loop (compat); classification via `classify_exception` |
-| Yahoo | fundamentals | `call_with_transient_retry` → delegates to `call_with_policy` |
+Proof contract (unit tests): `max_attempts=3` + always-transient → physical
+attempts **== 3** (not 6/9). Covered by SEC / Yahoo / DeepSeek / embedding tests.
 
-## 4–7. Semantics / deadlines / Retry-After / jitter
+---
 
-- `max_attempts` / historical `*_MAX_RETRIES` = **total physical attempts** (e.g. 3 → ≤3 calls, ≤2 sleeps)
-- New optional aliases: `MAS_LLM_MAX_ATTEMPTS`, `MAS_EMBEDDING_MAX_ATTEMPTS`
-- Request deadlines: `MAS_ANALYSIS_DEADLINE_SECONDS` (default 120), `MAS_INDEX_JOB_DEADLINE_SECONDS` (default 180)
-- Distinguishes `timeout` vs `deadline_exceeded`
-- `Retry-After` integer seconds honored as `max(backoff, retry_after)` capped by `max_backoff` and remaining deadline
-- Bounded multiplicative jitter (`jitter_ratio`, default 0.2); tests inject `jitter_ratio=0` / fixed RNG
+## 2. SEC unified policy
 
-## 8–9. HTTP client reuse / shutdown
+- Internal retry loop deleted; SEC uses `ProviderCallPolicy` + `ProviderCallContext` + `call_with_policy`
+- Process-local shared client; SEC User-Agent preserved (`SEC_USER_AGENT` / safe local fallback in dev/test/integration)
+- Deadline, Retry-After, bounded jitter; `404` → `not_found` (1 attempt); `400/401/403` no retry; `429/5xx/timeout/connection` limited retry
+- Trace records attempts; no response bodies / headers / env secrets in traces
+- Market-data bulkhead on SEC path; `provider_busy` is non-retryable for HTTP
 
-- Process-local shared `httpx.Client` via `get_shared_http_client` (`trust_env=False` to avoid proxy hijack of localhost)
-- `fork_usage()` reuses transport; does not clone connection pools unsafely
-- FastAPI lifespan closes shared clients; `shutdown_llm_http_clients()` / `close_shared_http_clients()`
+Tests: `tests/test_sec_provider_policy.py`, `tests/test_sec_retry_ownership.py`
 
-## 10–11. Fallback / trace
+---
 
-- Fallback sets `used_fallback`, `degraded`, `primary_error_class`, `primary_attempts`
-- API `AnalyzeResponse` exposes `degraded`, `provider_degraded`, `provider_call_summary`
-- Trace events redact secrets; no prompts/PDF bodies
+## 3. Yahoo retry ownership
 
-Example (desensitized):
+- Sole retry owner: `call_with_policy` around `_load_yahoo_income`
+- Empty DataFrame / missing symbols → `truly_missing`, no transient retry
+- Deadline stops further loader calls
+- Sample fallback after live provider errors is marked `degraded` + `data_fallback=sample_db` (does not hide `provider_errors`)
 
-```json
-{
-  "provider": "deepseek",
-  "operation": "chat",
-  "attempt": 2,
-  "status": "retry",
-  "status_code": 429,
-  "error_class": "rate_limited",
-  "retry_after_ms": 1000,
-  "used_fallback": false
-}
-```
+Tests: `tests/test_yahoo_retry_ownership.py`
 
-## 12–17. Scenario results (deterministic stub)
+---
+
+## 4. Dual-API Scenario G (multi-process)
+
+Mode: **dual OS processes** (`api-a`, `api-b`) + local `provider-stub`.
+Docker overlay available: `docker-compose.phase33a.yml` (compose with integration stack).
+Note: **per-process bulkhead ≠ cross-process global rate limit**.
+
+| Field | Value |
+|-------|-------|
+| API A | worker_id=`api-a`, PID=`32948`, container_id=`null` (OS process) |
+| API B | worker_id=`api-b`, PID=`14956`, container_id=`null` (OS process) |
+| request_count | 20 |
+| api_a_count / api_b_count | 10 / 10 |
+| logical_provider_calls | 20 |
+| physical_provider_attempts | 25 |
+| retry_amplification_ratio | 1.25 |
+| success_count | 17 |
+| degraded_count / fallback_count | 2 / 2 |
+| expected_failure_count | 1 |
+| unexpected_failure_count | 0 |
+| deadline_exceeded_count | 0 |
+| provider_busy_count | 0 |
+| p50 / p95 / max latency (ms) | 481.21 / 929.3 / 940.05 |
+| provider stub request count | **25** (matches physical attempts) |
+| cross-process shared client ids | **none** |
+| unique request / logical call ids | 20 / 20 |
+
+Artifact: `outputs/phase33a_provider_resilience/dual_api_summary.json`
+
+---
+
+## 5. Bulkhead coverage
+
+| Lane | Wired paths |
+|------|-------------|
+| LLM | `DeepSeekChatClient.chat` → `acquire_provider_slot("llm")` |
+| embedding | `ResilientEmbeddingProvider.embed` → `acquire_provider_slot("embedding")` |
+| market-data | SEC `_get_json_with_retries`, Yahoo `fetch_yahoo_fundamentals` → `acquire_provider_slot("market-data")` |
+
+- Semaphores are **per-process** only
+- Acquire respects request deadline; timeout → `provider_busy` (no HTTP retry)
+- Release on exception paths; unit test `tests/test_provider_bulkhead.py`
+
+---
+
+## 6. Embedding failure compensation
+
+| Case | Result |
+|------|--------|
+| embedding_count_mismatch / dimension_mismatch / malformed_json | `invalid_response`, provider attempts=1 (no transient retry) |
+| timeout until deadline | provider retry stops before max_attempts |
+| indexer path | document **not** `ready`; chunks cleared; partial vectors deleted; orphan chunks/vectors = 0 in compensation test |
+
+**Layer separation**
+
+- **Provider retry:** re-issues the external embed HTTP call inside one index job
+- **Redis job retry:** redelivers the whole document index job after job-level failure
+
+Tests: `tests/test_embedding_provider_compensation.py`
+
+---
+
+## 7. Phase 3.2B latest regression (current evidence)
+
+| Field | Value |
+|-------|-------|
+| Run id | `20260804T095357Z` |
+| Status | **pass** |
+| Artifact | `outputs/phase32b_integration/20260804T095357Z/summary.json` |
+| postgres_migrations | pass |
+| checkpoint CAS / duplicate Redis / kill reclaim | covered (manual_redelivery=false) |
+| stale fencing / tenant isolation / DLQ / Redis restart / limited load | covered |
+| orphan_chunk_count / orphan_vector_count | **0 / 0** |
+| unexpected_error_count | 0 |
+
+Prior Phase 3.2B PASS remains historical only; this run is the closure basis.
+
+---
+
+## 8. Deterministic Phase 3.3A suite (re-run)
 
 | Scenario | Result |
 |----------|--------|
-| A 503 then success | pass — attempts=3, fallback=false |
-| B 429 + Retry-After | pass — Retry-After recognized, attempts=2 |
-| C permanent 400 | pass — attempts=1, `client_error` |
-| D deadline | pass — `deadline_exceeded` |
-| E fallback | pass — degraded=true, primary error retained |
-| F embedding invalid | pass — `invalid_response`, attempts=1 |
-| G concurrency (10) | pass |
+| A 503 then success | pass |
+| B 429 + Retry-After | pass |
+| C permanent 400 | pass |
+| D deadline | pass |
+| E fallback | pass |
+| F embedding invalid | pass |
+| G concurrency | pass — logical=10, physical=14, ratio=1.4 |
 
-## 18–24. Concurrency aggregates (scenario G)
+---
 
-| Metric | Value |
-|--------|-------|
-| logical_provider_calls | 10 |
-| physical_provider_attempts | 14 |
-| retry_amplification_ratio | 1.4 |
-| p50 / p95 / max latency (ms) | 4.06 / 5.61 / 5.62 |
-| fallback_count | 1 |
-| deadline_exceeded_count | 0 |
-| unexpected_error_count | 0 |
+## 9. Offline / live smoke
 
-## 25–28. Suites
+- Offline: **453 passed, 1 skipped**
+- `scripts/validate_concurrency.py`: pass (this session)
+- Live smoke: **skipped**
 
-- Offline: 437 passed, 1 skipped
-- Phase 3.2B: not re-executed this session
-- Phase 3.3A summary: `outputs/phase33a_provider_resilience/summary.json` (gitignored under `outputs/`)
-- Live smoke: skipped
+---
 
-## 29–31. Git / risks
+## 10. Remaining risks (not verified / out of scope)
 
-- **HEAD:** `f97119aa25fcbbee65d22e451175b16d5c344acd`
-- Worktree clean after commit
-- Remaining risks: SEC still has a parallel custom retry loop; dual-API Docker compose stub profile not required for this deterministic PASS; per-process bulkheads are implemented as helpers but not yet wired into every market-data path; Phase 3.2B docker regression deferred; no live DeepSeek/DashScope smoke; not exactly-once; not production-ready
+- Dual-API evidence here used **OS processes**, not Docker containers (compose overlay exists but was not the measured run)
+- Intra-process `get_shared_http_client` has no lock; rare races under extreme concurrency possible
+- No cross-process Redis distributed semaphore / shared circuit breaker (intentionally out of scope)
+- No large-scale real provider soak; live DeepSeek/DashScope smoke not run
+- Not exactly-once; not production-ready
