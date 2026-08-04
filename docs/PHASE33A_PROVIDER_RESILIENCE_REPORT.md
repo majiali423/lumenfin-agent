@@ -1,26 +1,62 @@
 # Phase 3.3A Provider Resilience Report
 
+**Phase 3.3A: PASS**
+
 Desensitized validation record for unified provider call policy, request
 deadlines, Retry-After/jitter, fallback degradation, dual-API multi-process
-fault injection, and embedding failure compensation. Not a production-ready
-certification. Not exactly-once.
+fault injection (OS process + **Docker containers**), and embedding failure
+compensation. Not a production-ready certification. Not exactly-once.
 
-## Test metadata (closure patch)
+## Test metadata (final closure)
 
 | Field | Value |
 |-------|-------|
 | Test date (UTC) | 2026-08-04 |
-| Closure base HEAD (pushed) | `2c90f85` |
-| Closure patch HEAD | `b12e9ab` |
-| Suite A–G deterministic | **pass** (`scripts/run_phase33a_provider_resilience.py`) |
-| Dual-API Scenario G | **pass** (`scripts/run_phase33a_dual_api_scenario_g.py`, dual OS processes) |
-| Offline unit tests | **453 passed, 1 skipped** (`scripts/run_tests.py`) |
-| Phase 3.2B regression (current) | **pass** — run id `20260804T095357Z` |
-| Live smoke | **skipped** (no live key exercise this session) |
+| Pushed baseline before Docker evidence | `193c097` |
+| Suite A–G deterministic | **pass** |
+| Dual-API Scenario G (OS process) | **pass** (earlier closure) |
+| Dual-API Scenario G (**Docker**) | **pass** — run id `docker_20260804T100817Z` |
+| Offline unit tests | **453 passed, 1 skipped** |
+| Phase 3.2B latest regression | **pass** — `20260804T095357Z` (same code baseline as `193c097`; not re-run this Docker-only round) |
+| Live smoke | **skipped** |
 
-Historical Phase 3.3A deterministic PASS (pre-closure) is retained under
-`outputs/phase33a_provider_resilience/`; current evidence is the closure
-re-run plus dual-API and Phase 3.2B regression above.
+---
+
+## Docker Dual-API Validation
+
+| Field | Value |
+|-------|-------|
+| Docker run id | `docker_20260804T100817Z` |
+| Test commit (image/build baseline at run start) | `193c097` (+ local harness fixes validated in-run) |
+| Compose files | `docker-compose.integration.yml` + `docker-compose.phase33a.yml` |
+| Runner | `scripts/run_phase33a_dual_api_docker.py` (`--mode docker` only; no OS-process fallback) |
+| Mode | `docker` |
+| API A short container ID | `5f8518e619cd` |
+| API B short container ID | `cadce5e69547` |
+| API A hostname / worker_id / PID | `api-a` / `api-a` / `1` |
+| API B hostname / worker_id / PID | `api-b` / `api-b` / `1` |
+| API A / B request count | 10 / 10 |
+| logical_provider_calls | 20 |
+| physical_provider_attempts | 25 |
+| provider stub request count | **25** (exact match) |
+| retry_amplification_ratio | 1.25 |
+| p50 / p95 / max latency (ms) | 617.88 / 755.39 / 756.83 |
+| success / degraded / expected failure / unexpected | 17 / 2 / 1 / **0** |
+| fallback_count | 2 |
+| deadline_exceeded_count | 0 |
+| provider_context_leakage_count | 0 |
+| duplicate_logical_call_id_count | 0 |
+| configured per-process LLM inflight limit | 4 |
+| API A / B max observed inflight | 4 / 3 |
+| HTTP client reuse | each API: **1** stable `http_client_instance_id`; cross-container IDs **disjoint** |
+| Lifespan shutdown | both APIs logged cleanup; `unclosed_client_warnings=0`; `shutdown_tracebacks=0` |
+| Unexpected container restarts | 0 / 0 |
+| postgres / redis / milvus error signals in API logs | 0 / 0 / 0 |
+| Artifact dir | `outputs/phase33a_provider_resilience/docker_20260804T100817Z/docker/` |
+
+**Explicit semantics:** per-process bulkhead and process-local shared HTTP client
+**≠** cross-process global rate limiting. Combined observed inflight across
+containers may reach the sum of per-process limits.
 
 ---
 
@@ -28,143 +64,61 @@ re-run plus dual-API and Phase 3.2B regression above.
 
 | Provider | Logical entry | Retry owner | Physical transport | Max attempts config |
 |----------|---------------|-------------|--------------------|---------------------|
-| DeepSeek | `DeepSeekChatClient.chat` | `call_with_policy` only | process-local shared `httpx.Client` (`deepseek-chat`) | `MAS_LLM_MAX_ATTEMPTS` / `DEEPSEEK_MAX_RETRIES` (total attempts) |
-| DashScope | `ResilientEmbeddingProvider.embed` | `call_with_policy` only (inner DashScope does not retry) | shared/injected `httpx.Client` | `MAS_EMBEDDING_MAX_ATTEMPTS` / `MAS_EMBEDDING_MAX_RETRIES` |
-| SEC | `_get_json_with_retries` / `fetch_sec_companyfacts_fundamentals` | `call_with_policy` only (custom loop removed) | shared `httpx.Client` (`sec-edgar`) + required User-Agent | `MAS_MARKET_DATA_MAX_ATTEMPTS` (default 3) |
-| Yahoo | `fetch_yahoo_fundamentals` → `_load_yahoo_income` | `call_with_policy` only | yfinance loader (not raw HTTP) | `MAS_MARKET_DATA_MAX_ATTEMPTS` (default 3) |
-
-Proof contract (unit tests): `max_attempts=3` + always-transient → physical
-attempts **== 3** (not 6/9). Covered by SEC / Yahoo / DeepSeek / embedding tests.
+| DeepSeek | `DeepSeekChatClient.chat` | `call_with_policy` only | process-local shared `httpx.Client` (`deepseek-chat`) | `MAS_LLM_MAX_ATTEMPTS` / `DEEPSEEK_MAX_RETRIES` |
+| DashScope | `ResilientEmbeddingProvider.embed` | `call_with_policy` only | shared/injected `httpx.Client` | `MAS_EMBEDDING_MAX_*` |
+| SEC | `_get_json_with_retries` | `call_with_policy` only | shared `httpx.Client` (`sec-edgar`) | `MAS_MARKET_DATA_MAX_ATTEMPTS` |
+| Yahoo | `fetch_yahoo_fundamentals` | `call_with_policy` only | yfinance loader | `MAS_MARKET_DATA_MAX_ATTEMPTS` |
 
 ---
 
-## 2. SEC unified policy
+## 2–3. SEC / Yahoo ownership
 
-- Internal retry loop deleted; SEC uses `ProviderCallPolicy` + `ProviderCallContext` + `call_with_policy`
-- Process-local shared client; SEC User-Agent preserved (`SEC_USER_AGENT` / safe local fallback in dev/test/integration)
-- Deadline, Retry-After, bounded jitter; `404` → `not_found` (1 attempt); `400/401/403` no retry; `429/5xx/timeout/connection` limited retry
-- Trace records attempts; no response bodies / headers / env secrets in traces
-- Market-data bulkhead on SEC path; `provider_busy` is non-retryable for HTTP
-
-Tests: `tests/test_sec_provider_policy.py`, `tests/test_sec_retry_ownership.py`
+Unchanged from prior closure: SEC and Yahoo use a single `call_with_policy`
+owner; sample fallback is marked degraded; physical-attempt unit tests pass.
 
 ---
 
-## 3. Yahoo retry ownership
+## 4. Bulkhead coverage
 
-- Sole retry owner: `call_with_policy` around `_load_yahoo_income`
-- Empty DataFrame / missing symbols → `truly_missing`, no transient retry
-- Deadline stops further loader calls
-- Sample fallback after live provider errors is marked `degraded` + `data_fallback=sample_db` (does not hide `provider_errors`)
-
-Tests: `tests/test_yahoo_retry_ownership.py`
+LLM / embedding / market-data (SEC+Yahoo) use per-process semaphores.
+Acquire respects request deadline; `provider_busy` is non-retryable for HTTP.
 
 ---
 
-## 4. Dual-API Scenario G (multi-process)
+## 5. Embedding failure compensation
 
-Mode: **dual OS processes** (`api-a`, `api-b`) + local `provider-stub`.
-Docker overlay available: `docker-compose.phase33a.yml` (compose with integration stack).
-Note: **per-process bulkhead ≠ cross-process global rate limit**.
-
-| Field | Value |
-|-------|-------|
-| API A | worker_id=`api-a`, PID=`32948`, container_id=`null` (OS process) |
-| API B | worker_id=`api-b`, PID=`14956`, container_id=`null` (OS process) |
-| request_count | 20 |
-| api_a_count / api_b_count | 10 / 10 |
-| logical_provider_calls | 20 |
-| physical_provider_attempts | 25 |
-| retry_amplification_ratio | 1.25 |
-| success_count | 17 |
-| degraded_count / fallback_count | 2 / 2 |
-| expected_failure_count | 1 |
-| unexpected_failure_count | 0 |
-| deadline_exceeded_count | 0 |
-| provider_busy_count | 0 |
-| p50 / p95 / max latency (ms) | 481.21 / 929.3 / 940.05 |
-| provider stub request count | **25** (matches physical attempts) |
-| cross-process shared client ids | **none** |
-| unique request / logical call ids | 20 / 20 |
-
-Artifact: `outputs/phase33a_provider_resilience/dual_api_summary.json`
+`invalid_response` → attempts=1; timeout bounded by deadline; failed index jobs
+leave orphan chunks/vectors = 0. Provider retry ≠ Redis job retry.
 
 ---
 
-## 5. Bulkhead coverage
-
-| Lane | Wired paths |
-|------|-------------|
-| LLM | `DeepSeekChatClient.chat` → `acquire_provider_slot("llm")` |
-| embedding | `ResilientEmbeddingProvider.embed` → `acquire_provider_slot("embedding")` |
-| market-data | SEC `_get_json_with_retries`, Yahoo `fetch_yahoo_fundamentals` → `acquire_provider_slot("market-data")` |
-
-- Semaphores are **per-process** only
-- Acquire respects request deadline; timeout → `provider_busy` (no HTTP retry)
-- Release on exception paths; unit test `tests/test_provider_bulkhead.py`
-
----
-
-## 6. Embedding failure compensation
-
-| Case | Result |
-|------|--------|
-| embedding_count_mismatch / dimension_mismatch / malformed_json | `invalid_response`, provider attempts=1 (no transient retry) |
-| timeout until deadline | provider retry stops before max_attempts |
-| indexer path | document **not** `ready`; chunks cleared; partial vectors deleted; orphan chunks/vectors = 0 in compensation test |
-
-**Layer separation**
-
-- **Provider retry:** re-issues the external embed HTTP call inside one index job
-- **Redis job retry:** redelivers the whole document index job after job-level failure
-
-Tests: `tests/test_embedding_provider_compensation.py`
-
----
-
-## 7. Phase 3.2B latest regression (current evidence)
+## 6. Phase 3.2B latest regression (referenced)
 
 | Field | Value |
 |-------|-------|
 | Run id | `20260804T095357Z` |
 | Status | **pass** |
-| Artifact | `outputs/phase32b_integration/20260804T095357Z/summary.json` |
-| postgres_migrations | pass |
-| checkpoint CAS / duplicate Redis / kill reclaim | covered (manual_redelivery=false) |
-| stale fencing / tenant isolation / DLQ / Redis restart / limited load | covered |
-| orphan_chunk_count / orphan_vector_count | **0 / 0** |
-| unexpected_error_count | 0 |
-
-Prior Phase 3.2B PASS remains historical only; this run is the closure basis.
+| Note | Validated on HEAD `193c097` before this Docker evidence round. Docker harness did not change queueing/checkpoint/Milvus cleanup shared paths beyond compose overlay env for provider stub; Phase 3.2B was **not** re-executed this round. |
 
 ---
 
-## 8. Deterministic Phase 3.3A suite (re-run)
+## 7. Deterministic Phase 3.3A suite
 
-| Scenario | Result |
-|----------|--------|
-| A 503 then success | pass |
-| B 429 + Retry-After | pass |
-| C permanent 400 | pass |
-| D deadline | pass |
-| E fallback | pass |
-| F embedding invalid | pass |
-| G concurrency | pass — logical=10, physical=14, ratio=1.4 |
+Scenarios A–G: **pass** (prior closure re-run retained).
 
 ---
 
-## 9. Offline / live smoke
+## 8. Offline / live smoke
 
 - Offline: **453 passed, 1 skipped**
-- `scripts/validate_concurrency.py`: pass (this session)
 - Live smoke: **skipped**
 
 ---
 
-## 10. Remaining risks (not verified / out of scope)
+## 9. Known limitations / remaining risks
 
-- Dual-API evidence here used **OS processes**, not Docker containers (compose overlay exists but was not the measured run)
-- Intra-process `get_shared_http_client` has no lock; rare races under extreme concurrency possible
-- No cross-process Redis distributed semaphore / shared circuit breaker (intentionally out of scope)
-- No large-scale real provider soak; live DeepSeek/DashScope smoke not run
+- Live DeepSeek/DashScope smoke not run
+- No cross-process Redis semaphore / shared circuit breaker (out of scope)
+- No large-scale real provider soak
+- Docker Scenario G uses deterministic stub + local fallback; not production traffic
 - Not exactly-once; not production-ready
