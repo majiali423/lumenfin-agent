@@ -1,8 +1,9 @@
 name: test
 
+# Extended gate (FinAgentBench checkout + cross-repo). Manual / optional.
+# Primary required offline CI is `.github/workflows/ci.yml`.
+
 on:
-  push:
-  pull_request:
   workflow_dispatch:
     inputs:
       finagentbench_ref:

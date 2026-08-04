@@ -1,0 +1,39 @@
+name: integration-manual
+
+# Heavy Docker suites (Phase 3.2B / 3.3A dual-API). Manual only.
+# Requires a runner with Docker Desktop / Docker Engine and substantial disk/RAM.
+# Do not enable as a required check on every commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Which suite to document/run instructions for
+        required: true
+        default: both
+        type: choice
+        options:
+          - phase32b
+          - phase33a-docker
+          - both
+
+jobs:
+  instruct:
+    name: Print Docker suite commands
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Document required local/Docker commands
+        run: |
+          echo "## Manual integration suites"
+          echo "This workflow does not start Docker Desktop automatically on GitHub-hosted runners"
+          echo "with enough resources for Milvus + dual API. Run on a Docker-capable machine:"
+          echo ""
+          echo "### Phase 3.2B"
+          echo "python scripts/run_phase32b_integration.py"
+          echo ""
+          echo "### Phase 3.3A Docker dual-API"
+          echo "python scripts/run_phase33a_dual_api_docker.py"
+          echo ""
+          echo "Selected suite input: ${{ inputs.suite }}"
+          echo "See docs/PHASE32B_INTEGRATION_REPORT.md and docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md"

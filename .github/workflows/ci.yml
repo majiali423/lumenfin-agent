@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  offline:
+    name: Offline regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      APP_ENV: test
+      DATA_MODE: demo
+      ALLOW_LOCAL_FALLBACK: "true"
+      MAS_RAG_INDEX_MODE: sync_on_run
+      MAS_EMBEDDING_PROVIDER: deterministic
+      MAS_EMBEDDING_DIMENSION: "384"
+      MAS_MILVUS_URI: data/milvus_lite_ci.db
+      MAS_MILVUS_COLLECTION: lumenfin_chunks_ci
+      MAS_MILVUS_ISOLATE: "true"
+      MAS_REDIS_URL: ""
+      DEEPSEEK_API_KEY: ""
+      DASHSCOPE_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-lock.txt
+          python -m pip install -e . --no-deps
+
+      - name: Offline unit tests
+        run: python scripts/run_tests.py
+
+      - name: Documentation link check
+        run: python scripts/check_doc_links.py
+
+      - name: Portfolio demo (offline A/B/C)
+        run: python scripts/run_portfolio_demo.py
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-ci-logs
+          path: |
+            outputs/portfolio_demo/**
+          if-no-files-found: ignore
