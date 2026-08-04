@@ -138,7 +138,13 @@ class LumenFinAnalysisService:
     def enqueue_index_job(self, document_id: str, *, tenant_id: str | None = None) -> bool:
         if not self.config.redis_url:
             return False
-        queue = RedisQueueManager(self.config.redis_url, self.config.redis_index_queue_name)
+        queue = RedisQueueManager(
+            self.config.redis_url,
+            self.config.redis_index_queue_name,
+            max_attempts=self.config.redis_job_max_attempts,
+            reclaim_idle_seconds=self.config.redis_reclaim_idle_seconds,
+            retry_backoff_seconds=self.config.redis_retry_backoff_seconds,
+        )
         queue.enqueue(
             {
                 "type": "rag_index",
@@ -340,7 +346,13 @@ class LumenFinAnalysisService:
     ) -> bool:
         if not self.config.redis_url:
             return False
-        queue = RedisQueueManager(self.config.redis_url, self.config.redis_queue_name)
+        queue = RedisQueueManager(
+            self.config.redis_url,
+            self.config.redis_queue_name,
+            max_attempts=self.config.redis_job_max_attempts,
+            reclaim_idle_seconds=self.config.redis_reclaim_idle_seconds,
+            retry_backoff_seconds=self.config.redis_retry_backoff_seconds,
+        )
         queue.enqueue(
             {
                 "job_id": job_id,

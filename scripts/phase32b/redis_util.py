@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from redis import Redis
+from lumenfin.queueing import RedisQueueManager
 
 
-def client(redis_url: str) -> Redis:
-    return Redis.from_url(redis_url)
+def manager(redis_url: str, queue_name: str, **kwargs: Any) -> RedisQueueManager:
+    return RedisQueueManager(redis_url, queue_name, **kwargs)
 
 
 def queue_depth(redis_url: str, queue_name: str) -> int:
-    return int(client(redis_url).llen(queue_name) or 0)
+    depths = manager(redis_url, queue_name).depths()
+    return int(depths["pending"] + depths["processing"] + depths["legacy"])
 
 
 def enqueue_index_job(
@@ -20,24 +21,30 @@ def enqueue_index_job(
     document_id: str,
     tenant_id: str,
     count: int = 1,
-) -> None:
-    import json
-
-    conn = client(redis_url)
-    payload = json.dumps(
-        {"type": "rag_index", "document_id": document_id, "tenant_id": tenant_id},
-        ensure_ascii=False,
-    )
+) -> list[str]:
+    queue = manager(redis_url, queue_name)
+    ids: list[str] = []
     for _ in range(count):
-        conn.rpush(queue_name, payload)
+        ids.append(
+            queue.enqueue(
+                {
+                    "type": "rag_index",
+                    "document_id": document_id,
+                    "tenant_id": tenant_id,
+                }
+            )
+        )
+    return ids
 
 
-def purge_queue(redis_url: str, queue_name: str) -> int:
-    conn = client(redis_url)
-    depth = int(conn.llen(queue_name) or 0)
-    conn.delete(queue_name)
-    return depth
+def purge_queue(redis_url: str, queue_name: str) -> dict[str, int]:
+    return manager(redis_url, queue_name).purge()
 
 
 def observe_queue(redis_url: str, queue_name: str) -> dict[str, Any]:
-    return {"queue_name": queue_name, "depth": queue_depth(redis_url, queue_name)}
+    depths = manager(redis_url, queue_name).depths()
+    return {
+        "queue_name": queue_name,
+        "depth": int(depths["pending"] + depths["processing"] + depths["legacy"]),
+        **depths,
+    }
