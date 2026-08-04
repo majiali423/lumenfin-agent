@@ -28,6 +28,8 @@ from .schemas import (
     DocumentStatusResponse,
     HealthResponse,
     JobResponse,
+    ProviderProbeRequest,
+    ProviderProbeResponse,
     SubmitJobRequest,
     SubmitJobResponse,
 )
@@ -123,6 +125,104 @@ def create_app(
             pid=os.getpid() if app_config.app_env in {"dev", "test", "integration"} else None,
             worker_id=worker_id if app_config.app_env in {"dev", "test", "integration"} else None,
         )
+
+    if app_config.app_env in {"test", "integration", "dev"}:
+
+        @app.post("/api/v1/provider-resilience/probe", response_model=ProviderProbeResponse)
+        def provider_resilience_probe(
+            payload: ProviderProbeRequest,
+            _: None = Depends(auth_dependency),
+        ) -> ProviderProbeResponse:
+            """Single logical LLM call for dual-API provider resilience harnesses."""
+            import threading
+            from uuid import uuid4
+
+            from ..llm import DeepSeekChatClient, LocalFallbackLLMClient, ResilientLLMClient, fork_llm_client
+            from ..provider_resilience import (
+                ProviderCallContext,
+                classify_provider_exception,
+                summarize_provider_trace,
+            )
+
+            request_id = f"probe-{uuid4().hex[:12]}"
+            thread_id = f"thread-{threading.get_ident()}"
+            context = ProviderCallContext.create(
+                request_id=request_id,
+                thread_id=thread_id,
+                deadline_seconds=float(app_config.analysis_deadline_seconds),
+            )
+            context.sleep = lambda _: None
+            base = fork_llm_client(service.providers.llm.client)
+            deepseek = base
+            if isinstance(base, ResilientLLMClient):
+                deepseek = base.primary
+            if payload.max_attempts is not None and isinstance(deepseek, DeepSeekChatClient):
+                from dataclasses import replace
+
+                deepseek.settings = replace(
+                    deepseek.settings, max_retries=max(1, int(payload.max_attempts))
+                )
+            if isinstance(deepseek, DeepSeekChatClient):
+                deepseek.extra_headers["X-LumenFin-Scenario"] = payload.scenario
+            bind = getattr(base, "bind_call_context", None)
+            if callable(bind):
+                bind(context)
+
+            use_fallback = payload.scenario in {"always_503", "timeout"}
+            client = (
+                ResilientLLMClient(
+                    primary=deepseek if isinstance(deepseek, DeepSeekChatClient) else base,
+                    fallback=LocalFallbackLLMClient(),
+                    allow_fallback=True,
+                )
+                if use_fallback
+                else (deepseek if isinstance(deepseek, DeepSeekChatClient) else base)
+            )
+            if hasattr(client, "bind_call_context") and callable(client.bind_call_context):
+                client.bind_call_context(context)
+
+            ok = False
+            degraded = False
+            fallback = False
+            attempts = 0
+            error_class = None
+            text = ""
+            try:
+                text = client.chat("You are a probe.", payload.prompt)
+                ok = bool(text)
+                degraded = bool(getattr(client, "degraded", False) or getattr(client, "used_fallback", False))
+                fallback = bool(getattr(client, "used_fallback", False))
+                attempts = int(
+                    getattr(client, "primary_attempts", None)
+                    or getattr(deepseek, "last_attempts", 0)
+                    or 0
+                )
+            except Exception as exc:  # noqa: BLE001
+                error_class = classify_provider_exception(exc)
+                attempts = int(getattr(deepseek, "last_attempts", 0) or 0)
+                ok = False
+
+            trace = list(getattr(deepseek, "last_trace", None) or context.trace_sink or [])
+            client_id = None
+            if isinstance(deepseek, DeepSeekChatClient):
+                shared = deepseek._client(deepseek._policy().httpx_timeout())
+                client_id = f"{id(shared)}"
+
+            return ProviderProbeResponse(
+                ok=ok,
+                degraded=degraded,
+                fallback=fallback,
+                attempts=attempts,
+                error_class=error_class,
+                text_preview=(text or "")[:120],
+                request_id=request_id,
+                thread_id=thread_id,
+                worker_id=(os.getenv("MAS_WORKER_ID") or "").strip() or None,
+                pid=os.getpid(),
+                client_id=client_id,
+                trace=trace,
+                provider_call_summary=summarize_provider_trace(trace),
+            )
 
     @app.get("/api/v1/config")
     def get_config(_: None = Depends(auth_dependency)) -> dict:

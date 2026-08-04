@@ -185,6 +185,26 @@ class FaultHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if scenario == "malformed_json":
+            payload = b"{not-json"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if scenario == "timeout":
+            time.sleep(5.0)
+            self._send(
+                200,
+                {
+                    "data": [
+                        {"index": i, "embedding": [0.01 * (i + 1)] * dim}
+                        for i, _ in enumerate(texts)
+                    ]
+                },
+            )
+            return
         if scenario == "always_503":
             self._send(503, {"error": "unavailable"})
             return

@@ -91,6 +91,28 @@ class HealthResponse(BaseModel):
     worker_id: Optional[str] = None
 
 
+class ProviderProbeRequest(BaseModel):
+    scenario: str = Field(default="success", description="Provider stub scenario name (integration/test only).")
+    prompt: str = Field(default="ping", description="User prompt for a single logical chat call.")
+    max_attempts: Optional[int] = Field(default=None, description="Optional override for LLM max attempts.")
+
+
+class ProviderProbeResponse(BaseModel):
+    ok: bool
+    degraded: bool = False
+    fallback: bool = False
+    attempts: int = 0
+    error_class: Optional[str] = None
+    text_preview: str = ""
+    request_id: str
+    thread_id: Optional[str] = None
+    worker_id: Optional[str] = None
+    pid: int
+    client_id: Optional[str] = None
+    trace: list[dict[str, Any]] = Field(default_factory=list)
+    provider_call_summary: dict[str, Any] = Field(default_factory=dict)
+
+
 class SubmitJobRequest(BaseModel):
     query: str = Field(..., description="User query for asynchronous financial analysis.")
     thread_id: Optional[str] = Field(default=None, description="Optional workflow thread id.")
