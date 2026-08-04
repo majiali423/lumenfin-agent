@@ -15,6 +15,7 @@ from ..provider_resilience import (
     InvalidProviderResponseError,
     ProviderCallContext,
     ProviderCallPolicy,
+    acquire_provider_slot,
     call_with_policy,
     get_shared_http_client,
 )
@@ -240,7 +241,19 @@ class ResilientEmbeddingProvider:
         def _call() -> list[list[float]]:
             return self._inner.embed(texts)
 
+        release = None
         try:
+            max_inflight = max(
+                1, int(os.getenv("MAS_EMBEDDING_MAX_INFLIGHT_PER_PROCESS", "4"))
+            )
+            release = acquire_provider_slot(
+                "embedding",
+                max_inflight=max_inflight,
+                context=context,
+                acquire_timeout_seconds=float(
+                    os.getenv("MAS_PROVIDER_ACQUIRE_TIMEOUT_SECONDS", "5")
+                ),
+            )
             vectors = call_with_policy(_call, policy=policy, context=context)
             self.last_attempts = max(1, len(context.trace_sink) - before)
             self.last_embed_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -257,6 +270,9 @@ class ResilientEmbeddingProvider:
                 exc,
             )
             raise
+        finally:
+            if release is not None:
+                release()
 
 
 def build_embedding_provider(

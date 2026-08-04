@@ -15,6 +15,7 @@ from .provider_resilience import (
     InvalidProviderResponseError,
     ProviderCallContext,
     ProviderCallPolicy,
+    acquire_provider_slot,
     call_with_policy,
     classify_provider_exception,
     close_shared_http_clients,
@@ -218,7 +219,16 @@ class DeepSeekChatClient(BaseLLMClient):
             return is_retryable_provider_exception(exc)
 
         before_events = len(context.trace_sink)
+        release = None
         try:
+            release = acquire_provider_slot(
+                "llm",
+                max_inflight=max(1, int(os.getenv("MAS_LLM_MAX_INFLIGHT_PER_PROCESS", "8"))),
+                context=context,
+                acquire_timeout_seconds=float(
+                    os.getenv("MAS_PROVIDER_ACQUIRE_TIMEOUT_SECONDS", "5")
+                ),
+            )
             visible_content, data = call_with_policy(
                 _once,
                 policy=policy,
@@ -229,6 +239,9 @@ class DeepSeekChatClient(BaseLLMClient):
             self.last_attempts = max(1, len(context.trace_sink) - before_events)
             self.last_trace = list(context.trace_sink[before_events:])
             raise
+        finally:
+            if release is not None:
+                release()
         self.last_attempts = max(1, len(context.trace_sink) - before_events)
         self.last_trace = list(context.trace_sink[before_events:])
         usage = data.get("usage", {})
