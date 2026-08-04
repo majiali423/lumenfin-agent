@@ -38,15 +38,32 @@ fall back to demo data.
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `MAS_DATABASE_URL` | SQLite derived from `MAS_DB_PATH` | Job and workflow checkpoint repository |
-| `MAS_DB_PATH` | `data/lumenfin.db` | Local SQLite only |
-| `MAS_REDIS_URL` | empty | Optional RQ job/index queues |
+| `MAS_DATABASE_URL` | SQLite derived from `MAS_DB_PATH` only when allowed | Job / checkpoint / RAG metadata |
+| `MAS_DB_PATH` | `data/lumenfin.db` | Local SQLite path when SQLite is allowed |
+| `MAS_ALLOW_SQLITE_DEV` | `false` | Explicit opt-in for SQLite when `APP_ENV=dev` |
+| `MAS_REDIS_URL` | empty | Optional reliable job/index queues |
+| `MAS_REDIS_JOB_MAX_ATTEMPTS` | `3` | Max deliveries before dead-letter |
+| `MAS_REDIS_RECLAIM_IDLE_SECONDS` | `10` | Stale processing reclaim threshold |
+| `MAS_REDIS_RETRY_BACKOFF_SECONDS` | `1` | Delay before requeue poll continues |
 | `MAS_NEO4J_URI` | empty | Optional knowledge store |
 | `MAS_OUTPUT_DIR` | `outputs` | Generated artifacts; ignored |
 | `MAS_UPLOAD_DIR` | `uploads` | Local uploads; ignored |
 
-Request execution state is request-scoped. SQLite persists pause/resume
-snapshots but is not a distributed strongly consistent checkpoint service.
+### PostgreSQL-first database policy
+
+| `APP_ENV` | Database rule |
+|-----------|---------------|
+| `production` | PostgreSQL required (`MAS_DATABASE_URL=postgresql+psycopg://...`) |
+| `integration` | PostgreSQL required |
+| `dev` | PostgreSQL recommended; SQLite only with `MAS_ALLOW_SQLITE_DEV=true` |
+| `test` | SQLite allowed for fast unit tests (`sqlite:///:memory:` or temp files) |
+
+Local recommended runtime: PostgreSQL via Docker Compose.
+Unit-test backend: SQLite.
+Production/integration: PostgreSQL required (fail-fast on SQLite).
+
+Request execution state is request-scoped. SQLite is for unit tests / explicit
+dev opt-in only; it is not a distributed strongly consistent checkpoint service.
 
 ## RAG / Milvus
 
@@ -77,8 +94,10 @@ resolved commit SHA. Normal push/PR validation uses the pinned release tag.
 
 ## Production Compose
 
-`docker-compose.yml` forces `APP_ENV=production` and `DATA_MODE=live`. Compose
-configuration fails before startup unless these operator-owned values are set:
+`docker-compose.yml` forces `APP_ENV=production` and `DATA_MODE=live`. A
+`migrator` service applies PostgreSQL migrations and must complete successfully
+before the API or analysis worker start. Compose configuration fails before
+startup unless these operator-owned values are set:
 
 - `MAS_API_KEY`
 - `DEEPSEEK_API_KEY`

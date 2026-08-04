@@ -20,6 +20,7 @@ if str(SRC) not in sys.path:
 from lumenfin.rag.profiles import apply_ci_rag_env
 
 apply_ci_rag_env()
+os.environ.setdefault("APP_ENV", "test")
 
 
 def configure_quiet_test_logging() -> None:

@@ -32,6 +32,39 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+def _is_sqlite_url(database_url: str) -> bool:
+    return database_url.strip().lower().startswith("sqlite:")
+
+
+def resolve_database_url(*, app_env: str, raw_db_path: str) -> str:
+    """PostgreSQL-first resolution with explicit SQLite opt-in outside tests."""
+    configured = os.getenv("MAS_DATABASE_URL")
+    if configured and configured.strip():
+        database_url = configured.strip()
+    else:
+        database_url = f"sqlite:///{raw_db_path.replace(os.sep, '/')}"
+
+    allow_sqlite_dev = os.getenv("MAS_ALLOW_SQLITE_DEV", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    using_sqlite = _is_sqlite_url(database_url)
+
+    if app_env in {"production", "integration"} and using_sqlite:
+        raise RuntimeError(
+            "PostgreSQL is required for production/integration. "
+            "Set MAS_DATABASE_URL=postgresql+psycopg://..."
+        )
+    if app_env == "dev" and using_sqlite and not allow_sqlite_dev:
+        raise RuntimeError(
+            "SQLite is disabled by default for APP_ENV=dev. "
+            "Set MAS_DATABASE_URL=postgresql+psycopg://... "
+            "or explicitly opt in with MAS_ALLOW_SQLITE_DEV=true."
+        )
+    return database_url
+
+
 @dataclass(frozen=True)
 class AppConfig:
     output_dir: Path
@@ -41,6 +74,9 @@ class AppConfig:
     redis_url: str | None
     redis_queue_name: str
     redis_index_queue_name: str
+    redis_job_max_attempts: int
+    redis_reclaim_idle_seconds: int
+    redis_retry_backoff_seconds: float
     neo4j_uri: str | None
     neo4j_username: str | None
     neo4j_password: str | None
@@ -54,6 +90,7 @@ class AppConfig:
     app_env: str
     data_mode: str
     allow_local_fallback: bool | None
+    allow_sqlite_dev: bool
     max_upload_bytes: int
     max_upload_files: int
     llm: LLMSettings
@@ -93,10 +130,13 @@ class AppConfig:
             return self.allow_local_fallback
         if self.requires_api_key():
             return False
-        return self.data_mode == "demo" or self.app_env in {"dev", "test"}
+        return self.data_mode == "demo" or self.app_env in {"dev", "test", "integration"}
 
     def requires_api_key(self) -> bool:
-        return self.app_env not in {"dev", "test"}
+        return self.app_env not in {"dev", "test", "integration"}
+
+    def uses_sqlite(self) -> bool:
+        return _is_sqlite_url(self.database_url)
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -105,7 +145,7 @@ class AppConfig:
         raw_output_dir = os.getenv("MAS_OUTPUT_DIR", "outputs")
         raw_db_path = os.getenv("MAS_DB_PATH", "data/lumenfin.db")
         app_env = os.getenv("APP_ENV", "dev").strip().lower() or "dev"
-        default_data_mode = "demo" if app_env in {"dev", "test"} else "live"
+        default_data_mode = "demo" if app_env in {"dev", "test", "integration"} else "live"
         data_mode = os.getenv("DATA_MODE", default_data_mode).strip().lower()
         if data_mode not in {"demo", "live"}:
             data_mode = default_data_mode
@@ -113,14 +153,23 @@ class AppConfig:
         allow_local_fallback = None
         if allow_raw is not None and allow_raw.strip() != "":
             allow_local_fallback = allow_raw.strip().lower() in {"1", "true", "yes"}
+        allow_sqlite_dev = os.getenv("MAS_ALLOW_SQLITE_DEV", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        database_url = resolve_database_url(app_env=app_env, raw_db_path=raw_db_path)
         return cls(
             output_dir=Path(raw_output_dir),
             upload_dir=Path(os.getenv("MAS_UPLOAD_DIR", "uploads")),
             db_path=Path(raw_db_path),
-            database_url=os.getenv("MAS_DATABASE_URL", f"sqlite:///{raw_db_path.replace(os.sep, '/')}"),
+            database_url=database_url,
             redis_url=os.getenv("MAS_REDIS_URL"),
             redis_queue_name=os.getenv("MAS_REDIS_QUEUE_NAME", "finance-analysis"),
             redis_index_queue_name=os.getenv("MAS_REDIS_INDEX_QUEUE_NAME", "rag-document-index"),
+            redis_job_max_attempts=_positive_int_env("MAS_REDIS_JOB_MAX_ATTEMPTS", 3),
+            redis_reclaim_idle_seconds=_positive_int_env("MAS_REDIS_RECLAIM_IDLE_SECONDS", 10),
+            redis_retry_backoff_seconds=float(os.getenv("MAS_REDIS_RETRY_BACKOFF_SECONDS", "1")),
             neo4j_uri=os.getenv("MAS_NEO4J_URI"),
             neo4j_username=os.getenv("MAS_NEO4J_USERNAME"),
             neo4j_password=os.getenv("MAS_NEO4J_PASSWORD"),
@@ -134,6 +183,7 @@ class AppConfig:
             app_env=app_env,
             data_mode=data_mode,
             allow_local_fallback=allow_local_fallback,
+            allow_sqlite_dev=allow_sqlite_dev,
             max_upload_bytes=int(os.getenv("MAS_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024))),
             max_upload_files=int(os.getenv("MAS_MAX_UPLOAD_FILES", "5")),
             llm=LLMSettings.from_env(),

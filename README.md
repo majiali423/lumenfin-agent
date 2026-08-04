@@ -148,7 +148,11 @@ fixtures/stress/       Small synthetic stress PDFs
 ## Limitations
 
 - Ready for **controlled** production deployment only
-- Milvus Lite and SQLite are not HA multi-tenant infrastructure
+- Local recommended runtime: PostgreSQL via Docker Compose
+- Unit-test backend: SQLite (`APP_ENV=test`)
+- Production/integration: PostgreSQL required (SQLite fail-fast)
+- Dev SQLite requires explicit `MAS_ALLOW_SQLITE_DEV=true`
+- Milvus Lite is not HA multi-tenant infrastructure
 - External LLM / embedding / SEC / Yahoo availability and quotas apply
 - Not an automated investment or legal decision system
 - No public license grant yet; repository is internal/portfolio-oriented

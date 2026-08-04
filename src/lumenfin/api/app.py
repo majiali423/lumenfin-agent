@@ -110,8 +110,8 @@ def create_app(
             market_provider_ok=bool(market_probe.get("ok")),
             embedding_provider=app_config.embedding_provider,
             rag_enabled=app_config.rag_enabled,
-            pid=os.getpid() if app_config.app_env in {"dev", "test"} else None,
-            worker_id=worker_id if app_config.app_env in {"dev", "test"} else None,
+            pid=os.getpid() if app_config.app_env in {"dev", "test", "integration"} else None,
+            worker_id=worker_id if app_config.app_env in {"dev", "test", "integration"} else None,
         )
 
     @app.get("/api/v1/config")

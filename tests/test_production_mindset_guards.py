@@ -30,6 +30,8 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
         self.assertIn("DATA_MODE: live", compose)
         self.assertIn("MAS_API_KEY: ${MAS_API_KEY:?Set MAS_API_KEY}", compose)
         self.assertIn("POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}", compose)
+        self.assertIn("migrator:", compose)
+        self.assertIn("service_completed_successfully", compose)
         self.assertNotIn('"5432:5432"', compose)
         self.assertNotIn('"6379:6379"', compose)
 
@@ -40,6 +42,7 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
                 "APP_ENV": "production",
                 "MAS_API_KEY": "prod-key",
                 "DEEPSEEK_API_KEY": "",
+                "MAS_DATABASE_URL": "postgresql+psycopg://user:pass@localhost:5432/lumenfin",
             },
             clear=True,
         ):
@@ -58,6 +61,7 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
                 "MAS_API_KEY": "prod-key",
                 "DATA_MODE": "demo",
                 "ALLOW_LOCAL_FALLBACK": "true",
+                "MAS_DATABASE_URL": "postgresql+psycopg://user:pass@localhost:5432/lumenfin",
             },
             clear=True,
         ):
@@ -66,6 +70,55 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
         self.assertEqual(config.data_mode, "demo")
         self.assertTrue(config.allows_sample_data())
         self.assertTrue(config.allows_local_fallback())
+
+    def test_production_rejects_sqlite_database_url(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "APP_ENV": "production",
+                "MAS_API_KEY": "prod-key",
+                "MAS_DATABASE_URL": "sqlite:///tmp/prod.db",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "PostgreSQL is required"):
+                AppConfig.from_env()
+
+    def test_dev_sqlite_requires_explicit_opt_in(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "APP_ENV": "dev",
+                "MAS_DATABASE_URL": "sqlite:///tmp/dev.db",
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "MAS_ALLOW_SQLITE_DEV"):
+                AppConfig.from_env()
+
+        with patch.dict(
+            "os.environ",
+            {
+                "APP_ENV": "dev",
+                "MAS_DATABASE_URL": "sqlite:///tmp/dev.db",
+                "MAS_ALLOW_SQLITE_DEV": "true",
+            },
+            clear=True,
+        ):
+            config = AppConfig.from_env()
+        self.assertTrue(config.uses_sqlite())
+
+    def test_test_env_allows_sqlite(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "APP_ENV": "test",
+                "MAS_DATABASE_URL": "sqlite:///:memory:",
+            },
+            clear=True,
+        ):
+            config = AppConfig.from_env()
+        self.assertTrue(config.uses_sqlite())
 
     def test_live_mode_skips_sample_financial_payload(self) -> None:
         demo = retrieve_company_payload("Apple", allow_sample_data=True)
