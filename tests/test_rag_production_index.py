@@ -465,7 +465,16 @@ class RagConcurrencyHardeningTestCase(unittest.TestCase):
             receipts = list(pool.map(lambda _: indexer.index_file(path, tenant_id="tenant-a"), range(2)))
 
         self.assertEqual({receipt["document_id"] for receipt in receipts}, {receipts[0]["document_id"]})
-        self.assertEqual(sorted(receipt["status"] for receipt in receipts), ["ready", "skipped_duplicate"])
+        statuses = sorted(receipt["status"] for receipt in receipts)
+        # Exactly one winner indexes. The loser either sees the finished canonical
+        # row (skipped_duplicate) or the in-flight winner (indexing) depending on
+        # scheduling — both are correct, and neither may double-index.
+        # See test_losing_worker_and_api_report_indexing_until_winner_is_ready.
+        self.assertEqual(sum(status == "ready" for status in statuses), 1, statuses)
+        self.assertIn(
+            next(status for status in statuses if status != "ready"),
+            {"skipped_duplicate", "indexing"},
+        )
         documents, chunks, failed = _repository_counts(repo)
         self.assertEqual(documents, 1)
         self.assertEqual(chunks, receipts[0]["chunk_count"] or receipts[1]["chunk_count"])
