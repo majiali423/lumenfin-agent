@@ -28,6 +28,7 @@ from .schemas import (
     DocumentStatusResponse,
     HealthResponse,
     JobResponse,
+    ProviderIdentityResponse,
     ProviderProbeRequest,
     ProviderProbeResponse,
     SubmitJobRequest,
@@ -44,9 +45,16 @@ def _package_version() -> str:
 
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
+    import logging
+
+    logger = logging.getLogger("lumenfin.api.lifespan")
     yield
+    print("provider transport cleanup starting (FastAPI lifespan shutdown)", flush=True)
+    logger.info("provider transport cleanup starting (FastAPI lifespan shutdown)")
     shutdown_llm_http_clients()
     close_shared_http_clients()
+    print("provider transport cleanup completed", flush=True)
+    logger.info("provider transport cleanup completed")
 
 
 def create_app(
@@ -128,12 +136,66 @@ def create_app(
 
     if app_config.app_env in {"test", "integration", "dev"}:
 
+        def _container_id_hint() -> str | None:
+            # Docker often sets hostname to the short container id unless overridden.
+            # Authoritative container ID still comes from docker inspect in the runner.
+            hint = (os.getenv("HOSTNAME") or "").strip() or None
+            try:
+                import socket
+
+                host = socket.gethostname().strip()
+                if host:
+                    hint = hint or host
+            except Exception:  # noqa: BLE001
+                pass
+            cgroup = Path("/proc/self/cgroup")
+            if cgroup.exists():
+                try:
+                    text = cgroup.read_text(encoding="utf-8", errors="ignore")
+                    for token in text.replace("/", " ").split():
+                        if len(token) >= 12 and all(ch in "0123456789abcdef" for ch in token[:12]):
+                            return token[:12]
+                except Exception:  # noqa: BLE001
+                    pass
+            return (hint[:12] if hint and len(hint) >= 12 and hint.isalnum() else hint)
+
+        def _provider_identity_payload() -> ProviderIdentityResponse:
+            import socket
+
+            from ..provider_resilience import (
+                get_shared_http_client_instance_id,
+                provider_bulkhead_snapshot,
+            )
+
+            configured = int(getattr(app_config, "llm_max_inflight_per_process", 0) or 0) or int(
+                os.getenv("MAS_LLM_MAX_INFLIGHT_PER_PROCESS", "8")
+            )
+            snap = provider_bulkhead_snapshot("llm")
+            return ProviderIdentityResponse(
+                worker_id=(os.getenv("MAS_WORKER_ID") or "").strip() or None,
+                pid=os.getpid(),
+                hostname=socket.gethostname(),
+                container_id_hint=_container_id_hint(),
+                http_client_instance_id=get_shared_http_client_instance_id("deepseek-chat"),
+                llm_inflight_current=int(snap.get("inflight") or 0),
+                llm_max_inflight_seen=int(snap.get("max_inflight_seen") or 0),
+                llm_max_inflight_configured=configured,
+            )
+
+        @app.get("/api/v1/provider-resilience/identity", response_model=ProviderIdentityResponse)
+        def provider_resilience_identity(
+            _: None = Depends(auth_dependency),
+        ) -> ProviderIdentityResponse:
+            """Test/integration-only worker identity for dual-API Docker evidence."""
+            return _provider_identity_payload()
+
         @app.post("/api/v1/provider-resilience/probe", response_model=ProviderProbeResponse)
         def provider_resilience_probe(
             payload: ProviderProbeRequest,
             _: None = Depends(auth_dependency),
         ) -> ProviderProbeResponse:
             """Single logical LLM call for dual-API provider resilience harnesses."""
+            import socket
             import threading
             from uuid import uuid4
 
@@ -141,6 +203,8 @@ def create_app(
             from ..provider_resilience import (
                 ProviderCallContext,
                 classify_provider_exception,
+                get_shared_http_client_instance_id,
+                provider_bulkhead_snapshot,
                 summarize_provider_trace,
             )
 
@@ -203,10 +267,14 @@ def create_app(
                 ok = False
 
             trace = list(getattr(deepseek, "last_trace", None) or context.trace_sink or [])
-            client_id = None
             if isinstance(deepseek, DeepSeekChatClient):
-                shared = deepseek._client(deepseek._policy().httpx_timeout())
-                client_id = f"{id(shared)}"
+                # Ensure shared client exists so instance id is stable for reuse checks.
+                deepseek._client(deepseek._policy().httpx_timeout())
+            client_instance_id = get_shared_http_client_instance_id("deepseek-chat")
+            configured = int(getattr(app_config, "llm_max_inflight_per_process", 0) or 0) or int(
+                os.getenv("MAS_LLM_MAX_INFLIGHT_PER_PROCESS", "8")
+            )
+            snap = provider_bulkhead_snapshot("llm")
 
             return ProviderProbeResponse(
                 ok=ok,
@@ -219,7 +287,13 @@ def create_app(
                 thread_id=thread_id,
                 worker_id=(os.getenv("MAS_WORKER_ID") or "").strip() or None,
                 pid=os.getpid(),
-                client_id=client_id,
+                hostname=socket.gethostname(),
+                container_id_hint=_container_id_hint(),
+                client_instance_id=client_instance_id,
+                client_id=client_instance_id,
+                llm_inflight_current=int(snap.get("inflight") or 0),
+                llm_max_inflight_seen=int(snap.get("max_inflight_seen") or 0),
+                llm_max_inflight_configured=configured,
                 trace=trace,
                 provider_call_summary=summarize_provider_trace(trace),
             )

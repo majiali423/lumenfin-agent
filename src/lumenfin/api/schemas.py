@@ -108,9 +108,27 @@ class ProviderProbeResponse(BaseModel):
     thread_id: Optional[str] = None
     worker_id: Optional[str] = None
     pid: int
+    hostname: Optional[str] = None
+    container_id_hint: Optional[str] = None
+    client_instance_id: Optional[str] = None
     client_id: Optional[str] = None
+    llm_inflight_current: int = 0
+    llm_max_inflight_seen: int = 0
+    llm_max_inflight_configured: int = 0
     trace: list[dict[str, Any]] = Field(default_factory=list)
     provider_call_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProviderIdentityResponse(BaseModel):
+    worker_id: Optional[str] = None
+    pid: int
+    hostname: str
+    container_id_hint: Optional[str] = None
+    http_client_instance_id: Optional[str] = None
+    llm_inflight_current: int = 0
+    llm_max_inflight_seen: int = 0
+    llm_max_inflight_configured: int = 0
+    note: str = "per-process bulkhead ≠ cross-process global rate limit"
 
 
 class SubmitJobRequest(BaseModel):

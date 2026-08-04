@@ -388,6 +388,17 @@ def _append_trace(
 # ---------------------------------------------------------------------------
 
 _CLIENTS: dict[str, httpx.Client] = {}
+_CLIENT_INSTANCE_IDS: dict[str, str] = {}
+_CLIENT_LOCK = None
+
+
+def _client_lock():
+    global _CLIENT_LOCK
+    import threading
+
+    if _CLIENT_LOCK is None:
+        _CLIENT_LOCK = threading.Lock()
+    return _CLIENT_LOCK
 
 
 def get_shared_http_client(
@@ -396,22 +407,40 @@ def get_shared_http_client(
     timeout: httpx.Timeout | float | None = None,
     headers: dict[str, str] | None = None,
 ) -> httpx.Client:
-    client = _CLIENTS.get(key)
-    if client is not None and not client.is_closed:
+    with _client_lock():
+        client = _CLIENTS.get(key)
+        if client is not None and not client.is_closed:
+            return client
+        # trust_env=False avoids corporate HTTP(S)_PROXY hijacking localhost stub/tests.
+        client = httpx.Client(timeout=timeout, headers=headers, trust_env=False)
+        _CLIENTS[key] = client
+        _CLIENT_INSTANCE_IDS[key] = uuid.uuid4().hex
         return client
-    # trust_env=False avoids corporate HTTP(S)_PROXY hijacking localhost stub/tests.
-    client = httpx.Client(timeout=timeout, headers=headers, trust_env=False)
-    _CLIENTS[key] = client
-    return client
+
+
+def get_shared_http_client_instance_id(key: str) -> str | None:
+    """Stable process-local transport identity (not a Python object address)."""
+    with _client_lock():
+        return _CLIENT_INSTANCE_IDS.get(key)
 
 
 def close_shared_http_clients() -> None:
-    for key, client in list(_CLIENTS.items()):
-        try:
-            if not client.is_closed:
-                client.close()
-        finally:
-            _CLIENTS.pop(key, None)
+    import logging
+
+    logger = logging.getLogger(__name__)
+    with _client_lock():
+        for key, client in list(_CLIENTS.items()):
+            try:
+                if not client.is_closed:
+                    client.close()
+                    logger.info("closed shared HTTP client key=%s", key)
+            finally:
+                _CLIENTS.pop(key, None)
+                _CLIENT_INSTANCE_IDS.pop(key, None)
+    # Always emit a stable marker for Docker lifespan assertions.
+    msg = "shared HTTP clients closed; provider transport cleanup completed"
+    logger.info(msg)
+    print(msg, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +448,18 @@ def close_shared_http_clients() -> None:
 # ---------------------------------------------------------------------------
 
 _SEMAPHORES: dict[str, Any] = {}
+_INFLIGHT: dict[str, int] = {}
+_MAX_INFLIGHT_SEEN: dict[str, int] = {}
+_INFLIGHT_LOCK = None
+
+
+def _inflight_lock():
+    global _INFLIGHT_LOCK
+    import threading
+
+    if _INFLIGHT_LOCK is None:
+        _INFLIGHT_LOCK = threading.Lock()
+    return _INFLIGHT_LOCK
 
 
 def get_provider_semaphore(name: str, *, max_inflight: int):
@@ -430,6 +471,20 @@ def get_provider_semaphore(name: str, *, max_inflight: int):
         sem = threading.Semaphore(max(1, int(max_inflight)))
         _SEMAPHORES[key] = sem
     return sem
+
+
+def provider_bulkhead_snapshot(name: str | None = None) -> dict[str, Any]:
+    with _inflight_lock():
+        if name is None:
+            return {
+                "inflight": dict(_INFLIGHT),
+                "max_inflight_seen": dict(_MAX_INFLIGHT_SEEN),
+            }
+        return {
+            "name": name,
+            "inflight": int(_INFLIGHT.get(name, 0)),
+            "max_inflight_seen": int(_MAX_INFLIGHT_SEEN.get(name, 0)),
+        }
 
 
 def acquire_provider_slot(
@@ -452,7 +507,14 @@ def acquire_provider_slot(
             raise DeadlineExceededError(f"deadline exceeded waiting for {name} bulkhead")
         raise ProviderBusyError(f"provider bulkhead busy: {name}")
 
+    with _inflight_lock():
+        current = int(_INFLIGHT.get(name, 0)) + 1
+        _INFLIGHT[name] = current
+        _MAX_INFLIGHT_SEEN[name] = max(int(_MAX_INFLIGHT_SEEN.get(name, 0)), current)
+
     def _release() -> None:
+        with _inflight_lock():
+            _INFLIGHT[name] = max(0, int(_INFLIGHT.get(name, 0)) - 1)
         sem.release()
 
     return _release
