@@ -12,9 +12,9 @@ what is verified.
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Release candidate **`0.1.0rc2`** (`v0.1.0-rc.2`) · FinRun schema `1.0` ·
-FinAgentBench pin **`v0.1.0-rc.2`** · **portfolio release candidate**, not a
-certification of unrestricted production readiness
+Release candidate **`0.1.0rc2`** — tag `v0.1.0-rc.2` (`d075b685`) · FinRun
+schema `1.0` · FinAgentBench evaluator pin **`v0.1.0-rc.2`** · **portfolio
+release candidate**, not a certification of unrestricted production readiness
 ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
 [Docs](docs/README.md) · [Architecture](docs/FINAL_ARCHITECTURE.md) ·
@@ -251,12 +251,19 @@ Do **not** merge these into one “accuracy” number.
 | **Provider fault validation** | Phase 3.3A + Docker dual-API | **PASS** (`docker_20260804T100817Z`) |
 | Retry amplification across 2 API containers | Logical provider calls → physical HTTP attempts | **20 → 25** (1.25×); stub observed exactly **25** |
 | Provider unexpected failures | Scenario G | **0** |
-| **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational) |
-| Mutation detection | Wrong entity/number/citation/risk | **4/4** |
+| **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational; measured under evaluator pin `v0.1.0-rc.1`) |
+| Core mutation detection | Wrong entity / number / citation / risk | **4/4** |
+| **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.2` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
 
 Unit-regression counts come from `scripts/run_tests.py` (unittest discovery) at
-release baseline `193c097`; invoking `pytest` directly reports the same suite
-with subtests counted separately, so the totals differ by runner.
+the frozen release commit `d075b685` (`v0.1.0-rc.2`), and still hold on current
+`main`, which only adds documentation commits. Invoking `pytest` directly reports
+the same suite with subtests counted separately, so the totals differ by runner.
+
+The benchmark row is informational and was produced with the earlier evaluator
+pin; it is **not** a score for the published `v0.1.0-rc.2` evaluator. What the
+current pin verifies is compatibility: the frozen FinRun export is accepted and
+replayed by FinAgentBench `v0.1.0-rc.2`.
 
 Evidence: [PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
@@ -341,8 +348,24 @@ Live providers need keys in `.env` (never commit them). Configuration:
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md) · reproducing the frozen
 evidence: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
 
-FinAgentBench (optional sibling / published tag **`v0.1.0-rc.2`**):
-[majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)
+### Independent evaluation
+
+The evaluator lives in a separate repository and never imports LumenFin's app
+layer. Reproduce the compatibility gate from the FinAgentBench side against the
+published tag **`v0.1.0-rc.2`**
+([majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)):
+
+```powershell
+git clone --branch v0.1.0-rc.2 https://github.com/majiali423/finagentbench-demo.git
+cd finagentbench-demo
+python -m pip install -e .
+$env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
+python scripts\validate_cross_repo.py --profile ci
+```
+
+The summary records both commits, both worktree states, FinRun schema, profile,
+and core/extended mutation results. LumenFin CI also runs this gate at the
+pinned evaluator tag; the pin is configurable per workflow dispatch.
 
 ---
 
@@ -371,7 +394,11 @@ Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 | [docs/MULTI_TENANCY_BOUNDARY.md](docs/MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Environment variables and provider pins |
 | [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) | Reproducing the frozen evidence |
+| [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | Offline demo walkthrough |
 | [docs/PORTFOLIO_RELEASE_REPORT.md](docs/PORTFOLIO_RELEASE_REPORT.md) | Freeze evidence |
+| [docs/PHASE32B_INTEGRATION_REPORT.md](docs/PHASE32B_INTEGRATION_REPORT.md) | Multi-process queue/worker evidence |
+| [docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) | Provider fault-injection evidence |
+| [reports/current/Joint_Compatibility_Report.md](reports/current/Joint_Compatibility_Report.md) | LumenFin ↔ FinAgentBench contract |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | Supported commands |
 
