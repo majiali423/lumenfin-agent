@@ -1,5 +1,7 @@
 # LumenFin
 
+**English** | [中文](README.zh-CN.md)
+
 **Evidence-grounded financial research agent with an explicit
 planner–critic–repair control flow**
 
