@@ -1,13 +1,16 @@
 # LumenFin
 
-**Evidence-grounded multi-agent financial diligence** — LangGraph orchestration,
-structured grounding, claim→evidence binding, and an independent FinAgentBench
-reliability gate.
+**Evidence-grounded financial research agent with explicit
+planner–critic–repair control flow**
+
+LangGraph-orchestrated specialist nodes (not a swarm of fully autonomous
+agents): plan → retrieve → analyze → check → repair → bind evidence →
+synthesize only what is verified.
 
 [![CI](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
 
-Release candidate: **`0.1.0rc2`** | FinRun schema: `1.0` | FinAgentBench pin:
-`v0.1.0-rc.1`
+Release candidate: **`0.1.0rc2`** (`v0.1.0-rc.2`) · FinRun schema: `1.0` ·
+FinAgentBench pin: **`v0.1.0-rc.2`**
 
 LumenFin is a **portfolio release candidate** validated under controlled
 multi-process and deterministic fault-injection conditions. These results are
@@ -19,13 +22,7 @@ multi-process and deterministic fault-injection conditions. These results are
 
 ---
 
-## 1. One-line positioning
-
-Turn a research query (and optional filings) into a **checkable** diligence
-report that fails closed when data is missing — then prove reliability with an
-external FinRun gate.
-
-## 2. Core problem
+## What problem it solves
 
 Typical financial RAG demos often:
 
@@ -34,47 +31,160 @@ Typical financial RAG demos often:
 - emit fluent claims without citations;
 - look “correct” when only the final paragraph is judged.
 
-LumenFin makes those failure modes **visible** and **fail-closed**.
+LumenFin makes those failure modes **visible** and **fail-closed**: it plans
+the work, acquires evidence, runs specialist analysis nodes, audits
+completeness, repairs with a bounded retry loop, binds claims to evidence, and
+refuses unsupported numeric conclusions when fundamentals are missing.
 
-## 3. System architecture (two paths)
+---
 
-### Agent / evidence path
+## 30-second offline demo
 
-```text
-Query / PDF
-→ LangGraph orchestration
-→ SEC / Yahoo / hybrid RAG
-→ structured financial grounding
-→ claim builder
-→ evidence binder
-→ verified-only synthesis
-→ FinRun
-→ FinAgentBench
+Deterministic · offline · no API key · non-zero exit on failure.
+
+```powershell
+python scripts/run_portfolio_demo.py
 ```
 
-### Runtime / infrastructure path
+| Demo | Story |
+|------|--------|
+| **A** Trusted normal analysis | Issuer scope, grounded claims, citations, FinRun export |
+| **B** Isolation & mutation detection | Multi-company isolation; mutation **4/4**; tenant leakage **0** |
+| **C** Fail-closed | Missing fundamentals → `incomplete_data`; no forged numerics |
 
-```text
-Client
-→ API instance(s)
-→ PostgreSQL checkpoint / job / RAG metadata
-→ Redis reliable queues (pending / processing / DLQ)
-→ index worker(s)
-→ Milvus Server
-→ provider resilience layer
+Interview walkthrough: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+
+---
+
+## Agent control flow
+
+Implementation: a **LangGraph state machine** of specialist nodes in
+`src/lumenfin/graph.py`. Nodes share one `FinanceState`; they are not
+independent multi-agent action loops.
+
+```mermaid
+flowchart TD
+    IN["Query + optional PDFs"] --> IG["Input Guardrail"]
+
+    IG -->|critical document injection| BLOCK["blocked_by_guardrail"]
+    IG -->|allowed or sanitized| QP["Query Planner"]
+
+    QP -->|missing required fields| HITL["Await Clarification"]
+    HITL --> PAUSE["Paused workflow checkpoint"]
+    PAUSE -. "resume_with_clarification" .-> QP
+
+    QP -->|complete plan| SUP["Supervisor"]
+    SUP --> RET["Retrieval & Grounding<br/>uploads · hybrid RAG · SEC/Yahoo"]
+
+    RET -->|fatal_data_gap| CB["Claim Binder"]
+    RET -->|supplementary evidence needed| AR["Appendix Replan"]
+    AR -->|retry retrieval| RET
+    AR -->|retry budget exhausted / degraded| CB
+
+    RET -->|computable fundamentals| QA["Quant Analyst<br/>AST-safe formulas"]
+    QA -->|supplementary evidence needed| AR
+    QA --> SENT["Management Sentiment Analyst<br/>(code node: psychologist)"]
+
+    SENT --> CR["Critic<br/>risk audit + deterministic checks"]
+
+    CR -->|findings and repair budget remains| REP["Repair Router"]
+    REP -->|retrieval issue| RET
+    REP -->|quant issue| QA
+    REP -->|sentiment issue| SENT
+
+    CR -->|passed or max iterations reached| CB
+
+    CB --> SYN["Verified-only Synthesizer"]
+    SYN --> FR["FinRun Export"]
+    FR --> FAB["Independent FinAgentBench Gate"]
 ```
 
-Details: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)
+| Phase | Nodes | Responsibility |
+|-------|--------|----------------|
+| Plan | `input_guardrail`, `query_planner`, `supervisor` | Input protection, intent/entity plan, clarification, execution plan |
+| Acquire | `retrieval`, `appendix_replan` | Document/provider grounding and supplementary evidence |
+| Analyze | `quant`, `psychologist` | AST-safe financial calculations and management-sentiment analysis |
+| Validate and repair | `critic`, `repair`, `claim_binder` | Completeness checks, directed re-run, Claim–Evidence Binding |
+| Publish and evaluate | `synthesizer`, FinRun, FinAgentBench | Verified-only report and independent evaluation |
 
-## 4. Trusted financial analysis chain
+Routing details and edge conditions: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md).
 
-- Issuer-only entity resolution and multi-company isolation
-- SEC companyfacts / Yahoo fundamentals with provenance
-- Hybrid RAG (keyword + vector) with page citations when uploads exist
-- Typed claims bound to evidence before synthesis
-- `incomplete_data` when fundamentals are absent (no forged numerics)
+### Critic vs Repair vs Claim Binder
 
-## 5. Engineering reliability
+These are **not** the same gate.
+
+**Critic** — `deterministic completeness checks + risk/compliance audit`.
+It inspects whether intermediate analysis is present and structurally complete
+(quant results, sentiment, risk/compliance outputs, state gaps). It is not a
+pure LLM judge.
+
+**Repair** — an **evaluator–router–retry** mechanism. It does **not** rewrite
+the final report. From structured violations it routes back to
+`retrieval` / `quant` / `psychologist` under `critic_max_iterations`. Only
+retrieval-worthy violations re-run expensive retrieval.
+
+**Claim Binder** — validates individual reportable facts against evidence:
+entity, metric, value, unit, period, citation / `source_record_id`, formula
+inputs. Only verified claims may enter the synthesizer.
+
+> Critic validates workflow completeness.  
+> Repair reruns the responsible upstream stage.  
+> Claim Binder validates individual reportable facts.
+
+### Fail-closed path
+
+```text
+retrieval detects fatal_data_gap
+→ skip quant / sentiment / critic loops
+→ claim_binder
+→ synthesizer
+→ workflow_status = incomplete_data
+```
+
+Why: without AST-computable fundamentals, Quant must not invent defaults,
+Critic/Repair must not idle-loop, and Synthesizer must not forge ratios.
+
+> Fail-closed means the system refuses unsupported numeric conclusions.  
+> It does not prove that every accepted upstream source is universally correct.
+
+---
+
+## Evidence / trust chain
+
+```text
+PDF / SEC / Yahoo / market providers
+→ normalized fundamentals and provenance
+→ AST-safe calculations
+→ typed claims
+→ entity / metric / value / unit / period / citation binding
+→ verified claims only
+→ report + FinRun
+→ independent replay evaluation
+```
+
+- RAG evidence is **not** automatically equivalent to structured fundamentals.
+- A fluent sentence is **not** automatically a verified Claim.
+
+---
+
+## LLM vs deterministic responsibilities
+
+| Concern | LLM-assisted | Deterministic / programmatic |
+|---------|--------------|------------------------------|
+| Query understanding | Intent/entity extraction fallback | Required-field and clarification routing |
+| Retrieval | Query phrasing and profile generation | Provider order, issuer scope, tenant filters |
+| Financial calculations | No arithmetic authority | AST-safe formulas over structured inputs |
+| Critic | Short compliance narrative | Violation codes and repair routing |
+| Evidence verification | No final authority | Entity/value/unit/period/citation matching |
+| Report generation | Language synthesis | Only verified claims are eligible |
+| Evaluation | Optional semantic judge | Replay-first deterministic gates |
+
+The system uses LLMs where language helps; it does **not** treat Claim Binder
+as proof of absolute world-truth.
+
+---
+
+## Engineering reliability
 
 | Concern | Design |
 |---------|--------|
@@ -84,7 +194,9 @@ Details: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)
 | Providers | Single retry owner, deadline, Retry-After, jitter, degraded fallback, per-process bulkhead |
 | Tenancy | RAG data-plane tenant-aware logical isolation ([boundary](docs/MULTI_TENANCY_BOUNDARY.md)) |
 
-## 6. Validated results (separate gates)
+---
+
+## Validated results (separate gates)
 
 Do **not** merge these into one “accuracy” number.
 
@@ -106,25 +218,42 @@ Evidence: [PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [RC reliability](reports/current/LumenFin_RC_Final_Reliability_Report.md) ·
 [Compatibility](reports/current/Joint_Compatibility_Report.md)
 
-## 7. Three demo narratives
+---
 
-| Demo | Story |
-|------|--------|
-| **A** Trusted normal analysis | Issuer scope, grounded claims, citations, FinRun export |
-| **B** Isolation & error detection | Multi-company isolation; mutation 4/4; tenant leakage 0 |
-| **C** Fail-closed | Missing fundamentals → `incomplete_data`; no forged numerics |
+## Runtime topology
 
-```powershell
-python scripts/run_portfolio_demo.py
+PostgreSQL, Redis, and Milvus are **different roles**, not a single pipeline.
+API ↔ PostgreSQL / Milvus are bidirectional request paths, not
+`API → DB → Redis → Worker → Milvus` only.
+
+```mermaid
+flowchart LR
+    CLIENT["Client"] --> API["FastAPI instances"]
+
+    API <--> PG[("PostgreSQL<br/>checkpoints · jobs · RAG documents/chunks")]
+    API --> REDIS[("Redis<br/>pending · processing · DLQ")]
+    REDIS --> WORKER["Index workers"]
+
+    WORKER <--> PG
+    WORKER --> MILVUS[("Milvus Server")]
+    API <--> MILVUS
+
+    API --> RES["Provider resilience<br/>deadline · retry · jitter · bulkhead"]
+    WORKER --> RES
+    RES --> EXT["DeepSeek · DashScope · SEC · Yahoo"]
+
+    WORKER -. "lease + attempt fencing" .-> PG
 ```
 
-Interview walkthrough: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+- Redis queues are **at-least-once**, not exactly-once
+- PostgreSQL lease + attempt fencing recovers killed workers
+- Bulkhead is **per-process**, not a global distributed rate limit
 
-Optional Docker recovery story (not in default demo): worker A killed →
-automatic reclaim → worker B attempt=2 → ready
-([Phase 3.2B](docs/PHASE32B_INTEGRATION_REPORT.md)).
+Details: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)
 
-## 8. Quick start
+---
+
+## Quick start
 
 Supported CI Python: **3.12**. Prefer the lockfile path.
 
@@ -140,26 +269,30 @@ copy .env.example .env
 Live providers need keys in `.env` (never commit them). See
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-FinAgentBench (optional sibling / published tag):
+FinAgentBench (optional sibling / published tag **`v0.1.0-rc.2`**):
 [majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)
 
-## 9. Boundaries
+---
+
+## Limitations
 
 - Portfolio RC / controlled deployment candidate — **not** unrestricted production-ready
 - At-least-once queues — **not** exactly-once
 - Per-process bulkhead — **not** cross-process global rate limit
 - Live provider smoke: **skipped** in current release evidence
-- Not investment advice; human review required
+- Not investment advice; human financial review required
 - PyMuPDF license limits public image redistribution
 
 Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 
-## 10. Documentation map
+---
+
+## Documentation map
 
 | Doc | Purpose |
 |-----|---------|
 | [docs/README.md](docs/README.md) | Doc index |
-| [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md) | Agent + runtime architecture |
+| [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md) | Agent control flow + runtime architecture |
 | [docs/MULTI_TENANCY_BOUNDARY.md](docs/MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope |
 | [docs/PORTFOLIO_RELEASE_REPORT.md](docs/PORTFOLIO_RELEASE_REPORT.md) | Freeze evidence |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
