@@ -1,7 +1,7 @@
 # LumenFin Final Architecture
 
 Trustworthy Financial Research Agent — architecture for **portfolio release
-candidate** `0.1.0rc2` (FinRun schema `1.0`, FinAgentBench pin **`v0.1.0-rc.2`**).
+candidate** `0.1.0rc2` (FinRun schema `1.0`, FinAgentBench pin **`v0.1.0-rc.3`**).
 
 LumenFin is a portfolio release candidate validated under controlled
 multi-process and deterministic fault-injection conditions. These results
@@ -25,7 +25,7 @@ data is missing**.
 | Operable runtime | PostgreSQL + Redis reliable queues + Milvus Server + provider resilience under multi-process stress |
 
 **Sibling evaluator:** [FinAgentBench](https://github.com/majiali423/finagentbench-demo)
-scores exported `FinRun` traces. Recommended published tag: **`v0.1.0-rc.2`**
+scores exported `FinRun` traces. Recommended published tag: **`v0.1.0-rc.3`**
 (local sibling checkout optional for offline demos). LumenFin generates;
 FinAgentBench gates reliability.
 

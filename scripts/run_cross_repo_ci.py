@@ -49,6 +49,40 @@ def _git_revision(repo: Path) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else "unavailable"
 
 
+def _fab_package_version(fab: Path) -> str:
+    pyproject = fab / "pyproject.toml"
+    if not pyproject.is_file():
+        return "unavailable"
+    for line in pyproject.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith("version"):
+            # version = "0.1.0rc2"
+            parts = line.split("=", 1)
+            if len(parts) == 2:
+                return parts[1].strip().strip("\"'")
+    try:
+        from importlib import metadata
+
+        return metadata.version("finagentbench")
+    except Exception:  # noqa: BLE001 - best-effort CI metadata only
+        return "unavailable"
+
+
+def _case_hash(case_path: Path) -> str:
+    if not case_path.is_file():
+        return "unavailable"
+    try:
+        fab_root = case_path.resolve().parents[1]
+        fab_root_str = str(fab_root)
+        if fab_root_str not in sys.path:
+            sys.path.insert(0, fab_root_str)
+        from finagentbench.provenance import case_hash
+
+        payload = json.loads(case_path.read_text(encoding="utf-8"))
+        return case_hash(payload)
+    except Exception as exc:  # noqa: BLE001 - report metadata, do not fail gate
+        return f"unavailable:{exc.__class__.__name__}"
+
+
 def _git_porcelain(repo: Path) -> list[str]:
     proc = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -294,11 +328,15 @@ def main(argv: list[str] | None = None) -> int:
         "lumenfin_root": str(lumen),
         "finagentbench_root": str(fab),
         "lumenfin_commit": _git_revision(lumen),
+        "finagentbench_requested_ref": os.environ.get("FINAGENTBENCH_REF", ""),
         "finagentbench_commit": _git_revision(fab),
+        "finagentbench_package_version": _fab_package_version(fab),
         "lumenfin_unexpected_dirty": dirty,
         "lumenfin_worktree_dirty": bool(dirty),
         "finagentbench_worktree_dirty": bool(_git_porcelain(fab)),
         "finrun_schema_version": finrun.get("schema_version", "legacy-0"),
+        "case_path": str(case_path),
+        "case_hash": _case_hash(case_path),
         "benchmark_profile": args.profile,
         "sample_finrun": str(finrun_path),
         "finrun_bytes": finrun_path.stat().st_size,

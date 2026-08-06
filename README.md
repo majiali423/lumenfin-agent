@@ -15,7 +15,7 @@ Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
 Release candidate **`0.1.0rc2`** — tag `v0.1.0-rc.2` (`d075b685`) · FinRun
-schema `1.0` · FinAgentBench evaluator pin **`v0.1.0-rc.2`** · **portfolio
+schema `1.0` · FinAgentBench evaluator pin **`v0.1.0-rc.3`** · **portfolio
 release candidate**, not a certification of unrestricted production readiness
 ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
@@ -277,18 +277,18 @@ Do **not** merge these into one “accuracy” number.
 | Provider unexpected failures | Scenario G | **0** |
 | **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational; measured under evaluator pin `v0.1.0-rc.1`) |
 | Core mutation detection | Wrong entity / number / citation / risk | **4/4** |
-| **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.2` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
+| **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.3` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
 
 Unit-regression counts come from `scripts/run_tests.py` (unittest discovery) at
-the frozen release commit `d075b685` (`v0.1.0-rc.2`). Current `main` adds
-documentation, configuration, and evaluator-pin updates; `src/` and `tests/`
-remain unchanged from the frozen release tag. Invoking `pytest` directly reports
-the same suite with subtests counted separately, so the totals differ by runner.
+the frozen release commit `d075b685` (`v0.1.0-rc.2`). Current branches may add
+worker/CI hardening and evaluator-pin updates beyond that frozen tag. Invoking
+`pytest` directly reports the same suite with subtests counted separately, so
+the totals differ by runner.
 
 The benchmark row is informational and was produced with the earlier evaluator
-pin; it is **not** a score for the published `v0.1.0-rc.2` evaluator. What the
+pin; it is **not** a score for the published `v0.1.0-rc.3` evaluator. What the
 current pin verifies is compatibility: the frozen FinRun export is accepted and
-replayed by FinAgentBench `v0.1.0-rc.2`.
+replayed by FinAgentBench `v0.1.0-rc.3`.
 
 Evidence: [PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
@@ -388,11 +388,11 @@ evidence: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
 
 The evaluator lives in a separate repository and never imports LumenFin's app
 layer. Reproduce the compatibility gate from the FinAgentBench side against the
-published tag **`v0.1.0-rc.2`**
+published tag **`v0.1.0-rc.3`**
 ([majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)):
 
 ```powershell
-git clone --branch v0.1.0-rc.2 https://github.com/majiali423/finagentbench-demo.git
+git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
 cd finagentbench-demo
 python -m pip install -e .
 $env:LUMENFIN_ROOT = "<path to lumenfin-agent>"

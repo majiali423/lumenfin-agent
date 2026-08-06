@@ -13,6 +13,10 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class JobRedeliveryConflict(ValueError):
+    """Same job_id redelivered with a mismatched thread_id/query fingerprint."""
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -127,6 +131,11 @@ class JobRepository:
             job = session.get(AnalysisJob, job_id)
             if job is None:
                 return
+            # Never downgrade a completed analysis job (at-least-once redelivery).
+            if job.status == "completed" and status != "completed":
+                return
+            if job.status == "completed" and status == "completed" and job.result_json:
+                return
             job.status = status
             if llm_backend is not None:
                 job.llm_backend = llm_backend
@@ -137,6 +146,44 @@ class JobRepository:
             job.error_message = error_message
             job.updated_at = utc_now()
             session.commit()
+
+    def begin_job_execution(
+        self,
+        job_id: str,
+        *,
+        thread_id: str,
+        query: str,
+    ) -> str:
+        """Claim a job for execution.
+
+        Returns:
+            ``run`` — caller should execute analysis
+            ``skip_completed`` — job already completed with matching identity
+            ``missing`` — job row does not exist
+
+        Raises:
+            JobRedeliveryConflict — same job_id already completed (or stored)
+            with a different thread_id/query fingerprint.
+        """
+        with Session(self.engine) as session:
+            job = session.get(AnalysisJob, job_id)
+            if job is None:
+                return "missing"
+            stored_thread = str(job.thread_id or "")
+            stored_query = str(job.query or "")
+            if stored_thread != str(thread_id) or stored_query != str(query):
+                raise JobRedeliveryConflict(
+                    f"Analysis job identity conflict for job_id={job_id}: "
+                    f"stored thread_id/query does not match redelivery payload "
+                    f"(stored_thread_id={stored_thread!r}, payload_thread_id={thread_id!r})"
+                )
+            if job.status == "completed":
+                return "skip_completed"
+            job.status = "running"
+            job.error_message = None
+            job.updated_at = utc_now()
+            session.commit()
+            return "run"
 
     def get_job(self, job_id: str) -> Optional[dict[str, Any]]:
         with Session(self.engine) as session:
