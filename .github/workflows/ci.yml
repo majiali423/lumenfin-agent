@@ -52,3 +52,84 @@ jobs:
           path: |
             outputs/portfolio_demo/**
           if-no-files-found: ignore
+
+  # Lightweight FinRun contract gate: current LumenFin + pinned FinAgentBench.
+  # Does not re-run the offline unit suite (avoid duplicating ci.offline).
+  # Full extended lane (RAG eval + this gate) remains workflow_dispatch in test.yml.
+  finrun-contract:
+    name: FinRun contract gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Always on push/PR so FinRun/claims/graph exporter changes cannot skip the gate.
+    # Path-only filters are insufficient when shared helpers change export shape.
+    env:
+      APP_ENV: test
+      DATA_MODE: demo
+      ALLOW_LOCAL_FALLBACK: "true"
+      MAS_REDIS_URL: ""
+      DEEPSEEK_API_KEY: ""
+      DASHSCOPE_API_KEY: ""
+      FINAGENTBENCH_REF: v0.1.0-rc.2
+      FINAGENTBENCH_PROFILE: ci
+      LUMENFIN_ROOT: ${{ github.workspace }}/lumenfin-agent
+      FINAGENTBENCH_DIR: ${{ github.workspace }}/finagentbench-demo
+      CROSS_REPO_OUT_DIR: ${{ github.workspace }}/cross_repo_validation
+    steps:
+      - name: Checkout LumenFin
+        uses: actions/checkout@v4
+        with:
+          path: lumenfin-agent
+
+      - name: Checkout FinAgentBench (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ format('{0}/finagentbench-demo', github.repository_owner) }}
+          ref: ${{ env.FINAGENTBENCH_REF }}
+          path: finagentbench-demo
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install LumenFin
+        working-directory: lumenfin-agent
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-lock.txt
+          python -m pip install -e . --no-deps
+
+      - name: Record revisions
+        run: |
+          echo "FINAGENTBENCH_REF=${FINAGENTBENCH_REF}"
+          echo "LUMENFIN_ROOT=${LUMENFIN_ROOT}"
+          echo "FINAGENTBENCH_DIR=${FINAGENTBENCH_DIR}"
+          echo "requested_ref=${FINAGENTBENCH_REF}"
+          echo -n "lumenfin_commit="; git -C "${LUMENFIN_ROOT}" rev-parse HEAD
+          echo -n "finagentbench_commit="; git -C "${FINAGENTBENCH_DIR}" rev-parse HEAD
+          git -C "${FINAGENTBENCH_DIR}" describe --tags --exact-match HEAD || true
+          python -c "from importlib import metadata; print('finagentbench_package_version=' + metadata.version('finagentbench'))" || true
+
+      - name: Install FinAgentBench
+        run: python -m pip install -e "${FINAGENTBENCH_DIR}"
+
+      - name: Record package version after install
+        run: |
+          python -c "from importlib import metadata; print('finagentbench_package_version=' + metadata.version('finagentbench'))"
+          python -c "import json; from pathlib import Path; from finagentbench.provenance import case_hash; p=Path('${{ env.FINAGENTBENCH_DIR }}')/'fixtures'/'case_lumenfin_diligence.json'; print('case_hash=' + case_hash(json.loads(p.read_text(encoding='utf-8'))))"
+
+      - name: Cross-repository FinRun reliability gate
+        working-directory: lumenfin-agent
+        run: >
+          python scripts/run_cross_repo_ci.py
+          --profile "${FINAGENTBENCH_PROFILE}"
+          --lumenfin-root "${LUMENFIN_ROOT}"
+          --finagentbench-root "${FINAGENTBENCH_DIR}"
+          --out-dir "${CROSS_REPO_OUT_DIR}"
+
+      - name: Upload contract gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finrun-contract-gate
+          path: ${{ env.CROSS_REPO_OUT_DIR }}/
+          if-no-files-found: ignore

@@ -1,7 +1,8 @@
 name: test
 
-# Extended gate (FinAgentBench checkout + cross-repo). Manual / optional.
-# Primary required offline CI is `.github/workflows/ci.yml`.
+# Extended gate (FinAgentBench checkout + cross-repo + RAG eval). Manual / optional.
+# Required PR CI is `.github/workflows/ci.yml` (offline suite + FinRun contract gate).
+# This workflow intentionally does not duplicate the offline unit suite on every PR.
 
 on:
   workflow_dispatch:
@@ -66,10 +67,6 @@ jobs:
 
       - name: Install FinAgentBench
         run: python -m pip install -e "${FINAGENTBENCH_DIR}"
-
-      - name: Run offline unit tests
-        working-directory: lumenfin-agent
-        run: python scripts/run_tests.py
 
       - name: RAG eval release gate
         working-directory: lumenfin-agent

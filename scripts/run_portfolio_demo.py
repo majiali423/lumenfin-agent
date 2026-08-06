@@ -451,9 +451,14 @@ def main() -> int:
         "validated_refs": {
             "phase32b": "20260804T095357Z",
             "phase33a_docker": "docker_20260804T100817Z",
-            "offline_tests": "453 passed, 1 skipped",
+            # Frozen RC2 release evidence (not current dirty worktree counts).
+            "offline_tests": "453 passed, 1 skipped (frozen v0.1.0-rc.2 release evidence)",
             "mutation_detection": "4/4",
             "finagentbench_mean": 92.97,
+            "evidence_note": (
+                "validated_refs cite stamped RC2 / Phase 3.2B-3.3A evidence; "
+                "do not treat as live uncommitted worktree test counts"
+            ),
         },
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
