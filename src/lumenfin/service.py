@@ -405,7 +405,23 @@ class LumenFinAnalysisService:
         document_paths: list[str] | None = None,
         output_format: str | None = None,
     ) -> None:
-        self.repository.update_job_status(job_id=job_id, status="running")
+        """Execute an analysis job with at-least-once safe completion semantics.
+
+        Order of durable side effects:
+        1. ``analyze()`` persists checkpoint / result artifacts
+        2. job row is marked ``completed`` only after analyze returns
+        3. Redis ACK happens in the worker *after* ``run_job`` returns
+
+        Idempotent skip requires matching ``job_id`` + ``thread_id`` + ``query``.
+        A completed job with a mismatched identity raises ``JobRedeliveryConflict``.
+        """
+        claim = self.repository.begin_job_execution(
+            job_id,
+            thread_id=thread_id,
+            query=query,
+        )
+        if claim == "skip_completed":
+            return
         try:
             response = self.analyze(
                 query=query,
@@ -414,12 +430,14 @@ class LumenFinAnalysisService:
                 document_paths=document_paths,
                 output_format=output_format,
             )
+            # Mark completed only after analyze persisted checkpoint/artifacts.
             self.repository.update_job_status(
                 job_id=job_id,
                 status="completed",
                 llm_backend=response["llm_backend"],
                 result=response["result"],
                 artifacts=response["artifacts"],
+                error_message=None,
             )
         except Exception as exc:
             self.repository.update_job_status(

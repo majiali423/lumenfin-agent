@@ -16,9 +16,12 @@ def execute_analysis_job(
     export_artifacts: bool = True,
     document_paths: list[str] | None = None,
     output_format: str | None = None,
+    *,
+    service: LumenFinAnalysisService | None = None,
 ) -> None:
-    config = AppConfig.from_env()
-    service = LumenFinAnalysisService(config)
+    if service is None:
+        config = AppConfig.from_env()
+        service = LumenFinAnalysisService(config)
     service.run_job(
         job_id=job_id,
         query=query,
@@ -40,6 +43,50 @@ def _queue_from_config(config: AppConfig) -> RedisQueueManager:
     )
 
 
+def process_reserved_analysis_message(
+    *,
+    queue: RedisQueueManager,
+    service: LumenFinAnalysisService,
+    reserved,
+    worker_id: str,
+    retry_backoff_seconds: float = 0.0,
+) -> str:
+    """Process one reserved analysis message. Returns action label for tests/logs."""
+    payload = reserved.payload
+    job_id = str(payload.get("job_id") or "")
+    try:
+        execute_analysis_job(
+            job_id=job_id,
+            query=payload["query"],
+            thread_id=payload["thread_id"],
+            export_artifacts=payload.get("export_artifacts", True),
+            document_paths=payload.get("document_paths", []),
+            output_format=payload.get("output_format"),
+            service=service,
+        )
+    except Exception as exc:  # noqa: BLE001 - persist failure then retry/DLQ
+        if job_id:
+            try:
+                service.repository.update_job_status(
+                    job_id,
+                    status="failed",
+                    error_message=str(exc),
+                )
+            except Exception as status_exc:  # noqa: BLE001
+                print(f"Failed to persist job failure for {job_id}: {status_exc}")
+        result = queue.retry(reserved.message_id, worker_id, f"exception: {exc}")
+        print(
+            f"Analysis retry/DLQ message_id={reserved.message_id} "
+            f"action={result.action} attempt={result.attempt} error={exc}"
+        )
+        if result.action == "requeued" and retry_backoff_seconds > 0:
+            time.sleep(retry_backoff_seconds)
+        return result.action
+    acked = queue.ack(reserved.message_id, worker_id)
+    print(f"Analysis ACK message_id={reserved.message_id} job_id={job_id} ok={acked}")
+    return "acked" if acked else "ack_miss"
+
+
 def work_forever() -> None:
     config = AppConfig.from_env()
     if not config.redis_url:
@@ -59,34 +106,10 @@ def work_forever() -> None:
             continue
         if reserved is None:
             continue
-        payload = reserved.payload
-        job_id = str(payload.get("job_id") or "")
-        try:
-            execute_analysis_job(
-                job_id=job_id,
-                query=payload["query"],
-                thread_id=payload["thread_id"],
-                export_artifacts=payload.get("export_artifacts", True),
-                document_paths=payload.get("document_paths", []),
-                output_format=payload.get("output_format"),
-            )
-        except Exception as exc:  # noqa: BLE001 - persist failure then retry/DLQ
-            if job_id:
-                try:
-                    service.repository.update_job_status(
-                        job_id,
-                        status="failed",
-                        error_message=str(exc),
-                    )
-                except Exception as status_exc:  # noqa: BLE001
-                    print(f"Failed to persist job failure for {job_id}: {status_exc}")
-            result = queue.retry(reserved.message_id, worker_id, f"exception: {exc}")
-            print(
-                f"Analysis retry/DLQ message_id={reserved.message_id} "
-                f"action={result.action} attempt={result.attempt} error={exc}"
-            )
-            if result.action == "requeued":
-                time.sleep(config.redis_retry_backoff_seconds)
-            continue
-        acked = queue.ack(reserved.message_id, worker_id)
-        print(f"Analysis ACK message_id={reserved.message_id} job_id={job_id} ok={acked}")
+        process_reserved_analysis_message(
+            queue=queue,
+            service=service,
+            reserved=reserved,
+            worker_id=worker_id,
+            retry_backoff_seconds=config.redis_retry_backoff_seconds,
+        )
