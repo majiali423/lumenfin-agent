@@ -70,7 +70,9 @@ Claim Builder + Evidence Binding
         ↓
 Report Synthesizer (verified claims only)
         ↓
-FinRun Export → FinAgentBench Evaluation
+LangGraph END
+        ↓
+(post-graph) FinRun Export → FinAgentBench Evaluation
 ```
 
 ### Module responsibilities
@@ -90,8 +92,8 @@ FinRun Export → FinAgentBench Evaluation
 
 ## 3. Agent control flow (code truth)
 
-Source of truth: `src/lumenfin/graph.py` (`FinanceGraph._build_graph` and
-`route_after_*`).
+Source of truth: `src/lumenfin/graph.py`
+(`LumenFinAgentSystem._build_graph()` and `route_after_*`).
 
 ### Nodes
 
@@ -110,6 +112,10 @@ Source of truth: `src/lumenfin/graph.py` (`FinanceGraph._build_graph` and
 | `claim_binder` | Claim Binder | Bind claims to evidence |
 | `synthesizer` | Verified-only Synthesizer | Report from verified claims only |
 
+LangGraph registration ends at `synthesizer → END`. **FinRun export** and
+**FinAgentBench** are not `workflow.add_node()` targets; they run after the
+graph produces a final result (`export_finrun_state()` / sibling CI gate).
+
 ### Control-flow diagram
 
 ```mermaid
@@ -120,7 +126,7 @@ flowchart TD
     IG -->|allowed or sanitized| QP["query_planner"]
 
     QP -->|missing_fields| HITL["await_clarification"]
-    HITL --> PAUSE["END · paused checkpoint"]
+    HITL --> PAUSE["END<br/>paused workflow checkpoint"]
     PAUSE -. "resume_with_clarification" .-> QP
 
     QP -->|complete plan| SUP["supervisor"]
@@ -145,7 +151,10 @@ flowchart TD
     CR -->|no findings or max iterations| CB
 
     CB --> SYN["synthesizer"]
-    SYN --> OUT["END · FinRun export"]
+    SYN --> GEND(["LangGraph END"])
+
+    GEND -. "export_finrun_state()" .-> FR[["FinRun artifact"]]
+    FR -. "separate repository / CI gate" .-> FAB[["FinAgentBench"]]
 ```
 
 ### Conditional routers (summary)
@@ -207,43 +216,81 @@ instead of inventing ratios.
 
 They are complementary: the graph saver is the LangGraph runtime checkpointer;
 the repository is the application persistence model for durable workflow state.
+They are **not** the same checkpoint mechanism.
 
-HITL: `await_clarification` edges to `END`. Resume is
-`FinanceGraph.resume_with_clarification(...)`, which merges clarification into
-the query/plan and continues from the planner path.
+### HITL pause and clarification resume
+
+```text
+await_clarification → END
+```
+
+Resume is **not** a full re-execution of the `query_planner()` node function as
+a fresh graph entry. `LumenFinAgentSystem.resume_with_clarification(...)`:
+
+```text
+load graph snapshot (InMemorySaver thread state)
+→ merge user clarification into the query
+→ rebuild query plan via build_query_plan(...)
+→ graph.update_state(..., as_node="query_planner")
+→ continue invoke through planner routing
+  (missing_fields → await_clarification again, else → supervisor)
+```
+
+Durable API/worker paths may also hydrate from `WorkflowCheckpointRepository`
+via `bootstrap_thread_from_store` before resume.
 
 ---
 
 ## 4. Runtime topology
 
-Validated multi-process reference (Phase 3.2B / 3.3A Docker):
+Validated multi-process reference (Phase 3.2B / 3.3A Docker). Analysis and
+index work use **separate** Redis queues:
+
+```text
+Analysis queue → Analysis Worker → LumenFinAnalysisService.run_job()
+Index queue    → Index Worker    → document indexing / PostgreSQL / Milvus
+```
 
 ```mermaid
 flowchart LR
     CLIENT["Client"] --> API["FastAPI instances"]
 
-    API <--> PG[("PostgreSQL<br/>checkpoints · jobs · RAG documents/chunks")]
-    API --> REDIS[("Redis<br/>pending · processing · DLQ")]
-    REDIS --> WORKER["Index workers"]
+    API <--> PG[("PostgreSQL<br/>checkpoints · jobs · RAG metadata/chunks")]
+    API --> AQ[("Redis analysis queue")]
+    API --> IQ[("Redis index queue")]
 
-    WORKER <--> PG
-    WORKER --> MILVUS[("Milvus Server")]
-    API <--> MILVUS
+    AQ --> AW["Analysis Worker<br/>src/lumenfin/worker.py"]
+    IQ --> IW["Index Worker<br/>scripts/run_rag_index_worker.py"]
 
-    API --> RES["Provider resilience<br/>deadline · retry · jitter · bulkhead"]
-    WORKER --> RES
-    RES --> EXT["DeepSeek · DashScope · SEC · Yahoo"]
+    AW <--> PG
+    IW <--> PG
 
-    WORKER -. "lease + attempt fencing" .-> PG
+    API <--> MV[("Milvus Server")]
+    AW <--> MV
+    IW --> MV
+
+    AW --> PR["Provider resilience"]
+    API --> PR
+    IW --> EMB["Embedding provider"]
+
+    PR --> EXT["DeepSeek · DashScope · SEC · Yahoo · market providers"]
+
+    IW -. "lease + attempt fencing" .-> PG
 ```
 
-| Store | Role |
-|-------|------|
-| **PostgreSQL** | Checkpoints (CAS revision), jobs, RAG metadata/chunks, index leases/attempts |
-| **Redis** | Reliable index/analysis queues: pending → processing → dead-letter; Lua reserve/ack/retry/reclaim (**at-least-once**) |
+| Component | Role |
+|-----------|------|
+| **PostgreSQL** | Checkpoints (CAS revision), analysis jobs, RAG metadata/chunks, index leases/attempts |
+| **Redis analysis queue** | Reliable pending → processing → DLQ for analysis jobs (`MAS` analysis queue name); Analysis Worker uses reserve / ACK / retry / reclaim (**at-least-once**) |
+| **Redis index queue** | Separate reliable queue for RAG indexing; Index Worker uses the same Redis reliability primitives plus PostgreSQL **lease + attempt fencing** |
+| **Analysis Worker** | `src/lumenfin/worker.py` → `LumenFinAnalysisService.run_job()` |
+| **Index Worker** | `scripts/run_rag_index_worker.py` → embed / upsert / finalize ready or failed |
+| **API instances** | Request handlers; process-local HTTP clients and bulkheads; enqueue jobs; read/write PG and query Milvus |
 | **Milvus Server** | Shared vector index for hybrid RAG (integration). Lite remains a local/dev option only |
-| **API instances** | Request handlers; process-local HTTP clients and bulkheads; read/write PG and query Milvus |
-| **Index workers** | Claim lease, embed, upsert vectors, finalize ready/failed with fencing |
+
+**Layer separation:** provider HTTP retry (`call_with_policy`) ≠ Redis job retry /
+reclaim ≠ appendix replan. Bulkheads are **per-process**, not a cross-process
+global rate limit.
 
 Local demos may use SQLite + Milvus Lite under `APP_ENV=test` / explicit
 `MAS_ALLOW_SQLITE_DEV`. Production/integration **require** PostgreSQL.
@@ -299,7 +346,8 @@ Financial Facts (document + issuer SEC/Yahoo gap-fill)
         ↓
 Retrieval (hybrid RAG + structured company payload)
         ↓
-Quant / risk → Claims → Evidence binding → Report → FinRun → FinAgentBench
+Quant / risk → Claims → Evidence binding → Report
+→ (post-graph) FinRun export → FinAgentBench
 ```
 
 ### Important separations

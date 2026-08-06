@@ -1,0 +1,22 @@
+{
+  "_comment": "Illustrative abridged shape of a fail-closed data-limitation risk claim from lumenfin.claims.build_claims when block_numeric is true. Not copied from a committed FinRun export.",
+  "claim_id": "cl_risk_OpenAI_supply",
+  "entity": "OpenAI",
+  "claim_type": "risk_conclusion",
+  "statement": "OpenAI data-limitation risk is elevated: no AST-computable fundamentals (structured_source=none).",
+  "value": "elevated",
+  "period": "unknown",
+  "metric_name": "data_limitation_risk",
+  "evidence_refs": [
+    {
+      "evidence_id": "ev_gap_OpenAI",
+      "entity": "OpenAI",
+      "citation": "lumenfin:data_gap:OpenAI:none",
+      "source_type": "data_gap",
+      "text": "OpenAI data-limitation risk is elevated: no AST-computable fundamentals (structured_source=none).",
+      "period": "unknown"
+    }
+  ],
+  "verification": "verified",
+  "verify_reason": "Fail-closed data-limitation risk bound to structured_source=none provenance."
+}

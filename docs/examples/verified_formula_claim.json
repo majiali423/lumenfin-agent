@@ -1,0 +1,37 @@
+{
+  "_comment": "Illustrative abridged shape of a verified formula claim produced by lumenfin.claims.build_claims / _verify_numeric. Not copied from a committed FinRun export (outputs/ is gitignored). Field names and ID patterns match src/lumenfin/claims.py.",
+  "claim_id": "cl_num_Apple_ebitda_margin",
+  "entity": "Apple",
+  "claim_type": "numeric",
+  "statement": "Apple EBITDA margin is 34.8% for FY2025.",
+  "value": 0.3478,
+  "unit": "ratio",
+  "period": "FY2025",
+  "metric_name": "ebitda_margin",
+  "evidence_refs": [
+    {
+      "evidence_id": "ev_fund_Apple_ebitda_FY2025",
+      "entity": "Apple",
+      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:ebitda",
+      "source_type": "sec_companyfacts",
+      "text": "Apple EBITDA was 136.5 billion USD.",
+      "period": "FY2025",
+      "metric_name": "ebitda",
+      "value": 136.5,
+      "unit": "billion_usd"
+    },
+    {
+      "evidence_id": "ev_fund_Apple_revenue_FY2025",
+      "entity": "Apple",
+      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:revenue",
+      "source_type": "sec_companyfacts",
+      "text": "Apple Revenue was 392.3 billion USD.",
+      "period": "FY2025",
+      "metric_name": "revenue",
+      "value": 392.3,
+      "unit": "billion_usd"
+    }
+  ],
+  "verification": "verified",
+  "verify_reason": "Metric/period/unit-bound evidence (formula_inputs_bound); formula_inputs={'ebitda': 'ev_fund_Apple_ebitda_FY2025', 'revenue': 'ev_fund_Apple_revenue_FY2025'}"
+}

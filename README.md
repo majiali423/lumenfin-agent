@@ -41,7 +41,7 @@ refuses unsupported numeric conclusions when fundamentals are missing.
 
 ---
 
-## 30-second offline demo
+## One-command offline demo
 
 Deterministic · offline · no API key · non-zero exit on failure.
 
@@ -61,8 +61,9 @@ not started by this entrypoint. Walkthrough: [docs/DEMO_GUIDE.md](docs/DEMO_GUID
 
 ### What a verified claim looks like
 
-Abridged from an exported FinRun (`schema_version: "1.0"`; artifacts land in the
-git-ignored `outputs/`):
+Illustrative abridged shape of a verified formula claim (IDs and binding rules
+match `src/lumenfin/claims.py`; full example:
+[docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)):
 
 ```json
 {
@@ -72,26 +73,44 @@ git-ignored `outputs/`):
   "statement": "Apple EBITDA margin is 34.8% for FY2025.",
   "value": 0.3478, "unit": "ratio", "period": "FY2025",
   "metric_name": "ebitda_margin",
-  "evidence_refs": [{
-    "evidence_id": "ev_fund_Apple_FY2025",
-    "citation": "lumenfin:sec_companyfacts:Apple:FY2025",
-    "source_type": "sec_companyfacts",
-    "period": "FY2025"
-  }],
+  "evidence_refs": [
+    {
+      "evidence_id": "ev_fund_Apple_ebitda_FY2025",
+      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:ebitda",
+      "source_type": "sec_companyfacts", "period": "FY2025"
+    },
+    {
+      "evidence_id": "ev_fund_Apple_revenue_FY2025",
+      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:revenue",
+      "source_type": "sec_companyfacts", "period": "FY2025"
+    }
+  ],
   "verification": "verified",
-  "verify_reason": "Metric value and inputs bound to evidence containing those numbers."
+  "verify_reason": "Metric/period/unit-bound evidence (formula_inputs_bound); formula_inputs={'ebitda': 'ev_fund_Apple_ebitda_FY2025', 'revenue': 'ev_fund_Apple_revenue_FY2025'}"
 }
 ```
 
+`ebitda_margin` is a formula claim: it must bind **both** `ebitda` and
+`revenue` fundamentals evidence (`FORMULA_INPUTS` in `claims.py`), not a single
+`ev_fund_{company}_{period}` id.
+
 With no AST-computable fundamentals, the same pipeline emits a data-limitation
-claim instead of a ratio:
+claim instead of a ratio (full shape:
+[docs/examples/fail_closed_data_limitation_claim.json](docs/examples/fail_closed_data_limitation_claim.json)):
 
 ```json
 {
   "claim_id": "cl_risk_OpenAI_supply",
+  "entity": "OpenAI",
   "claim_type": "risk_conclusion",
   "statement": "OpenAI data-limitation risk is elevated: no AST-computable fundamentals (structured_source=none).",
-  "evidence_refs": [{ "citation": "lumenfin:data_gap:OpenAI:none", "source_type": "data_gap" }],
+  "value": "elevated",
+  "metric_name": "data_limitation_risk",
+  "evidence_refs": [{
+    "evidence_id": "ev_gap_OpenAI",
+    "citation": "lumenfin:data_gap:OpenAI:none",
+    "source_type": "data_gap"
+  }],
   "verification": "verified",
   "verify_reason": "Fail-closed data-limitation risk bound to structured_source=none provenance."
 }
@@ -138,8 +157,10 @@ flowchart TD
     CR -->|passed or max iterations reached| CB
 
     CB --> SYN["Verified-only Synthesizer"]
-    SYN --> FR["FinRun Export"]
-    FR --> FAB["Independent FinAgentBench Gate"]
+    SYN --> GEND(["LangGraph END"])
+
+    GEND -. "export_finrun_state()" .-> FR[["FinRun artifact"]]
+    FR -. "separate repository / CI gate" .-> FAB[["FinAgentBench"]]
 ```
 
 | Phase | Nodes | Responsibility |
@@ -148,7 +169,8 @@ flowchart TD
 | Acquire | `retrieval`, `appendix_replan` | Document/provider grounding and supplementary evidence |
 | Analyze | `quant`, `psychologist` | AST-safe financial calculations and management-sentiment analysis |
 | Validate and repair | `critic`, `repair`, `claim_binder` | Completeness checks, directed re-run, Claim–Evidence Binding |
-| Publish and evaluate | `synthesizer`, FinRun, FinAgentBench | Verified-only report and independent evaluation |
+| Publish (in-graph) | `synthesizer` → `END` | Verified-only report; LangGraph ends here |
+| Evaluate (out-of-graph) | FinRun export, FinAgentBench | Post-run artifact + independent sibling evaluator |
 
 Routing details and edge conditions: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md).
 
@@ -233,7 +255,7 @@ as proof of absolute world-truth.
 |---------|--------|
 | Persistence | PostgreSQL-first (SQLite only for `test` / explicit dev opt-in) |
 | Queues | Redis pending → processing → dead-letter; reclaim without manual redelivery |
-| Workers | Index lease + attempt fencing; kill → automatic reclaim |
+| Workers | **Analysis Worker** (`src/lumenfin/worker.py`) consumes the analysis queue; **Index Worker** (`scripts/run_rag_index_worker.py`) consumes the index queue with lease + attempt fencing |
 | Providers | Single retry owner, deadline, Retry-After, jitter, degraded fallback, per-process bulkhead |
 | Tenancy | RAG data-plane tenant-aware logical isolation ([boundary](docs/MULTI_TENANCY_BOUNDARY.md)) |
 
@@ -258,8 +280,9 @@ Do **not** merge these into one “accuracy” number.
 | **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.2` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
 
 Unit-regression counts come from `scripts/run_tests.py` (unittest discovery) at
-the frozen release commit `d075b685` (`v0.1.0-rc.2`), and still hold on current
-`main`, which only adds documentation commits. Invoking `pytest` directly reports
+the frozen release commit `d075b685` (`v0.1.0-rc.2`). Current `main` adds
+documentation, configuration, and evaluator-pin updates; `src/` and `tests/`
+remain unchanged from the frozen release tag. Invoking `pytest` directly reports
 the same suite with subtests counted separately, so the totals differ by runner.
 
 The benchmark row is informational and was produced with the earlier evaluator
@@ -284,24 +307,35 @@ API ↔ PostgreSQL / Milvus are bidirectional request paths, not
 flowchart LR
     CLIENT["Client"] --> API["FastAPI instances"]
 
-    API <--> PG[("PostgreSQL<br/>checkpoints · jobs · RAG documents/chunks")]
-    API --> REDIS[("Redis<br/>pending · processing · DLQ")]
-    REDIS --> WORKER["Index workers"]
+    API <--> PG[("PostgreSQL<br/>checkpoints · jobs · RAG metadata/chunks")]
+    API --> AQ[("Redis analysis queue")]
+    API --> IQ[("Redis index queue")]
 
-    WORKER <--> PG
-    WORKER --> MILVUS[("Milvus Server")]
-    API <--> MILVUS
+    AQ --> AW["Analysis Worker"]
+    IQ --> IW["Index Worker"]
 
-    API --> RES["Provider resilience<br/>deadline · retry · jitter · bulkhead"]
-    WORKER --> RES
-    RES --> EXT["DeepSeek · DashScope · SEC · Yahoo"]
+    AW <--> PG
+    IW <--> PG
+    API <--> MV[("Milvus Server")]
+    AW <--> MV
+    IW --> MV
 
-    WORKER -. "lease + attempt fencing" .-> PG
+    API --> PR["Provider resilience"]
+    AW --> PR
+    IW --> EMB["Embedding provider"]
+    PR --> EXT["DeepSeek · DashScope · SEC · Yahoo"]
+
+    IW -. "lease + attempt fencing" .-> PG
 ```
 
-- Redis queues are **at-least-once**, not exactly-once
-- PostgreSQL lease + attempt fencing recovers killed workers
+- Analysis queue and index queue are **separate** Redis queues (both
+  **at-least-once**, not exactly-once)
+- Analysis Worker: reserve / ACK / retry / DLQ around `run_job()`
+- Index Worker: PostgreSQL lease + attempt fencing recovers killed workers
 - Bulkhead is **per-process**, not a global distributed rate limit
+- Provider HTTP retry ≠ Redis job retry ≠ appendix replan (different layers)
+
+Full topology notes: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md).
 
 ---
 

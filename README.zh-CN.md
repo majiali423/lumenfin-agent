@@ -38,7 +38,7 @@ LumenFin 让这些失败模式变得**可见**，并以 **fail-closed** 方式�
 
 ---
 
-## 30 秒离线演示
+## 一键离线演示
 
 确定性 · 离线 · 无需 API key · 失败时非零退出。
 
@@ -58,7 +58,9 @@ Docker run id）；本入口不会启动 Docker 栈。完整走读：
 
 ### 已验证 claim 长什么样
 
-摘自导出的 FinRun（`schema_version: "1.0"`；工件写入 gitignore 的 `outputs/`）：
+已验证公式 Claim 的精简结构示例（ID 与绑定规则与 `src/lumenfin/claims.py`
+一致；完整示例见
+[docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)）：
 
 ```json
 {
@@ -68,25 +70,44 @@ Docker run id）；本入口不会启动 Docker 栈。完整走读：
   "statement": "Apple EBITDA margin is 34.8% for FY2025.",
   "value": 0.3478, "unit": "ratio", "period": "FY2025",
   "metric_name": "ebitda_margin",
-  "evidence_refs": [{
-    "evidence_id": "ev_fund_Apple_FY2025",
-    "citation": "lumenfin:sec_companyfacts:Apple:FY2025",
-    "source_type": "sec_companyfacts",
-    "period": "FY2025"
-  }],
+  "evidence_refs": [
+    {
+      "evidence_id": "ev_fund_Apple_ebitda_FY2025",
+      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:ebitda",
+      "source_type": "sec_companyfacts", "period": "FY2025"
+    },
+    {
+      "evidence_id": "ev_fund_Apple_revenue_FY2025",
+      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:revenue",
+      "source_type": "sec_companyfacts", "period": "FY2025"
+    }
+  ],
   "verification": "verified",
-  "verify_reason": "Metric value and inputs bound to evidence containing those numbers."
+  "verify_reason": "Metric/period/unit-bound evidence (formula_inputs_bound); formula_inputs={'ebitda': 'ev_fund_Apple_ebitda_FY2025', 'revenue': 'ev_fund_Apple_revenue_FY2025'}"
 }
 ```
 
-当没有 AST 可计算的 fundamentals 时，同一流水线会发出数据受限主张，而不是编造比率：
+`ebitda_margin` 是公式 Claim：必须同时绑定 `ebitda` 与 `revenue` 两条
+fundamentals 证据（见 `claims.py` 的 `FORMULA_INPUTS`），不能写成缺少 metric 的
+`ev_fund_{company}_{period}`。
+
+当没有 AST 可计算的 fundamentals 时，同一流水线会发出数据受限主张，而不是编造比率
+（完整形状见
+[docs/examples/fail_closed_data_limitation_claim.json](docs/examples/fail_closed_data_limitation_claim.json)）：
 
 ```json
 {
   "claim_id": "cl_risk_OpenAI_supply",
+  "entity": "OpenAI",
   "claim_type": "risk_conclusion",
   "statement": "OpenAI data-limitation risk is elevated: no AST-computable fundamentals (structured_source=none).",
-  "evidence_refs": [{ "citation": "lumenfin:data_gap:OpenAI:none", "source_type": "data_gap" }],
+  "value": "elevated",
+  "metric_name": "data_limitation_risk",
+  "evidence_refs": [{
+    "evidence_id": "ev_gap_OpenAI",
+    "citation": "lumenfin:data_gap:OpenAI:none",
+    "source_type": "data_gap"
+  }],
   "verification": "verified",
   "verify_reason": "Fail-closed data-limitation risk bound to structured_source=none provenance."
 }
@@ -132,8 +153,10 @@ flowchart TD
     CR -->|passed or max iterations reached| CB
 
     CB --> SYN["Verified-only Synthesizer"]
-    SYN --> FR["FinRun Export"]
-    FR --> FAB["Independent FinAgentBench Gate"]
+    SYN --> GEND(["LangGraph END"])
+
+    GEND -. "export_finrun_state()" .-> FR[["FinRun artifact"]]
+    FR -. "separate repository / CI gate" .-> FAB[["FinAgentBench"]]
 ```
 
 | Phase | Nodes | Responsibility |
@@ -142,7 +165,8 @@ flowchart TD
 | Acquire | `retrieval`, `appendix_replan` | 文档/provider 落地与补充证据 |
 | Analyze | `quant`, `psychologist` | AST-safe 财务计算与管理层情绪分析 |
 | Validate and repair | `critic`, `repair`, `claim_binder` | 完整性检查、定向重跑、Claim–Evidence Binding |
-| Publish and evaluate | `synthesizer`, FinRun, FinAgentBench | 仅发布已验证报告，并由独立评测器评估 |
+| Publish（图内） | `synthesizer` → `END` | 仅发布已验证报告；LangGraph 在此结束 |
+| Evaluate（图外） | FinRun export、FinAgentBench | 运行后产物 + 独立 sibling 评测器 |
 
 路由细节与边条件见 [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)。
 
@@ -223,7 +247,7 @@ PDF / SEC / Yahoo / market providers
 |---------|--------|
 | Persistence | PostgreSQL-first（SQLite 仅用于 `test` / 显式开发 opt-in） |
 | Queues | Redis pending → processing → dead-letter；可在无需人工重投的情况下回收 |
-| Workers | Index lease + attempt fencing；进程被杀后自动回收 |
+| Workers | **Analysis Worker**（`src/lumenfin/worker.py`）消费 analysis 队列；**Index Worker**（`scripts/run_rag_index_worker.py`）消费 index 队列，并带 lease + attempt fencing |
 | Providers | 单一重试所有者、deadline、Retry-After、jitter、降级兜底、per-process bulkhead |
 | Tenancy | RAG 数据面租户感知的逻辑隔离（[boundary](docs/MULTI_TENANCY_BOUNDARY.md)） |
 
@@ -248,8 +272,9 @@ PDF / SEC / Yahoo / market providers
 | **Evaluator compatibility** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.2` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
 
 单元回归计数来自冻结发布提交 `d075b685`（`v0.1.0-rc.2`）上的
-`scripts/run_tests.py`（unittest discovery），在当前仅含文档提交的 `main` 上仍成立。
-直接调用 `pytest` 会对同一套件按 subtest 单独计数，因此总数因 runner 而异。
+`scripts/run_tests.py`（unittest discovery）。当前 `main` 在此基础上增加了文档、
+配置及评测器 pin 更新；`src/` 与 `tests/` 相对冻结发布 tag 保持不变。直接调用
+`pytest` 会对同一套件按 subtest 单独计数，因此总数因 runner 而异。
 
 Benchmark 行仅供参考，是在更早的评测器 pin 下测得；**不是**已发布
 `v0.1.0-rc.2` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
@@ -272,24 +297,34 @@ API ↔ PostgreSQL / Milvus 是双向请求路径，而不是只存在
 flowchart LR
     CLIENT["Client"] --> API["FastAPI instances"]
 
-    API <--> PG[("PostgreSQL<br/>checkpoints · jobs · RAG documents/chunks")]
-    API --> REDIS[("Redis<br/>pending · processing · DLQ")]
-    REDIS --> WORKER["Index workers"]
+    API <--> PG[("PostgreSQL<br/>checkpoints · jobs · RAG metadata/chunks")]
+    API --> AQ[("Redis analysis queue")]
+    API --> IQ[("Redis index queue")]
 
-    WORKER <--> PG
-    WORKER --> MILVUS[("Milvus Server")]
-    API <--> MILVUS
+    AQ --> AW["Analysis Worker"]
+    IQ --> IW["Index Worker"]
 
-    API --> RES["Provider resilience<br/>deadline · retry · jitter · bulkhead"]
-    WORKER --> RES
-    RES --> EXT["DeepSeek · DashScope · SEC · Yahoo"]
+    AW <--> PG
+    IW <--> PG
+    API <--> MV[("Milvus Server")]
+    AW <--> MV
+    IW --> MV
 
-    WORKER -. "lease + attempt fencing" .-> PG
+    API --> PR["Provider resilience"]
+    AW --> PR
+    IW --> EMB["Embedding provider"]
+    PR --> EXT["DeepSeek · DashScope · SEC · Yahoo"]
+
+    IW -. "lease + attempt fencing" .-> PG
 ```
 
-- Redis 队列是 **at-least-once**，不是 exactly-once
-- PostgreSQL lease + attempt fencing 可恢复被杀 worker
+- Analysis 队列与 Index 队列是**不同的** Redis 队列（均为 **at-least-once**，不是 exactly-once）
+- Analysis Worker：围绕 `run_job()` 的 reserve / ACK / retry / DLQ
+- Index Worker：PostgreSQL lease + attempt fencing 可恢复被杀 worker
 - Bulkhead 是 **per-process**，不是跨进程全局限流
+- Provider HTTP retry ≠ Redis job retry ≠ appendix replan（不同层级）
+
+完整拓扑说明见 [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)。
 
 ---
 
