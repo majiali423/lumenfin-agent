@@ -10,7 +10,7 @@ on:
       finagentbench_ref:
         description: FinAgentBench release tag or commit SHA
         required: false
-        default: v0.1.0-rc.2
+        default: v0.1.0-rc.3
 
 jobs:
   test:
@@ -27,7 +27,7 @@ jobs:
       MAS_RAG_DEGRADE_ON_VECTOR_ERROR: "true"
       MAS_RAG_SANITIZE_HITS: "true"
       MAS_REDIS_URL: ""
-      FINAGENTBENCH_REF: ${{ github.event.inputs.finagentbench_ref || 'v0.1.0-rc.2' }}
+      FINAGENTBENCH_REF: ${{ github.event.inputs.finagentbench_ref || 'v0.1.0-rc.3' }}
       FINAGENTBENCH_PROFILE: ci
       LUMENFIN_ROOT: ${{ github.workspace }}/lumenfin-agent
       FINAGENTBENCH_DIR: ${{ github.workspace }}/finagentbench-demo

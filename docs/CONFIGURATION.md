@@ -90,7 +90,7 @@ down to Milvus metadata (see
 |----------|---------|---------|
 | `FINAGENTBENCH_DIR` | sibling `finagentbench-demo` | Local repository discovery |
 | `LUMENFIN_ROOT` | sibling `lumenfin-agent` | Benchmark-side discovery |
-| `FINAGENTBENCH_REF` | `v0.1.0-rc.2` | Released benchmark tag/SHA |
+| `FINAGENTBENCH_REF` | `v0.1.0-rc.3` | Released benchmark tag/SHA |
 | `FINAGENTBENCH_PROFILE` | `ci` | Deterministic benchmark profile |
 
 The GitHub workflow permits manual `FINAGENTBENCH_REF` override and records the

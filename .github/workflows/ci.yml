@@ -69,7 +69,7 @@ jobs:
       MAS_REDIS_URL: ""
       DEEPSEEK_API_KEY: ""
       DASHSCOPE_API_KEY: ""
-      FINAGENTBENCH_REF: v0.1.0-rc.2
+      FINAGENTBENCH_REF: v0.1.0-rc.3
       FINAGENTBENCH_PROFILE: ci
       LUMENFIN_ROOT: ${{ github.workspace }}/lumenfin-agent
       FINAGENTBENCH_DIR: ${{ github.workspace }}/finagentbench-demo

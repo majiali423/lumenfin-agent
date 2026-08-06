@@ -13,7 +13,7 @@ Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
 Release candidate **`0.1.0rc2`** — tag `v0.1.0-rc.2`（`d075b685`）· FinRun
-schema `1.0` · FinAgentBench 评测器 pin **`v0.1.0-rc.2`** · **作品集发布候选**，
+schema `1.0` · FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · **作品集发布候选**，
 不是“无限制生产就绪”认证
 （[局限说明](docs/PRODUCTION_LIMITATIONS.md)）
 
@@ -269,16 +269,16 @@ PDF / SEC / Yahoo / market providers
 | Provider unexpected failures | Scenario G | **0** |
 | **Benchmark reliability** | FinAgentBench 完成案例均分 | **92.97**（informational；在评测器 pin `v0.1.0-rc.1` 下测得） |
 | Core mutation detection | 错误实体 / 数值 / 引用 / 风险 | **4/4** |
-| **Evaluator compatibility** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.2` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
+| **Evaluator compatibility** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.3` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
 
 单元回归计数来自冻结发布提交 `d075b685`（`v0.1.0-rc.2`）上的
-`scripts/run_tests.py`（unittest discovery）。当前 `main` 在此基础上增加了文档、
-配置及评测器 pin 更新；`src/` 与 `tests/` 相对冻结发布 tag 保持不变。直接调用
-`pytest` 会对同一套件按 subtest 单独计数，因此总数因 runner 而异。
+`scripts/run_tests.py`（unittest discovery）。当前分支可能在此基础上增加
+worker/CI 加固与评测器 pin 更新。直接调用 `pytest` 会对同一套件按 subtest
+单独计数，因此总数因 runner 而异。
 
 Benchmark 行仅供参考，是在更早的评测器 pin 下测得；**不是**已发布
-`v0.1.0-rc.2` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
-FinAgentBench `v0.1.0-rc.2` 接受并回放。
+`v0.1.0-rc.3` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
+FinAgentBench `v0.1.0-rc.3` 接受并回放。
 
 证据：[PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
@@ -375,11 +375,11 @@ Live provider 需要把密钥放进 `.env`（切勿提交）。配置说明：
 ### 独立评测
 
 评测器位于独立仓库，且不会 import LumenFin 的 app 层。可从 FinAgentBench 侧
-对照已发布 tag **`v0.1.0-rc.2`** 复现兼容性门禁
+对照已发布 tag **`v0.1.0-rc.3`** 复现兼容性门禁
 （[majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)）：
 
 ```powershell
-git clone --branch v0.1.0-rc.2 https://github.com/majiali423/finagentbench-demo.git
+git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
 cd finagentbench-demo
 python -m pip install -e .
 $env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
