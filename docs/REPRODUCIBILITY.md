@@ -66,12 +66,34 @@ failures**. They must not be recorded as Agent-quality passes.
 
 ```bash
 cd lumenfin-agent
-docker build -t lumenfin:0.1.0rc1 .
+docker build -t lumenfin:0.1.0rc2 .
 ```
 
-The Dockerfile installs `requirements-lock.txt`. Local build verification still
-depends on Docker being available; CI and local Python validation do not prove
-container runtime health by themselves.
+When the default PyPI route is slow, select a trusted mirror for that build
+without changing the project default:
+
+```bash
+docker build \
+  --build-arg PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+  -t lumenfin:0.1.0rc2 .
+```
+
+Do not include credentials in `PIP_INDEX_URL`, because Docker build arguments
+can appear in image build metadata.
+
+The Dockerfile installs `requirements-lock.txt` and the current project package.
+Application processes run as the unprivileged `lumenfin` user with fixed
+UID/GID `10001`. On native Linux, prepare the bind-mounted write directories
+before starting Compose:
+
+```bash
+mkdir -p outputs uploads
+sudo chown -R 10001:10001 outputs uploads
+```
+
+Docker Desktop handles these bind mounts without the Linux ownership step.
+Local build verification still depends on Docker being available; CI and local
+Python validation do not prove container runtime health by themselves.
 
 ## Release order
 

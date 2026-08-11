@@ -14,7 +14,7 @@ from .config import AppConfig
 from .agents import AgentRuntime
 from .planning import build_query_plan
 from .skills import get_skill_specs
-from .knowledge_store import InMemoryKnowledgeStore, Neo4jKnowledgeStore
+from .knowledge_store import InMemoryKnowledgeStore
 from .llm import BaseLLMClient, build_llm_client
 from .market_data import MarketDataClient
 from .memory import ReasoningMemory, SessionMemory
@@ -135,7 +135,7 @@ class LumenFinAgentSystem:
     ) -> None:
         self.app_config = app_config or AppConfig.from_env()
         self.session_memory = SessionMemory()
-        self.knowledge_memory = self._build_knowledge_store()
+        self.knowledge_memory = InMemoryKnowledgeStore()
         self.reasoning_memory = ReasoningMemory()
         self.llm_client = llm_client or build_llm_client(
             self.app_config.llm,
@@ -180,18 +180,6 @@ class LumenFinAgentSystem:
         )
         self.checkpointer = InMemorySaver()
         self.graph = self._build_graph()
-
-    def _build_knowledge_store(self):
-        if self.app_config.neo4j_uri and self.app_config.neo4j_username and self.app_config.neo4j_password:
-            try:
-                return Neo4jKnowledgeStore(
-                    uri=self.app_config.neo4j_uri,
-                    username=self.app_config.neo4j_username,
-                    password=self.app_config.neo4j_password,
-                )
-            except Exception:
-                return InMemoryKnowledgeStore()
-        return InMemoryKnowledgeStore()
 
     def _build_graph(self):
         workflow = StateGraph(FinanceState)

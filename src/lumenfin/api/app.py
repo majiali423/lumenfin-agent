@@ -311,7 +311,6 @@ def create_app(
             "deepseek_enabled": bool(app_config.llm.api_key),
             "api_key_enabled": bool(app_config.api_key),
             "redis_enabled": bool(app_config.redis_url),
-            "neo4j_enabled": bool(app_config.neo4j_uri),
             "rag_enabled": app_config.rag_enabled,
             "rag_index_mode": app_config.rag_index_mode,
             "rag_tenant_id": app_config.rag_tenant_id,
@@ -632,6 +631,3 @@ def create_app(
         return [JobResponse(**job) for job in service.list_jobs(limit=limit)]
 
     return app
-
-
-app = create_app()

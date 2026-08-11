@@ -120,8 +120,6 @@ milvus-lite==3.1.0
     # via lumenfin-agent (pyproject.toml)
 multitasking==0.0.13
     # via yfinance
-neo4j==6.2.0
-    # via lumenfin-agent (pyproject.toml)
 networkx==3.6.1
     # via lumenfin-agent (pyproject.toml)
 numpy==2.5.1
@@ -200,7 +198,6 @@ python-multipart==0.0.32
     #   mcp
 pytz==2026.2
     # via
-    #   neo4j
     #   yfinance
 pywin32==312 ; sys_platform == "win32"
     # via mcp

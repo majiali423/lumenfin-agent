@@ -77,9 +77,6 @@ class AppConfig:
     redis_job_max_attempts: int
     redis_reclaim_idle_seconds: int
     redis_retry_backoff_seconds: float
-    neo4j_uri: str | None
-    neo4j_username: str | None
-    neo4j_password: str | None
     market_data_provider: str
     market_data_fallback: str
     market_cache_ttl_seconds: int
@@ -176,9 +173,6 @@ class AppConfig:
             redis_job_max_attempts=_positive_int_env("MAS_REDIS_JOB_MAX_ATTEMPTS", 3),
             redis_reclaim_idle_seconds=_positive_int_env("MAS_REDIS_RECLAIM_IDLE_SECONDS", 10),
             redis_retry_backoff_seconds=float(os.getenv("MAS_REDIS_RETRY_BACKOFF_SECONDS", "1")),
-            neo4j_uri=os.getenv("MAS_NEO4J_URI"),
-            neo4j_username=os.getenv("MAS_NEO4J_USERNAME"),
-            neo4j_password=os.getenv("MAS_NEO4J_PASSWORD"),
             market_data_provider=os.getenv("MAS_MARKET_DATA_PROVIDER", "yahoo"),
             market_data_fallback=os.getenv("MAS_MARKET_DATA_FALLBACK", "yahoo"),
             market_cache_ttl_seconds=int(os.getenv("MAS_MARKET_CACHE_TTL_SECONDS", "60")),

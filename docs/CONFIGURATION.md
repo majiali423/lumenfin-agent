@@ -45,7 +45,6 @@ fall back to demo data.
 | `MAS_REDIS_JOB_MAX_ATTEMPTS` | `3` | Max deliveries before dead-letter |
 | `MAS_REDIS_RECLAIM_IDLE_SECONDS` | `10` | Stale processing reclaim threshold |
 | `MAS_REDIS_RETRY_BACKOFF_SECONDS` | `1` | Delay before requeue poll continues |
-| `MAS_NEO4J_URI` | empty | Optional knowledge store |
 | `MAS_OUTPUT_DIR` | `outputs` | Generated artifacts; ignored |
 | `MAS_UPLOAD_DIR` | `uploads` | Local uploads; ignored |
 
@@ -76,6 +75,7 @@ dev opt-in only; it is not a distributed strongly consistent checkpoint service.
 | `MAS_EMBEDDING_PROVIDER` | `deterministic` | Example live profile uses DashScope |
 | `MAS_EMBEDDING_DIMENSION` | `384` | Must match provider/database |
 | `MAS_RAG_REQUIRE_READY` | `false` | Fail when referenced documents are not ready |
+| `MAS_RAG_INDEX_LEASE_SECONDS` | `300` | Lease before abandoned index work can be reclaimed |
 
 Milvus Lite is single-machine, single-writer infrastructure for local/dev runs.
 Do not share one Lite file among independent API/CLI/worker processes. Validated
@@ -83,6 +83,12 @@ multi-process runs (Phase 3.2B / 3.3A) use **Milvus Server** over the Compose
 network with `MAS_MILVUS_URI=http://milvus:19530`; tenant filtering is pushed
 down to Milvus metadata (see
 [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md)).
+
+The production Compose profile fixes the embedding provider to DashScope
+`text-embedding-v4` with 1024-dimensional vectors. API, analysis worker and
+index worker all connect to the same Milvus Server and use the same collection.
+Changing the embedding model or dimension requires a new collection or a full
+re-index; an existing collection must not be reused with a different dimension.
 
 ## Cross-repository release gate
 
@@ -100,17 +106,25 @@ resolved commit SHA. Normal push/PR validation uses the pinned release tag.
 
 `docker-compose.yml` forces `APP_ENV=production` and `DATA_MODE=live`. A
 `migrator` service applies PostgreSQL migrations and must complete successfully
-before the API or analysis worker start. Compose configuration fails before
-startup unless these operator-owned values are set:
+before the API, analysis worker or RAG index worker start. The stack includes
+Milvus Server with internal etcd and MinIO services; uploaded documents placed
+on the Redis index queue are consumed by `lumenfin-index-worker`.
+
+Compose configuration fails before startup unless these operator-owned values
+are set:
 
 - `MAS_API_KEY`
 - `DEEPSEEK_API_KEY`
+- `DASHSCOPE_API_KEY`
 - `SEC_USER_AGENT`
 - `POSTGRES_PASSWORD`
-- `NEO4J_PASSWORD`
+- `MINIO_ROOT_USER`
+- `MINIO_ROOT_PASSWORD`
 
-Postgres, Redis and Neo4j are available only on the internal Compose network by
-default; only the LumenFin API port is published.
+Postgres, Redis, etcd, MinIO and Milvus are available only on the
+internal Compose network by default; only the LumenFin API port is published.
+Milvus metadata, object data and vector state use separate named Docker volumes,
+so rebuilding an application container does not discard the indexed corpus.
 
 ## Offline versus live
 

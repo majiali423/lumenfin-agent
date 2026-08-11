@@ -32,7 +32,6 @@ Installed metadata was checked for LumenFin's direct runtime dependencies.
 | LangGraph, FastAPI, SQLAlchemy, redis-py, OpenPyXL, Pydantic, MCP SDK | MIT | Compatible with MIT/Apache distribution with notices |
 | NetworkX, Uvicorn, HTTPX, python-dotenv | BSD-3-Clause | Preserve notices |
 | RQ | BSD-2-Clause | Preserve notice |
-| Neo4j Python driver | Apache-2.0 AND Python-2.0 | Preserve applicable notices |
 | python-multipart, milvus-lite | Apache-2.0 | Preserve license/notice |
 | yfinance | Apache metadata | Code license is permissive, but Yahoo data/service terms remain separate |
 | psycopg / psycopg-binary | LGPL-3.0-only | Dynamic/library use is generally compatible, but redistribution obligations and notices must be observed |

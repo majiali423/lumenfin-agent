@@ -8,6 +8,8 @@ test_artifacts
 data
 .env
 .venv
+*.egg-info
+**/*.egg-info
 .cursor
 docs/DEBUG_LOG.md
 *.db

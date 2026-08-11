@@ -26,10 +26,10 @@ npipe:////./pipe/dockerDesktopLinuxEngine
 | Check | Result | Evidence |
 |-------|:------:|----------|
 | `docker compose config --quiet` with validation-only placeholders | PASS | Compose parses without warning |
-| Missing production values fail during Compose interpolation | PASS by configuration | `:?Set ...` required for API/LLM/SEC/Postgres/Neo4j values |
+| Missing production values fail during Compose interpolation | PASS by configuration | `:?Set ...` required for API/LLM/embedding/SEC/Postgres/MinIO values |
 | Compose forces `APP_ENV=production` | PASS | `docker-compose.yml` |
 | Compose forces `DATA_MODE=live` | PASS | `docker-compose.yml` |
-| Postgres/Redis/Neo4j host ports not published | PASS | Internal Compose network only |
+| Postgres/Redis/etcd/MinIO/Milvus host ports not published | PASS | Internal Compose network only |
 | `.env` excluded from image context | PASS by static inspection | `.dockerignore` |
 | local DB/Milvus files excluded | PASS by static inspection | `*.db`, `outputs`, `test_artifacts` ignored |
 | Production API without `MAS_API_KEY` fails fast | PASS | production guard regression test |

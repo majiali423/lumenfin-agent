@@ -118,7 +118,7 @@ SQLite keeps local development simple. PostgreSQL is available for a production-
 local demo -> SQLite
 service deployment -> PostgreSQL
 async jobs -> Redis/RQ
-graph memory extension -> Neo4j
+document-vector retrieval -> Milvus
 ```
 
 The project does not require every infrastructure component to run for the core workflow to be useful.

@@ -22,7 +22,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-# Must precede lumenfin imports (package __init__ builds the FastAPI app).
+# Keep worker tests isolated from developer or production environment settings.
 os.environ.setdefault("APP_ENV", "test")
 
 from lumenfin.llm import LocalFallbackLLMClient

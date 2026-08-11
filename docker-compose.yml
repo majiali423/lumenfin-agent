@@ -1,6 +1,21 @@
-# Production-oriented stack: API + analysis worker + Postgres/Redis/Neo4j.
+# Production-oriented stack: API + analysis/index workers +
+# Postgres/Redis/Milvus.
 # MCP servers are intentionally NOT included — optional demo side channel only
 # (see docs/MCP.md). Production evidence RAG is in-process LangGraph Retrieval.
+
+x-rag-env: &rag-env
+  MAS_RAG_ENABLED: "true"
+  MAS_RAG_INDEX_MODE: async_on_upload
+  MAS_RAG_INDEX_LEASE_SECONDS: ${MAS_RAG_INDEX_LEASE_SECONDS:-300}
+  MAS_RAG_TENANT_ID: ${MAS_RAG_TENANT_ID:-default}
+  MAS_MILVUS_URI: http://milvus:19530
+  MAS_MILVUS_COLLECTION: ${MAS_MILVUS_COLLECTION:-lumenfin_chunks}
+  MAS_MILVUS_ISOLATE: "false"
+  MAS_EMBEDDING_PROVIDER: dashscope
+  MAS_EMBEDDING_DIMENSION: ${MAS_EMBEDDING_DIMENSION:-1024}
+  DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?Set DASHSCOPE_API_KEY}
+  DASHSCOPE_EMBEDDING_MODEL: ${DASHSCOPE_EMBEDDING_MODEL:-text-embedding-v4}
+  DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
 
 services:
   postgres:
@@ -19,15 +34,67 @@ services:
 
   redis:
     image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
-  neo4j:
-    image: neo4j:5
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.16
     environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >
+      etcd
+      -advertise-client-urls=http://127.0.0.1:2379
+      -listen-client-urls=http://0.0.0.0:2379
+      --data-dir=/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
     volumes:
-      - ./data/neo4j:/data
+      - milvus_etcd_data:/etcd
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - milvus_minio_data:/minio_data
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    volumes:
+      - milvus_vector_data:/var/lib/milvus
 
   migrator:
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
     build: .
     environment:
       APP_ENV: production
@@ -42,17 +109,18 @@ services:
     restart: "no"
 
   lumenfin-api:
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
     build: .
     ports:
       - "8000:8000"
     environment:
+      <<: *rag-env
       APP_ENV: production
       DATA_MODE: live
       MAS_HOST: 0.0.0.0
       MAS_PORT: 8000
       MAS_OUTPUT_DIR: /app/outputs
       MAS_UPLOAD_DIR: /app/uploads
-      MAS_DB_PATH: /app/data/lumenfin.db
       MAS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mas_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lumenfin}
       MAS_REDIS_URL: redis://redis:6379/0
       MAS_REDIS_QUEUE_NAME: finance-analysis
@@ -60,9 +128,6 @@ services:
       MAS_REDIS_JOB_MAX_ATTEMPTS: ${MAS_REDIS_JOB_MAX_ATTEMPTS:-3}
       MAS_REDIS_RECLAIM_IDLE_SECONDS: ${MAS_REDIS_RECLAIM_IDLE_SECONDS:-30}
       MAS_REDIS_RETRY_BACKOFF_SECONDS: ${MAS_REDIS_RETRY_BACKOFF_SECONDS:-1}
-      MAS_NEO4J_URI: bolt://neo4j:7687
-      MAS_NEO4J_USERNAME: neo4j
-      MAS_NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
       MAS_MARKET_DATA_PROVIDER: yahoo
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
@@ -71,7 +136,6 @@ services:
       MAS_API_KEY: ${MAS_API_KEY:?Set MAS_API_KEY}
     volumes:
       - ./outputs:/app/outputs
-      - ./data:/app/data
       - ./uploads:/app/uploads
     depends_on:
       migrator:
@@ -79,19 +143,26 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
-      neo4j:
-        condition: service_started
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   lumenfin-worker:
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
     build: .
     command: ["python", "start_worker.py"]
     environment:
+      <<: *rag-env
       APP_ENV: production
       DATA_MODE: live
       MAS_OUTPUT_DIR: /app/outputs
       MAS_UPLOAD_DIR: /app/uploads
-      MAS_DB_PATH: /app/data/lumenfin.db
       MAS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mas_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lumenfin}
       MAS_REDIS_URL: redis://redis:6379/0
       MAS_REDIS_QUEUE_NAME: finance-analysis
@@ -99,9 +170,6 @@ services:
       MAS_REDIS_JOB_MAX_ATTEMPTS: ${MAS_REDIS_JOB_MAX_ATTEMPTS:-3}
       MAS_REDIS_RECLAIM_IDLE_SECONDS: ${MAS_REDIS_RECLAIM_IDLE_SECONDS:-30}
       MAS_REDIS_RETRY_BACKOFF_SECONDS: ${MAS_REDIS_RETRY_BACKOFF_SECONDS:-1}
-      MAS_NEO4J_URI: bolt://neo4j:7687
-      MAS_NEO4J_USERNAME: neo4j
-      MAS_NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}
       MAS_MARKET_DATA_PROVIDER: yahoo
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set DEEPSEEK_API_KEY}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
@@ -109,7 +177,6 @@ services:
       SEC_USER_AGENT: ${SEC_USER_AGENT:?Set SEC_USER_AGENT}
     volumes:
       - ./outputs:/app/outputs
-      - ./data:/app/data
       - ./uploads:/app/uploads
     depends_on:
       migrator:
@@ -117,6 +184,41 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
-      neo4j:
-        condition: service_started
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+
+  lumenfin-index-worker:
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
+    build: .
+    command: ["python", "scripts/run_rag_index_worker.py"]
+    environment:
+      <<: *rag-env
+      APP_ENV: production
+      DATA_MODE: live
+      MAS_WORKER_ID: index-worker
+      MAS_OUTPUT_DIR: /app/outputs
+      MAS_UPLOAD_DIR: /app/uploads
+      MAS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-mas_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-lumenfin}
+      MAS_REDIS_URL: redis://redis:6379/0
+      MAS_REDIS_INDEX_QUEUE_NAME: rag-document-index
+      MAS_REDIS_JOB_MAX_ATTEMPTS: ${MAS_REDIS_JOB_MAX_ATTEMPTS:-3}
+      MAS_REDIS_RECLAIM_IDLE_SECONDS: ${MAS_REDIS_RECLAIM_IDLE_SECONDS:-30}
+      MAS_REDIS_RETRY_BACKOFF_SECONDS: ${MAS_REDIS_RETRY_BACKOFF_SECONDS:-1}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./uploads:/app/uploads
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+
+volumes:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_vector_data:
