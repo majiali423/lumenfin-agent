@@ -28,6 +28,11 @@ x-app-env: &app-env
   MAS_EMBEDDING_PROVIDER: deterministic
   MAS_EMBEDDING_DIMENSION: "384"
   MAS_RAG_ENABLED: "true"
+  MAS_RAG_BM25_ENABLED: "true"
+  MAS_RAG_BM25_RRF_WEIGHT: "1.1"
+  MAS_RAG_RERANK_ENABLED: "true"
+  MAS_RAG_RERANK_CANDIDATES: "20"
+  MAS_RAG_RERANK_PROVIDER: lexical
   MAS_RAG_INDEX_MODE: async_on_upload
   MAS_RAG_INDEX_LEASE_SECONDS: ${MAS_RAG_INDEX_LEASE_SECONDS:-5}
   MAS_RAG_TENANT_ID: default
@@ -87,19 +92,19 @@ services:
       timeout: 5s
       retries: 20
     volumes:
-      - it_etcd_data:/etcd
+      - it_v3_etcd_data:/etcd
 
   minio:
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     command: minio server /minio_data --console-address ":9001"
     volumes:
-      - it_minio_data:/minio_data
+      - it_v3_minio_data:/minio_data
 
   milvus:
-    image: milvusdb/milvus:v2.4.15
+    image: milvusdb/milvus:v3.0.0
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
@@ -120,7 +125,7 @@ services:
       retries: 30
       start_period: 60s
     volumes:
-      - it_milvus_data:/var/lib/milvus
+      - it_v3_milvus_data:/var/lib/milvus
 
   migrator:
     build: .
@@ -227,8 +232,9 @@ services:
 
 volumes:
   it_postgres_data:
-  it_etcd_data:
-  it_minio_data:
-  it_milvus_data:
+  # Keep all Milvus 3 infrastructure data separate from historical 2.4 test volumes.
+  it_v3_etcd_data:
+  it_v3_minio_data:
+  it_v3_milvus_data:
   it_uploads:
   it_outputs:

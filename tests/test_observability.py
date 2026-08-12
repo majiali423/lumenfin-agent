@@ -32,6 +32,18 @@ class ObservabilityTestCase(unittest.TestCase):
         redacted = redact_secrets(UrlLike())
         self.assertEqual(redacted, "https://example.test/query?token=[REDACTED]")
 
+    def test_redacts_database_passwords_and_named_secret_fields(self) -> None:
+        raw = (
+            "database=postgresql+psycopg://user:db-secret@postgres:5432/lumenfin "
+            "password=another-secret"
+        )
+
+        redacted = str(redact_secrets(raw))
+
+        self.assertNotIn("db-secret", redacted)
+        self.assertNotIn("another-secret", redacted)
+        self.assertIn("[REDACTED]", redacted)
+
     def test_audit_log_contains_span_metrics(self) -> None:
         config = build_test_config(ROOT / "test_artifacts" / f"obs-{uuid4().hex[:8]}")
         app = LumenFinAgentSystem(

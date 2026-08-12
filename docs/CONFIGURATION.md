@@ -76,6 +76,14 @@ dev opt-in only; it is not a distributed strongly consistent checkpoint service.
 | `MAS_EMBEDDING_DIMENSION` | `384` | Must match provider/database |
 | `MAS_RAG_REQUIRE_READY` | `false` | Fail when referenced documents are not ready |
 | `MAS_RAG_INDEX_LEASE_SECONDS` | `300` | Lease before abandoned index work can be reclaimed |
+| `MAS_RAG_RERANK_ENABLED` | `true` | Rerank retrieved candidates before final top-K |
+| `MAS_RAG_RERANK_CANDIDATES` | `20` | Candidate count supplied to the reranker |
+| `MAS_RAG_RERANK_PROVIDER` | `lexical` | Safe code/example default; the approved local production profile uses `qwen3` |
+| `DASHSCOPE_RERANK_MODEL` | `qwen3-rerank` | Remote rerank model when provider is `qwen3` |
+| `DASHSCOPE_RERANK_BASE_URL` | empty | Workspace compatible API base URL required by Qwen3 |
+| `MAS_RAG_RERANK_TIMEOUT_SECONDS` | `12` | Qwen3 per-attempt timeout |
+| `MAS_RAG_RERANK_MAX_ATTEMPTS` | `2` | Total Qwen3 attempts, including the first |
+| `MAS_RAG_RERANK_MAX_INFLIGHT_PER_PROCESS` | `2` | Qwen3 concurrency bulkhead per process |
 
 Milvus Lite is single-machine, single-writer infrastructure for local/dev runs.
 Do not share one Lite file among independent API/CLI/worker processes. Validated
@@ -86,9 +94,17 @@ down to Milvus metadata (see
 
 The production Compose profile fixes the embedding provider to DashScope
 `text-embedding-v4` with 1024-dimensional vectors. API, analysis worker and
-index worker all connect to the same Milvus Server and use the same collection.
-Changing the embedding model or dimension requires a new collection or a full
-re-index; an existing collection must not be reused with a different dimension.
+index worker all connect to the same Milvus Server and use
+`lumenfin_chunks_v4_bm25`, whose schema combines dense vectors with a native
+Milvus BM25 sparse function. Changing the embedding model, dimension, analyzer,
+or BM25 schema requires a versioned collection or full re-index; an existing
+collection must not be reused with an incompatible schema.
+
+The optional Qwen3 reranker sends the query and candidate document text to
+DashScope. Its synthetic live preflight and local deployment cutover were
+approved and passed on 2026-08-12; the code and example defaults remain
+`lexical` so a fresh checkout does not send document text externally without
+an operator decision. See [QWEN3_RERANK.md](QWEN3_RERANK.md).
 
 ## Cross-repository release gate
 
@@ -121,10 +137,17 @@ are set:
 - `MINIO_ROOT_USER`
 - `MINIO_ROOT_PASSWORD`
 
-Postgres, Redis, etcd, MinIO and Milvus are available only on the
-internal Compose network by default; only the LumenFin API port is published.
-Milvus metadata, object data and vector state use separate named Docker volumes,
-so rebuilding an application container does not discard the indexed corpus.
+Postgres, Redis, etcd, MinIO and Milvus are available only on the internal
+Compose network by default; only the LumenFin API port is published. Redis uses
+AOF with a named volume. Milvus metadata, object data and vector state use
+separate named Docker volumes, so rebuilding an application container does not
+discard queue or indexed state.
+
+The API Compose healthcheck uses `/ready`, which requires PostgreSQL, Redis, and
+the configured Milvus collection to be reachable. MinIO has its own live
+healthcheck and Milvus waits for it before startup. See
+[PRODUCTION_BACKUP_RESTORE.md](PRODUCTION_BACKUP_RESTORE.md) for the verified
+backup and restore-rehearsal boundary.
 
 ## Offline versus live
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -15,6 +17,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.config import AppConfig
+from lumenfin.llm import shutdown_llm_http_clients
+from lumenfin.provider_resilience import close_shared_http_clients
+from lumenfin.provider_resilience import redact_provider_message
 from lumenfin.queueing import RedisQueueManager
 from lumenfin.service import LumenFinAnalysisService
 from lumenfin.stdio import configure_stdio_utf8
@@ -62,10 +67,21 @@ def main() -> int:
 
     worker_id = (os.getenv("MAS_WORKER_ID") or f"index-{os.getpid()}").strip()
     queue = _queue_from_config(config)
+    stop_event = threading.Event()
+
+    def _request_stop(signum, _frame) -> None:
+        print(f"Index worker shutdown requested signal={signum}", flush=True)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
     try:
         migrated = queue.migrate_legacy_messages()
     except (ConnectionError, OSError, TimeoutError, RedisError) as exc:
-        print(f"Legacy queue migrate deferred (redis unavailable): {exc}")
+        print(
+            "Legacy queue migrate deferred (redis unavailable): "
+            f"{redact_provider_message(str(exc))}"
+        )
         queue.reset_connection()
         migrated = 0
     if migrated:
@@ -90,10 +106,16 @@ def main() -> int:
         try:
             receipt = service.process_document_index(document_id, tenant_id=tenant_id)
         except Exception as exc:  # noqa: BLE001 - convert to retry/dead-letter
-            result = queue.retry(reserved.message_id, worker_id, f"exception: {exc}")
+            safe_error = redact_provider_message(str(exc))
+            result = queue.retry(
+                reserved.message_id,
+                worker_id,
+                f"exception: {safe_error}",
+            )
             print(
                 f"Retry/DLQ message_id={reserved.message_id} action={result.action} "
-                f"attempt={result.attempt} error={exc}"
+                f"attempt={result.attempt} error_type={type(exc).__name__} "
+                f"error={safe_error}"
             )
             if result.action == "requeued":
                 time.sleep(config.redis_retry_backoff_seconds)
@@ -109,7 +131,9 @@ def main() -> int:
             print(f"ACK message_id={reserved.message_id} ok={acked}")
             return True
 
-        error = str(receipt.get("error") or receipt.get("status") or "index_incomplete")
+        error = redact_provider_message(
+            str(receipt.get("error") or receipt.get("status") or "index_incomplete")
+        )
         result = queue.retry(reserved.message_id, worker_id, error)
         print(
             f"Retry/DLQ message_id={reserved.message_id} action={result.action} "
@@ -121,21 +145,33 @@ def main() -> int:
             time.sleep(config.redis_retry_backoff_seconds)
         return True
 
-    if args.once:
-        handled = _process_one()
-        if not handled:
-            print("No queued job.")
-        return 0
-
-    while True:
-        try:
+    try:
+        if args.once:
             handled = _process_one()
             if not handled:
-                time.sleep(0.1)
-        except (ConnectionError, OSError, TimeoutError, RedisError) as exc:
-            print(f"Worker redis connection error: {exc}")
-            queue.reset_connection()
-            time.sleep(1.0)
+                print("No queued job.")
+            return 0
+
+        while not stop_event.is_set():
+            try:
+                handled = _process_one()
+                if not handled:
+                    stop_event.wait(0.1)
+            except (ConnectionError, OSError, TimeoutError, RedisError) as exc:
+                print(
+                    "Worker redis connection error: "
+                    f"{redact_provider_message(str(exc))}"
+                )
+                queue.reset_connection()
+                stop_event.wait(1.0)
+    finally:
+        rag_store = getattr(service, "_rag_store", None)
+        if rag_store is not None:
+            rag_store.close()
+        shutdown_llm_http_clients()
+        close_shared_http_clients()
+        print("Index worker shutdown complete", flush=True)
+    return 0
 
 
 if __name__ == "__main__":

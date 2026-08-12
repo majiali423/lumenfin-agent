@@ -5,11 +5,25 @@
 
 x-rag-env: &rag-env
   MAS_RAG_ENABLED: "true"
+  # Native BM25 is the production sparse branch after the approved v4 cutover.
+  MAS_RAG_BM25_ENABLED: ${MAS_RAG_BM25_ENABLED:-true}
+  MAS_RAG_BM25_RRF_WEIGHT: ${MAS_RAG_BM25_RRF_WEIGHT:-1.1}
+  # Code default stays lexical; the approved deployment sets qwen3 in .env.
+  MAS_RAG_RERANK_ENABLED: ${MAS_RAG_RERANK_ENABLED:-true}
+  MAS_RAG_RERANK_CANDIDATES: ${MAS_RAG_RERANK_CANDIDATES:-20}
+  MAS_RAG_RERANK_PROVIDER: ${MAS_RAG_RERANK_PROVIDER:-lexical}
+  DASHSCOPE_RERANK_MODEL: ${DASHSCOPE_RERANK_MODEL:-qwen3-rerank}
+  DASHSCOPE_RERANK_BASE_URL: ${DASHSCOPE_RERANK_BASE_URL:-}
+  MAS_RAG_RERANK_TIMEOUT_SECONDS: ${MAS_RAG_RERANK_TIMEOUT_SECONDS:-12}
+  MAS_RAG_RERANK_MAX_ATTEMPTS: ${MAS_RAG_RERANK_MAX_ATTEMPTS:-2}
+  MAS_RAG_RERANK_BACKOFF_SECONDS: ${MAS_RAG_RERANK_BACKOFF_SECONDS:-0.25}
+  MAS_RAG_RERANK_MAX_INFLIGHT_PER_PROCESS: ${MAS_RAG_RERANK_MAX_INFLIGHT_PER_PROCESS:-2}
+  MAS_RAG_RERANK_MAX_DOCUMENT_CHARS: ${MAS_RAG_RERANK_MAX_DOCUMENT_CHARS:-4000}
   MAS_RAG_INDEX_MODE: async_on_upload
   MAS_RAG_INDEX_LEASE_SECONDS: ${MAS_RAG_INDEX_LEASE_SECONDS:-300}
   MAS_RAG_TENANT_ID: ${MAS_RAG_TENANT_ID:-default}
   MAS_MILVUS_URI: http://milvus:19530
-  MAS_MILVUS_COLLECTION: ${MAS_MILVUS_COLLECTION:-lumenfin_chunks}
+  MAS_MILVUS_COLLECTION: ${MAS_MILVUS_COLLECTION:-lumenfin_chunks_v4_bm25}
   MAS_MILVUS_ISOLATE: "false"
   MAS_EMBEDDING_PROVIDER: dashscope
   MAS_EMBEDDING_DIMENSION: ${MAS_EMBEDDING_DIMENSION:-1024}
@@ -19,7 +33,8 @@ x-rag-env: &rag-env
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-lumenfin}
       POSTGRES_USER: ${POSTGRES_USER:-mas_user}
@@ -33,7 +48,11 @@ services:
       retries: 20
 
   redis:
-    image: redis:7
+    image: redis:7@sha256:595cc6f2bb3af6e03347b90deb6123c6aa2c81dea05ce08128de8a174b6ac67b
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -41,7 +60,8 @@ services:
       retries: 20
 
   etcd:
-    image: quay.io/coreos/etcd:v3.5.16
+    image: quay.io/coreos/etcd:v3.5.16@sha256:d967d98a12dc220a1a290794711dba7eba04b8ce465e12b02383d1bfbb33e159
+    restart: unless-stopped
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
@@ -58,19 +78,28 @@ services:
       timeout: 5s
       retries: 20
     volumes:
-      - milvus_etcd_data:/etcd
+      - milvus_v3_etcd_data:/etcd
 
   minio:
-    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
     command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     volumes:
-      - milvus_minio_data:/minio_data
+      - milvus_v3_minio_data:/minio_data
 
   milvus:
-    image: milvusdb/milvus:v2.4.15
+    image: milvusdb/milvus:v3.0.0@sha256:49371c30af46b1013e4d3e0b980e691d81376d69cdbe1b372725baf1d7255862
+    restart: unless-stopped
+    stop_grace_period: 60s
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
@@ -83,7 +112,7 @@ services:
       etcd:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 15s
@@ -91,10 +120,11 @@ services:
       retries: 30
       start_period: 60s
     volumes:
-      - milvus_vector_data:/var/lib/milvus
+      - ./deploy/milvus-user.yaml:/milvus/configs/user.yaml:ro
+      - milvus_v3_vector_data:/var/lib/milvus
 
   migrator:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc3}
     build: .
     environment:
       APP_ENV: production
@@ -109,8 +139,15 @@ services:
     restart: "no"
 
   lumenfin-api:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc3}
     build: .
+    restart: unless-stopped
+    # Analysis deadline is 120s; retain a buffer for request cleanup.
+    stop_grace_period: 150s
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
     ports:
       - "8000:8000"
     environment:
@@ -147,15 +184,22 @@ services:
       milvus:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 20s
 
   lumenfin-worker:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc3}
     build: .
+    restart: unless-stopped
+    # Analysis deadline is 120s; retain a buffer for reservation cleanup.
+    stop_grace_period: 150s
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
     command: ["python", "start_worker.py"]
     environment:
       <<: *rag-env
@@ -189,8 +233,15 @@ services:
         condition: service_healthy
 
   lumenfin-index-worker:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc2}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc3}
     build: .
+    restart: unless-stopped
+    # Index-job deadline is 180s; retain a buffer for lease-safe cleanup.
+    stop_grace_period: 210s
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
     command: ["python", "scripts/run_rag_index_worker.py"]
     environment:
       <<: *rag-env
@@ -219,6 +270,9 @@ services:
         condition: service_healthy
 
 volumes:
-  milvus_etcd_data:
-  milvus_minio_data:
-  milvus_vector_data:
+  redis_data:
+  # Milvus 3 uses fresh volumes: direct reuse of the former 2.4 volumes is not
+  # a validated upgrade path. Docker keeps those old volumes intact for recovery.
+  milvus_v3_etcd_data:
+  milvus_v3_minio_data:
+  milvus_v3_vector_data:

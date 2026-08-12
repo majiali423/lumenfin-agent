@@ -20,6 +20,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+backups/
 
 # Local databases and vector state
 *.db
@@ -30,6 +31,9 @@ build/
 milvus_lite.db
 **/milvus*.db
 data/**
+!data/eval_rag/
+!data/eval_rag/bm25_cases.json
+!data/eval_rag/rerank_cases.json
 !data/.gitkeep
 
 .env

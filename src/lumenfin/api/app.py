@@ -7,15 +7,17 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
+from redis import Redis
+from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import RedirectResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from ..config import AppConfig
 from ..checkpoint_store import CheckpointConflictError
 from ..llm import BaseLLMClient, shutdown_llm_http_clients
 from ..logging_utils import configure_logging, request_logging_middleware
 from ..market_data import MarketDataClient, probe_market_provider
-from ..provider_resilience import close_shared_http_clients
+from ..provider_resilience import close_shared_http_clients, redact_provider_message
 from ..reporting import build_run_manifest, load_run_manifest
 from ..service import LumenFinAnalysisService
 from .auth import build_api_key_dependency
@@ -40,7 +42,7 @@ def _package_version() -> str:
     try:
         return metadata.version("lumenfin-agent")
     except metadata.PackageNotFoundError:
-        return "0.1.0rc2"
+        return "0.1.0rc3"
 
 
 @asynccontextmanager
@@ -132,6 +134,46 @@ def create_app(
             rag_enabled=app_config.rag_enabled,
             pid=os.getpid() if app_config.app_env in {"dev", "test", "integration"} else None,
             worker_id=worker_id if app_config.app_env in {"dev", "test", "integration"} else None,
+        )
+
+    @app.get("/ready")
+    def ready() -> JSONResponse:
+        checks: dict[str, dict[str, object]] = {}
+        try:
+            with service.repository.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            checks["database"] = {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            checks["database"] = {"ok": False, "error_type": type(exc).__name__}
+
+        if app_config.redis_url:
+            client = Redis.from_url(
+                app_config.redis_url,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
+            try:
+                checks["redis"] = {"ok": bool(client.ping())}
+            except Exception as exc:  # noqa: BLE001
+                checks["redis"] = {"ok": False, "error_type": type(exc).__name__}
+            finally:
+                client.close()
+
+        if app_config.rag_enabled:
+            try:
+                rag_store, _ = service._rag_resources()
+                rag_health = rag_store.health() if rag_store is not None else {"ready": False}
+                checks["milvus"] = {
+                    "ok": bool(rag_health.get("ready")),
+                    "collection": str(rag_health.get("collection") or ""),
+                }
+            except Exception as exc:  # noqa: BLE001
+                checks["milvus"] = {"ok": False, "error_type": type(exc).__name__}
+
+        is_ready = bool(checks) and all(bool(item.get("ok")) for item in checks.values())
+        return JSONResponse(
+            status_code=200 if is_ready else 503,
+            content={"status": "ready" if is_ready else "not_ready", "checks": checks},
         )
 
     if app_config.app_env in {"test", "integration", "dev"}:
@@ -303,8 +345,7 @@ def create_app(
         return {
             "output_dir": str(app_config.output_dir),
             "upload_dir": str(app_config.upload_dir),
-            "db_path": str(app_config.db_path),
-            "database_url": app_config.database_url,
+            "database_backend": "sqlite" if app_config.uses_sqlite() else "postgresql",
             "host": app_config.host,
             "port": app_config.port,
             "deepseek_model": app_config.llm.model,
@@ -331,6 +372,26 @@ def create_app(
             "llm_backend": result.get("llm_backend"),
             "clarification_questions": result.get("clarification_questions", []),
         }
+
+    def _public_job(job: dict) -> dict:
+        public = dict(job)
+        result = job.get("result")
+        if isinstance(result, dict):
+            public_result = _compact_state(result)
+            for key in (
+                "final_report",
+                "executive_summary",
+                "compliance_summary",
+                "chart_data",
+            ):
+                if key in result:
+                    public_result[key] = result.get(key)
+            public["result"] = public_result
+        if public.get("error_message"):
+            public["error_message"] = redact_provider_message(
+                str(public["error_message"])
+            )
+        return public
 
     def _to_response(payload: dict, *, include_state: bool = False) -> AnalyzeResponse:
         result = payload["result"]
@@ -621,13 +682,16 @@ def create_app(
         job = service.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found.")
-        return JobResponse(**job)
+        return JobResponse(**_public_job(job))
 
     @app.get("/api/v1/jobs", response_model=list[JobResponse])
     def list_jobs(
         limit: int = Query(default=20, ge=1, le=100),
         _: None = Depends(auth_dependency),
     ) -> list[JobResponse]:
-        return [JobResponse(**job) for job in service.list_jobs(limit=limit)]
+        return [
+            JobResponse(**_public_job(job))
+            for job in service.list_jobs(limit=limit)
+        ]
 
     return app

@@ -27,7 +27,11 @@ from .provider_retry import (
 T = TypeVar("T")
 
 _SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|authorization|bearer|token)\s*[:=]\s*\S+"
+    r"(?i)(api[_-]?key|authorization|bearer|token|password|secret|access[_-]?key)"
+    r"\s*[:=]\s*\S+"
+)
+_CREDENTIAL_URL_RE = re.compile(
+    r"(?i)\b([a-z][a-z0-9+.-]*://[^:/@\s]+:)[^@\s]+(@)"
 )
 
 
@@ -124,6 +128,7 @@ class ProviderCallContext:
 
 def redact_provider_message(message: str, *, limit: int = 300) -> str:
     text = _SECRET_RE.sub(r"\1=[REDACTED]", str(message or ""))
+    text = _CREDENTIAL_URL_RE.sub(r"\1[REDACTED]\2", text)
     text = text.replace("\n", " ").strip()
     if len(text) > limit:
         return text[: limit - 3] + "..."

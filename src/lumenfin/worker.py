@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import os
+import signal
+import threading
 import time
 
 from .config import AppConfig
+from .llm import shutdown_llm_http_clients
+from .provider_resilience import redact_provider_message
+from .provider_resilience import close_shared_http_clients
 from .queueing import RedisQueueManager
 from .service import LumenFinAnalysisService
 from redis.exceptions import RedisError
@@ -65,19 +70,24 @@ def process_reserved_analysis_message(
             service=service,
         )
     except Exception as exc:  # noqa: BLE001 - persist failure then retry/DLQ
+        safe_error = redact_provider_message(str(exc))
         if job_id:
             try:
                 service.repository.update_job_status(
                     job_id,
                     status="failed",
-                    error_message=str(exc),
+                    error_message=safe_error,
                 )
             except Exception as status_exc:  # noqa: BLE001
-                print(f"Failed to persist job failure for {job_id}: {status_exc}")
-        result = queue.retry(reserved.message_id, worker_id, f"exception: {exc}")
+                print(
+                    f"Failed to persist job failure for {job_id}: "
+                    f"{redact_provider_message(str(status_exc))}"
+                )
+        result = queue.retry(reserved.message_id, worker_id, f"exception: {safe_error}")
         print(
             f"Analysis retry/DLQ message_id={reserved.message_id} "
-            f"action={result.action} attempt={result.attempt} error={exc}"
+            f"action={result.action} attempt={result.attempt} "
+            f"error_type={type(exc).__name__} error={safe_error}"
         )
         if result.action == "requeued" and retry_backoff_seconds > 0:
             time.sleep(retry_backoff_seconds)
@@ -95,21 +105,40 @@ def work_forever() -> None:
     queue = _queue_from_config(config)
     queue.migrate_legacy_messages()
     service = LumenFinAnalysisService(config)
-    while True:
-        try:
-            queue.reclaim_stale()
-            reserved = queue.reserve(timeout_seconds=5, worker_id=worker_id)
-        except (ConnectionError, OSError, TimeoutError, RedisError) as exc:
-            print(f"Analysis worker redis connection error: {exc}")
-            queue.reset_connection()
-            time.sleep(1.0)
-            continue
-        if reserved is None:
-            continue
-        process_reserved_analysis_message(
-            queue=queue,
-            service=service,
-            reserved=reserved,
-            worker_id=worker_id,
-            retry_backoff_seconds=config.redis_retry_backoff_seconds,
-        )
+    stop_event = threading.Event()
+
+    def _request_stop(signum, _frame) -> None:
+        print(f"Analysis worker shutdown requested signal={signum}", flush=True)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+    try:
+        while not stop_event.is_set():
+            try:
+                queue.reclaim_stale()
+                reserved = queue.reserve(timeout_seconds=1, worker_id=worker_id)
+            except (ConnectionError, OSError, TimeoutError, RedisError) as exc:
+                print(
+                    "Analysis worker redis connection error: "
+                    f"{redact_provider_message(str(exc))}"
+                )
+                queue.reset_connection()
+                stop_event.wait(1.0)
+                continue
+            if reserved is None:
+                continue
+            process_reserved_analysis_message(
+                queue=queue,
+                service=service,
+                reserved=reserved,
+                worker_id=worker_id,
+                retry_backoff_seconds=config.redis_retry_backoff_seconds,
+            )
+    finally:
+        rag_store = getattr(service, "_rag_store", None)
+        if rag_store is not None:
+            rag_store.close()
+        shutdown_llm_http_clients()
+        close_shared_http_clients()
+        print("Analysis worker shutdown complete", flush=True)

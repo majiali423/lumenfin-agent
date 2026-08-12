@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from fastapi import Request
 
+from .provider_resilience import redact_provider_message
 from .stdio import configure_stdio_utf8
 
 
@@ -18,11 +19,10 @@ _SECRET_HEADER_PATTERN = re.compile(r"(?i)\b(authorization:\s*bearer\s+)[^\s,;]+
 
 def redact_secrets(value: object) -> object:
     text = value if isinstance(value, str) else str(value)
-    if not _SECRET_QUERY_PATTERN.search(text) and not _SECRET_HEADER_PATTERN.search(text):
-        return value
     redacted = _SECRET_QUERY_PATTERN.sub(r"\1[REDACTED]", text)
     redacted = _SECRET_HEADER_PATTERN.sub(r"\1[REDACTED]", redacted)
-    return redacted
+    redacted = redact_provider_message(redacted, limit=max(300, len(redacted) + 1))
+    return value if redacted == text else redacted
 
 
 def install_secret_redaction_filter() -> None:

@@ -285,6 +285,22 @@ class RagDocumentRepository:
                 return None
             return self._doc_to_dict(row)
 
+    def list_documents(
+        self,
+        *,
+        tenant_id: str | None = None,
+        index_status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List RAG documents deterministically for operational rebuilds."""
+        with Session(self.engine) as session:
+            stmt = select(RagDocument)
+            if tenant_id is not None:
+                stmt = stmt.where(RagDocument.tenant_id == tenant_id)
+            if index_status is not None:
+                stmt = stmt.where(RagDocument.index_status == index_status)
+            stmt = stmt.order_by(RagDocument.tenant_id.asc(), RagDocument.document_id.asc())
+            return [self._doc_to_dict(row) for row in session.scalars(stmt).all()]
+
     def register_pending_document(
         self,
         *,

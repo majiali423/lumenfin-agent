@@ -13,6 +13,7 @@ from .graph import LumenFinAgentSystem
 from .llm import BaseLLMClient, fork_llm_client
 from .market_data import MarketDataClient
 from .providers.registry import ProviderRegistry, build_provider_registry
+from .provider_resilience import redact_provider_message
 from .queueing import RedisQueueManager
 from .rag.factory import build_document_indexer, build_rag_store
 from .rag.indexer import IndexReceipt, summarize_index_receipts
@@ -443,7 +444,7 @@ class LumenFinAnalysisService:
             self.repository.update_job_status(
                 job_id=job_id,
                 status="failed",
-                error_message=str(exc),
+                error_message=redact_provider_message(str(exc)),
             )
             raise
 
