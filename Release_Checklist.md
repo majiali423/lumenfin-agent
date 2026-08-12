@@ -1,5 +1,11 @@
 # Release Checklist
 
+> Historical `0.1.0rc1` checklist. Statuses below describe that earlier
+> closure and must not be read as the current release gate. The active
+> `0.1.0rc3` closure is tracked in `docs/PORTFOLIO_RELEASE_REPORT.md`; current
+> full validation is recorded in
+> `reports/current/PHASE6_FULL_VALIDATION_REPORT.md`.
+
 Target: LumenFin + FinAgentBench `0.1.0rc1`
 
 | Item | Status | Evidence |

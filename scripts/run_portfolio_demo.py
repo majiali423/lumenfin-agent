@@ -437,7 +437,7 @@ def main() -> int:
     ]
     failed = [d for d in demos if d.get("status") != "pass"]
     summary = {
-        "portfolio_demo": "v0.1.0-rc.2",
+        "portfolio_demo": "v0.1.0-rc.3",
         "mode": "offline",
         "live_providers": False,
         "status": "pass" if not failed else "fail",
@@ -452,7 +452,7 @@ def main() -> int:
             "phase32b": "20260804T095357Z",
             "phase33a_docker": "docker_20260804T100817Z",
             # Frozen RC2 release evidence (not current dirty worktree counts).
-            "offline_tests": "453 passed, 1 skipped (frozen v0.1.0-rc.2 release evidence)",
+            "offline_tests": "495 passed, 2 skipped (Phase 6 Linux-image validation)",
             "mutation_detection": "4/4",
             "finagentbench_mean": 92.97,
             "evidence_note": (

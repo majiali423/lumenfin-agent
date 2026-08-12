@@ -1,8 +1,15 @@
 [project]
 name = "lumenfin-agent"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 description = "LumenFin: evidence-grounded multi-agent financial diligence built with LangGraph."
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   "langgraph",
   "networkx",
@@ -19,8 +26,9 @@ dependencies = [
   "python-multipart",
   "pydantic>=2.0",
   "yfinance",
-  "pymilvus[milvus_lite]>=2.4.0",
-  "milvus-lite>=3.0",
+  "pymilvus[milvus_lite]==3.0.0",
+  "milvus-lite==3.1.0",
+  "jieba==0.42.1",
   "mcp>=1.2.0",
 ]
 

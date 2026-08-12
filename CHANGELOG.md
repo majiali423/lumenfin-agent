@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.0rc3 — 2026-08-12
+
+Controlled portfolio RC closure with Milvus 3, native BM25, optional Qwen3
+reranking, production-runtime hardening, backup verification, and MIT licensing
+for project-owned source.
+
+### Added
+
+- Versioned `lumenfin_chunks_v4_bm25` dense/native-BM25 collection and rebuild
+  tooling
+- DashScope Qwen3 rerank with bounded retry, telemetry, lexical fallback, and
+  hard-negative quality gates
+- Deep readiness, persistent Redis AOF, verified production backup, and
+  graceful worker shutdown
+- MIT `LICENSE`, expanded third-party notices, and Phase 6 full validation
+  evidence
+
+### Validation
+
+- LumenFin full Linux-image suite: 495 passed, 2 skipped
+- FinAgentBench full suite: 149 passed
+- FinRun `1.0` cross-repository gate: score 100; negative controls 11/11
+
 ## 0.1.0rc2 — 2026-08-04
 
 Portfolio release candidate validated under controlled multi-process and

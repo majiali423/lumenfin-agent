@@ -55,7 +55,7 @@ def _fab_package_version(fab: Path) -> str:
         return "unavailable"
     for line in pyproject.read_text(encoding="utf-8").splitlines():
         if line.strip().startswith("version"):
-            # version = "0.1.0rc2"
+            # version = "0.1.0rc3"
             parts = line.split("=", 1)
             if len(parts) == 2:
                 return parts[1].strip().strip("\"'")

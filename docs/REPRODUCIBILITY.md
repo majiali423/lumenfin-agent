@@ -1,7 +1,7 @@
 # Reproducibility
 
-Supported release environment: Python 3.12, LumenFin `0.1.0rc1`,
-FinAgentBench `0.1.0rc1`, FinRun schema `1.0`.
+Supported release environment: Python 3.12, LumenFin `0.1.0rc3`,
+FinAgentBench `0.1.0rc3`, FinRun schema `1.0`.
 
 Clone repositories as siblings:
 
@@ -55,6 +55,7 @@ Live validation requires:
 
 - DeepSeek API/model availability
 - DashScope embedding API when configured
+- DashScope workspace-compatible Qwen3 rerank endpoint when configured
 - SEC and Yahoo/market-provider network access
 - operator-owned `SEC_USER_AGENT` outside dev/test
 - RC PDF/HTML fixtures in the sibling LumenFin repository
@@ -66,7 +67,7 @@ failures**. They must not be recorded as Agent-quality passes.
 
 ```bash
 cd lumenfin-agent
-docker build -t lumenfin:0.1.0rc2 .
+docker build -t lumenfin-agent:0.1.0rc3 .
 ```
 
 When the default PyPI route is slow, select a trusted mirror for that build
@@ -75,7 +76,7 @@ without changing the project default:
 ```bash
 docker build \
   --build-arg PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
-  -t lumenfin:0.1.0rc2 .
+  -t lumenfin-agent:0.1.0rc3 .
 ```
 
 Do not include credentials in `PIP_INDEX_URL`, because Docker build arguments
@@ -97,10 +98,13 @@ Python validation do not prove container runtime health by themselves.
 
 ## Release order
 
-1. Commit/tag FinAgentBench `v0.1.0-rc.1`.
-2. Verify its mutation and unit workflows.
-3. Commit LumenFin with CI pinned to that tag.
-4. Run LumenFin cross-repository and live RC gates.
-5. Tag LumenFin `v0.1.0-rc.1`.
+1. Run both repositories' full offline, mutation, and cross-repository gates.
+2. Run the approved live RC profile and classify infrastructure failures
+   separately from Agent-quality failures.
+3. Freeze release reports with the observed commits and test counts.
+4. Create fresh commits in each repository only after human diff review.
+5. Inspect existing remote tags before selecting new immutable RC tags; never
+   move or reuse an existing tag.
+6. Push, tag, and create releases only with explicit approval.
 
 Do not tag a dirty working tree.

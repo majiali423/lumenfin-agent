@@ -12,8 +12,8 @@
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Release candidate **`0.1.0rc2`** — tag `v0.1.0-rc.2`（`d075b685`）· FinRun
-schema `1.0` · FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · **作品集发布候选**，
+当前发布候选 **`0.1.0rc3`** · FinRun schema `1.0` · FinAgentBench 评测器
+pin **`v0.1.0-rc.3`** · 最终收口 commit/tag 尚未创建 · **作品集发布候选**，
 不是“无限制生产就绪”认证
 （[局限说明](docs/PRODUCTION_LIMITATIONS.md)）
 
@@ -259,7 +259,8 @@ PDF / SEC / Yahoo / market providers
 
 | Gate | What it measures | Result |
 |------|------------------|--------|
-| **Unit regression** | 离线 Python 测试 | **453 passed, 1 skipped** |
+| **LumenFin unit regression** | Linux 最终镜像全量 Python 测试 | **495 passed, 2 skipped** |
+| **FinAgentBench unit regression** | 全量 Python 测试 | **149 passed** |
 | **Infrastructure integration** | Phase 3.2B 多进程 Docker | **PASS**（`20260804T095357Z`） |
 | Worker-kill recovery | 被杀 worker 的任务是否需要人工重投？ | **否** — lease 过期 + attempt fencing 自动回收 |
 | Tenant leakage | 跨租户 RAG 读取 | **0** |
@@ -270,11 +271,13 @@ PDF / SEC / Yahoo / market providers
 | **Benchmark reliability** | FinAgentBench 完成案例均分 | **92.97**（informational；在评测器 pin `v0.1.0-rc.1` 下测得） |
 | Core mutation detection | 错误实体 / 数值 / 引用 / 风险 | **4/4** |
 | **Evaluator compatibility** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.3` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
+| **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback） |
+| **Production hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
 
-单元回归计数来自冻结发布提交 `d075b685`（`v0.1.0-rc.2`）上的
-`scripts/run_tests.py`（unittest discovery）。当前分支可能在此基础上增加
-worker/CI 加固与评测器 pin 更新。直接调用 `pytest` 会对同一套件按 subtest
-单独计数，因此总数因 runner 而异。
+当前单元回归计数来自 2026-08-12 Phase 6 的有意未提交工作树。LumenFin
+通过最终 UID-10001 Linux 镜像中的 `scripts/run_tests.py` 运行；
+FinAgentBench 使用 unittest discovery。直接调用 `pytest` 可能按 subtest
+产生不同计数，因此不能混用 runner 总数。
 
 Benchmark 行仅供参考，是在更早的评测器 pin 下测得；**不是**已发布
 `v0.1.0-rc.3` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
@@ -282,6 +285,7 @@ FinAgentBench `v0.1.0-rc.3` 接受并回放。
 
 证据：[PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
+[Phase 6 full validation](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) ·
 [RC reliability](reports/current/LumenFin_RC_Final_Reliability_Report.md) ·
 [Compatibility](reports/current/Joint_Compatibility_Report.md)
 
@@ -399,7 +403,9 @@ pin 可通过 workflow dispatch 配置。
 - 作品集 RC / 受控部署候选 — **不是**无限制生产就绪
 - At-least-once 队列 — **不是** exactly-once
 - Per-process bulkhead — **不是**跨进程全局限流
-- Live provider smoke：当前发布证据中为 **skipped**
+- DeepSeek、DashScope embedding 与 Qwen3 rerank 的受控合成 live smoke 已通过；
+  两仓库 Phase 6 本地全量门禁均已通过
+- Clean commit/tag RC 验证与远端 CI 仍属于 Phase 7 边界
 - 不构成投资建议；仍需人工财务审阅
 - PyMuPDF 许可限制公开图片再分发
 
@@ -440,6 +446,9 @@ reports/current/  权威 RC 证据包
 
 ## 许可 / 免责声明
 
-尚未选择开源许可证：仓库以 source-available 形式供审阅与评估，**不授予**再分发
-或生产使用权利。研究输出仅用于工程评估，**不构成投资建议**。
-第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+LumenFin 自有源码采用 [MIT License](LICENSE)。第三方依赖和源数据仍适用各自
+条款，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+当前应用镜像包含 PyMuPDF（AGPL-3.0/商业双许可），Compose 还引用 AGPL MinIO
+与 source-available Redis 7.4。在相关义务得到解决前，不得把该镜像作为“纯
+MIT 制品”公开分发。研究输出仅用于工程评估，**不构成投资建议**。

@@ -14,9 +14,10 @@ what is verified.
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Release candidate **`0.1.0rc2`** — tag `v0.1.0-rc.2` (`d075b685`) · FinRun
-schema `1.0` · FinAgentBench evaluator pin **`v0.1.0-rc.3`** · **portfolio
-release candidate**, not a certification of unrestricted production readiness
+Working release candidate **`0.1.0rc3`** · FinRun schema `1.0` ·
+FinAgentBench evaluator pin **`v0.1.0-rc.3`** · final closure commit/tag not
+created yet · **portfolio release candidate**, not a certification of
+unrestricted production readiness
 ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
 [Docs](docs/README.md) · [Architecture](docs/FINAL_ARCHITECTURE.md) ·
@@ -267,7 +268,8 @@ Do **not** merge these into one “accuracy” number.
 
 | Gate | What it measures | Result |
 |------|------------------|--------|
-| **Unit regression** | Offline Python tests | **453 passed, 1 skipped** |
+| **LumenFin unit regression** | Full Linux-image Python suite | **495 passed, 2 skipped** |
+| **FinAgentBench unit regression** | Full Python suite | **149 passed** |
 | **Infrastructure integration** | Phase 3.2B multi-process Docker | **PASS** (`20260804T095357Z`) |
 | Worker-kill recovery | Does a killed worker's job need human redelivery? | **no** — lease expiry + attempt fencing reclaim it |
 | Tenant leakage | Cross-tenant RAG read | **0** |
@@ -278,12 +280,14 @@ Do **not** merge these into one “accuracy” number.
 | **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational; measured under evaluator pin `v0.1.0-rc.1`) |
 | Core mutation detection | Wrong entity / number / citation / risk | **4/4** |
 | **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.3` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
+| **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback) |
+| **Production hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
 
-Unit-regression counts come from `scripts/run_tests.py` (unittest discovery) at
-the frozen release commit `d075b685` (`v0.1.0-rc.2`). Current branches may add
-worker/CI hardening and evaluator-pin updates beyond that frozen tag. Invoking
-`pytest` directly reports the same suite with subtests counted separately, so
-the totals differ by runner.
+Current unit-regression counts were frozen from the intentionally uncommitted
+Phase 6 worktrees on 2026-08-12. LumenFin ran through
+`scripts/run_tests.py` inside the final UID-10001 Linux image; FinAgentBench
+used unittest discovery. Invoking `pytest` directly can count subtests
+differently, so runner totals must not be mixed.
 
 The benchmark row is informational and was produced with the earlier evaluator
 pin; it is **not** a score for the published `v0.1.0-rc.3` evaluator. What the
@@ -292,6 +296,7 @@ replayed by FinAgentBench `v0.1.0-rc.3`.
 
 Evidence: [PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
+[Phase 6 full validation](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) ·
 [RC reliability](reports/current/LumenFin_RC_Final_Reliability_Report.md) ·
 [Compatibility](reports/current/Joint_Compatibility_Report.md)
 
@@ -413,7 +418,9 @@ deterministic fault-injection conditions, not in sustained production traffic.
 - Portfolio RC / controlled deployment candidate — **not** unrestricted production-ready
 - At-least-once queues — **not** exactly-once
 - Per-process bulkhead — **not** cross-process global rate limit
-- Live provider smoke: **skipped** in current release evidence
+- Controlled synthetic live smoke passed for DeepSeek, DashScope embedding,
+  and Qwen3 rerank; both repositories' full local Phase 6 gates passed
+- Clean committed/tagged RC validation and remote CI remain Phase 7 boundaries
 - Not investment advice; human financial review required
 - PyMuPDF license limits public image redistribution
 
@@ -454,8 +461,12 @@ reports/current/  Authoritative RC evidence packs
 
 ## License / disclaimer
 
-No open-source license has been selected: the repository is source-available for
-review and evaluation, and no redistribution or production-use rights are
-granted. Research output is for engineering evaluation only and is **not
+LumenFin's own source code is licensed under the
+[MIT License](LICENSE). Third-party dependencies and source data retain their
+own terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The current application image contains PyMuPDF (AGPL-3.0/commercial), and the
+Compose stack references AGPL MinIO plus source-available Redis 7.4. Do not
+publish the image as a purely MIT artifact until those obligations are
+resolved. Research output is for engineering evaluation only and is **not
 investment advice**.
-Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

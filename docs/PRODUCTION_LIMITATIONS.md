@@ -35,7 +35,9 @@ are **not** a certification of unrestricted production readiness.
 - Queue semantics are **at-least-once**, not exactly-once
 - Bulkheads are **per-process**, not a cross-process global rate limit
 - No shared circuit breaker across API processes
-- Live provider smoke is currently **skipped** in CI/release evidence
+- Controlled synthetic DeepSeek/DashScope/Qwen3 smoke passed locally on
+  2026-08-12; ordinary CI remains offline and the full release validation is
+  pending
 - No large-scale multi-day soak in the validated pack
 
 ### Infrastructure
@@ -62,7 +64,8 @@ are **not** a certification of unrestricted production readiness.
 - Transient provider failure can produce `incomplete_data`; operators must
   distinguish this from structural data absence
 - Provider resilience (deadline, Retry-After, single retry owner, degraded
-  fallback) is validated with a deterministic stub — not a live soak
+  fallback) is validated with a deterministic stub plus bounded synthetic live
+  smoke — not a live soak
 
 ### Evidence and data
 
@@ -77,9 +80,11 @@ are **not** a certification of unrestricted production readiness.
 - Human review remains required for material decisions
 - FinAgentBench measures execution reliability; it does not prove future
   investment performance
-- No public license grant is selected for this portfolio release
-- PyMuPDF licensing (AGPL and/or commercial terms) remains a blocker for
-  public Docker image redistribution until an explicit compliance path is chosen
+- Project-owned source is MIT licensed
+- PyMuPDF licensing (AGPL-3.0 and/or commercial terms) remains a blocker for
+  publishing the application image as a purely MIT artifact
+- Compose references AGPL MinIO and source-available Redis 7.4; operators and
+  distributors must follow their separate terms
 
 ## Scale-up prerequisites (beyond this RC)
 
@@ -89,4 +94,5 @@ are **not** a certification of unrestricted production readiness.
 4. Cross-process rate limits / circuit policy if multi-region
 5. Provider SLO monitoring, soak, and live smoke in CI
 6. Pinned release tags and artifact retention
-7. License decision for PDF stack redistribution
+7. Resolve PyMuPDF/MinIO/Redis distribution obligations before publishing
+   container artifacts

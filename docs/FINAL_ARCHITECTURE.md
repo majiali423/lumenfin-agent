@@ -1,7 +1,7 @@
 # LumenFin Final Architecture
 
 Trustworthy Financial Research Agent — architecture for **portfolio release
-candidate** `0.1.0rc2` (FinRun schema `1.0`, FinAgentBench pin **`v0.1.0-rc.3`**).
+candidate** `0.1.0rc3` (FinRun schema `1.0`, FinAgentBench pin **`v0.1.0-rc.3`**).
 
 LumenFin is a portfolio release candidate validated under controlled
 multi-process and deterministic fault-injection conditions. These results
@@ -80,7 +80,7 @@ LangGraph END
 | Layer | Responsibility |
 |-------|----------------|
 | **Agent orchestration** | Explicit LangGraph nodes with `audit_log`; conditional edges for repair, appendix replan, HITL pause |
-| **Research / retrieval / tools** | PDF/HTML chunking, hybrid RAG (`filename#pN`), ticker resolve, market providers |
+| **Research / retrieval / tools** | PDF/HTML chunking, Milvus dense + native BM25 weighted RRF, optional Qwen3 rerank (`filename#pN`), ticker resolve, market providers |
 | **Financial grounding** | Issuer fundamentals from SEC companyfacts / Yahoo when AST coverage is incomplete |
 | **Claim builder** | Typed claim objects from quant / risk / report context |
 | **Evidence binding** | Structural verify; reject unbound inventable numerics under fail-closed |
@@ -286,11 +286,15 @@ flowchart LR
 | **Analysis Worker** | `src/lumenfin/worker.py` → `LumenFinAnalysisService.run_job()` |
 | **Index Worker** | `scripts/run_rag_index_worker.py` → embed / upsert / finalize ready or failed |
 | **API instances** | Request handlers; process-local HTTP clients and bulkheads; enqueue jobs; read/write PG and query Milvus |
-| **Milvus Server** | Shared vector index for hybrid RAG (integration). Lite remains a local/dev option only |
+| **Milvus Server** | Shared `lumenfin_chunks_v4_bm25` collection: 1024-D dense vectors + native BM25 sparse function; weighted RRF candidates feed Qwen3 rerank. Lite remains local/dev only |
 
 **Layer separation:** provider HTTP retry (`call_with_policy`) ≠ Redis job retry /
 reclaim ≠ appendix replan. Bulkheads are **per-process**, not a cross-process
 global rate limit.
+
+Production Compose also persists Redis AOF and Milvus's coordinated etcd/MinIO
+state, gates API health on PostgreSQL + Redis + the configured Milvus
+collection, and runs application processes as UID/GID `10001`.
 
 Local demos may use SQLite + Milvus Lite under `APP_ENV=test` / explicit
 `MAS_ALLOW_SQLITE_DEV`. Production/integration **require** PostgreSQL.

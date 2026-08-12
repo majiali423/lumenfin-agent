@@ -1,5 +1,11 @@
 # LumenFin Final Release Report
 
+> Historical `0.1.0rc1` closure snapshot (2026-07-25). It is retained as
+> evidence and is not the current release recommendation. For the active
+> `0.1.0rc3` / FinAgentBench `v0.1.0-rc.3` closure, see
+> `docs/PORTFOLIO_RELEASE_REPORT.md` and
+> `reports/current/PHASE6_FULL_VALIDATION_REPORT.md`.
+
 Candidate: `0.1.0rc1`
 Suggested tag: `v0.1.0-rc.1`
 FinRun: `1.0`

@@ -1,19 +1,18 @@
 # License Recommendation
 
-Date: 2026-07-25
+Date: 2026-07-25; decision recorded 2026-08-12
 Scope: LumenFin and FinAgentBench
-Status: decision support only — **no license has been granted**
+Status: **MIT selected for project-owned source in both repositories**
 
 ## Recommendation
 
-For an autumn-recruiting portfolio and reusable developer tool, **MIT is the
-best default for both repositories**, provided the owner first resolves the
-PyMuPDF distribution issue and confirms redistribution rights for filing
-fixtures. Apache-2.0 is preferable only if an explicit patent grant/termination
-framework is important.
+The owner selected **MIT** for both repositories, with copyright
+`2026 Jiali Ma`. `LICENSE` files and package metadata now record that choice.
 
-No `LICENSE` file should be created until the repository owner explicitly
-chooses.
+This decision covers project-owned source only. It does not authorize
+redistribution of LumenFin's current application image as a purely MIT
+artifact: PyMuPDF is AGPL-3.0/commercial, MinIO is AGPL-3.0, and Redis 7.4 is
+RSALv2/SSPLv1. Filing-fixture and external-data rights also remain separate.
 
 ## Options
 
@@ -35,8 +34,8 @@ Installed metadata was checked for LumenFin's direct runtime dependencies.
 | python-multipart, milvus-lite | Apache-2.0 | Preserve license/notice |
 | yfinance | Apache metadata | Code license is permissive, but Yahoo data/service terms remain separate |
 | psycopg / psycopg-binary | LGPL-3.0-only | Dynamic/library use is generally compatible, but redistribution obligations and notices must be observed |
-| **PyMuPDF** | **AGPL-3.0 or commercial** | **High-risk blocker for distributing a Docker image or combined application under only MIT/Apache; obtain commercial terms, comply with AGPL, or avoid distributing it** |
-| PyMilvus | License field absent in installed metadata | Verify upstream Apache-2.0 source and include notice before public binary distribution |
+| **PyMuPDF** | **AGPL-3.0 or commercial** | **High-risk blocker for distributing a Docker image or combined application under only MIT; obtain commercial terms, comply with AGPL, or replace it** |
+| PyMilvus | Apache-2.0 (upstream verified) | Preserve upstream license/notice |
 
 FinAgentBench declares no runtime dependencies, so its own license decision is
 comparatively straightforward.
@@ -68,10 +67,18 @@ Using MIT for both repositories simplifies the paired RC story and downstream
 integration. Keep third-party notices separate per repository. The benchmark
 can be licensed independently before LumenFin if desired.
 
-## Required owner decisions
+## Decision record and remaining actions
 
-1. Choose MIT, Apache-2.0, or no public grant.
-2. Decide whether the RC distributes a Docker image containing PyMuPDF.
+Completed:
+
+1. MIT selected for both repositories.
+2. Copyright wording approved as `2026 Jiali Ma`.
+3. Third-party notice files created for both repositories.
+4. Current LumenFin image is **not** authorized for publication as a purely MIT
+   binary/container artifact.
+
+Still required before public binary/container distribution:
+
+1. Comply with AGPL obligations, obtain commercial terms, or replace PyMuPDF.
+2. Evaluate MinIO AGPL and Redis 7.4 RSALv2/SSPLv1 distribution/service terms.
 3. Confirm rights for SEC-derived fixture redistribution.
-4. Approve copyright holder/year wording.
-5. Generate a third-party notices inventory before binary/container release.

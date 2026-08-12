@@ -1,5 +1,10 @@
 # LumenFin ↔ FinAgentBench Compatibility Report
 
+> Historical `0.1.0rc1` planning snapshot (2026-07-25). Current compatibility
+> uses FinRun schema `1.0`, LumenFin `0.1.0rc3`, and published FinAgentBench
+> `v0.1.0-rc.3`; see `docs/PORTFOLIO_RELEASE_REPORT.md`. Fresh clean-tree
+> compatibility evidence remains a Phase 6 gate.
+
 Assessment date: 2026-07-25
 
 ## Contract

@@ -9,9 +9,13 @@
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Install and validation commands |
 | [VALIDATION_COMMANDS.md](VALIDATION_COMMANDS.md) | Supported offline / live / mutation commands |
 | [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Portfolio RC boundary |
+| [PRODUCTION_BACKUP_RESTORE.md](PRODUCTION_BACKUP_RESTORE.md) | Backup, verification, restore rehearsal, and rollback |
 | [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope and gaps |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Release freeze evidence |
+| [Phase 6 full validation](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | Current two-repository, image, runtime, backup, and security gates |
 | [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline demo and live A/B/C interview flow |
+| [../LICENSE](../LICENSE) | MIT license for LumenFin-owned source |
+| [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) | Dependency, image, provider, and data terms |
 
 ## Engineering evidence
 
@@ -31,13 +35,16 @@ release gate.
 |-----|---------|
 | [architecture_decisions.md](architecture_decisions.md) | Durable design decisions |
 | [RAG_MILVUS.md](RAG_MILVUS.md) | Hybrid RAG / Milvus Lite (dev) and Milvus Server (multi-process) |
+| [MILVUS3_CUTOVER.md](MILVUS3_CUTOVER.md) | Milvus 3.0 volume/cutover contract |
+| [BM25_CUTOVER.md](BM25_CUTOVER.md) | Native BM25 collection and rollback contract |
+| [QWEN3_RERANK.md](QWEN3_RERANK.md) | Controlled Qwen3 rerank rollout, data-egress boundary, evaluation, and rollback |
 | [TICKER_RESOLVE.md](TICKER_RESOLVE.md) | Ticker / company resolution |
 | [HITL_CLARIFICATION.md](HITL_CLARIFICATION.md) | Clarification pause / resume |
 | [INPUT_GUARDRAIL.md](INPUT_GUARDRAIL.md) | Input and upload guards |
 | [MCP.md](MCP.md) | Optional MCP boundary |
 | [evaluation_strategy.md](evaluation_strategy.md) | Internal evaluation strategy |
 | [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
-| [README_zh.md](README_zh.md) | Chinese overview |
+| [README_zh.md](README_zh.md) | Chinese overview (prefer root [../README.zh-CN.md](../README.zh-CN.md)) |
 
 ## Reports
 

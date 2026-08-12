@@ -8,23 +8,23 @@ below comes from a recorded run in this repository; nothing here is projected.
 | Field | Value |
 |-------|-------|
 | Name | **LumenFin Portfolio Release Candidate** |
-| Version | `0.1.0rc2` (recommended tag `v0.1.0-rc.2`) |
+| Version | Working candidate `0.1.0rc3`; final closure tag pending |
 | Positioning | Portfolio release candidate / controlled deployment candidate |
 | FinRun schema | `1.0` |
-| FinAgentBench pin | `v0.1.0-rc.1` |
+| FinAgentBench pin | `v0.1.0-rc.3` |
 
 > LumenFin is a portfolio release candidate validated under controlled
 > multi-process and deterministic fault-injection conditions. These results are
 > not a certification of unrestricted production readiness.
 
-## 2. Release commit / worktree / runtime
+## 2. Release closure state / runtime
 
 | Field | Value |
 |-------|-------|
-| Baseline commit | `0fa91f60977f55d9a7605bedf7e6f79c97f25f86` |
-| Phase 4.0 commits | `40fe781` docs(architecture) → `74264b1` docs(readme) → `cfb7443` ci → `659c725` feat(demo) → `8897aeb` fix(test) → this release-docs commit |
-| Release commit | current `main` HEAD after the commit series above (tag target) |
-| Worktree at freeze | clean (verified before tagging) |
+| Baseline branch | `main`; prior commits remain historical evidence |
+| Release commit | Not created; commit review is Phase 7 |
+| Worktree at this report update | Intentionally dirty with approved Milvus/BM25/Qwen3/production-hardening closure changes |
+| Tag | Not created or moved; inspect existing remote tags before choosing a fresh immutable RC tag |
 | Local Python | 3.12 (Windows) |
 | CI Python | 3.12 (`ubuntu-latest`) |
 | Exactly-once | **not claimed** |
@@ -68,7 +68,7 @@ Milvus Server
 |-------|------|
 | PostgreSQL | Source of truth: checkpoints (CAS), analysis jobs, RAG document/chunk metadata, index leases and attempt counters |
 | Redis | Reliable work queues only: `pending` → `processing` → dead-letter; reclaim of idle processing entries |
-| Milvus Server | Vector plane; rows keyed and filtered by `tenant_id` |
+| Milvus Server | `lumenfin_chunks_v4_bm25`: 1024-D dense vectors + native BM25 sparse function, tenant-filtered; weighted RRF candidates feed Qwen3 rerank |
 
 ## 6. Reliable queue semantics
 
@@ -105,14 +105,19 @@ per-tenant databases/collections. Details:
 
 ## 9. Validated gates
 
-Kept separate on purpose — these are four different questions.
+Kept separate on purpose — these gates answer different questions.
 
 | Gate | Question | Run id | Result |
 |------|----------|--------|--------|
-| Unit regression | Does offline logic still hold? | this release | **453 passed, 1 skipped** |
+| Current LumenFin full regression | Does the final Linux image pass the complete suite? | Phase 6 current worktree | **495 passed, 2 skipped** |
+| Current FinAgentBench full regression | Does the evaluator pass its complete suite? | Phase 6 current worktree | **149 passed** |
 | Infrastructure integration (Phase 3.2B) | Do multi-process queue/worker/DB semantics hold under kill? | `20260804T095357Z` | **PASS** |
 | Provider fault validation (Phase 3.3A) | Do deadlines/retries/bulkheads hold under injected faults across two API containers? | `docker_20260804T100817Z` | **PASS** |
-| Benchmark reliability (FinAgentBench) | Are exported runs judged reliable by an external gate? | pin `v0.1.0-rc.1` | completed-case mean **92.97**, mutation **4/4** |
+| Benchmark reliability (FinAgentBench) | Are exported runs judged reliable by an external gate? | pin `v0.1.0-rc.3` | completed-case mean **92.97**, mutation **4/4** |
+| Native BM25 cutover | Does dense + native BM25 weighted RRF pass offline and live first-search gates? | 2026-08-12 local closure | **PASS** |
+| Qwen3 rerank | Do hard-negative quality and telemetry gates pass with zero fallback? | 2026-08-12 synthetic live gate | **PASS** |
+| Cross-repository contract | Does current FinRun `1.0` pass the evaluator and negative controls? | Phase 6 current worktrees | score **100**, mutations **11/11** |
+| Production hardening | Do immutable builds, UID 10001, readiness, persistence, fallback, backup, leak, and graceful-stop gates pass? | 2026-08-12 Phase 6 | **PASS** |
 
 Phase 3.2B detail: worker-kill manual redelivery `false`; tenant leakage `0`;
 orphan chunks / vectors `0 / 0`.
@@ -120,10 +125,9 @@ orphan chunks / vectors `0 / 0`.
 Phase 3.3A Docker detail: provider logical calls `20`; physical attempts `25`;
 cross-container context leakage `0`; unexpected failures `0`.
 
-Phase 3.2B and 3.3A were **not re-run** in Phase 4.0: this phase changed only
-documentation, CI workflows, and the demo entrypoint — no queue, worker,
-database, checkpoint, Milvus filtering, provider resilience, or Compose shared
-infrastructure code was modified.
+The full Phase 6 evidence, including harness corrections and the dirty-worktree
+boundary, is frozen in
+[`PHASE6_FULL_VALIDATION_REPORT.md`](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md).
 
 ## 10. CI
 
@@ -165,7 +169,8 @@ Optional (not started by the demo): Docker recovery story
 - At-least-once queue delivery, **not** exactly-once
 - Per-process bulkheads, **not** a cross-process global rate limit
 - No shared circuit breaker across API processes
-- Live provider smoke: **skipped** in this release evidence
+- Controlled synthetic DeepSeek, DashScope embedding, and Qwen3 rerank smoke
+  passed; clean committed/tagged RC validation remains a Phase 7 boundary
 - No large-scale soak / long-duration endurance run
 - Tenant identity is not bound to authentication (no IAM tenant binding)
 - No PostgreSQL Row-Level Security
@@ -174,16 +179,26 @@ Optional (not started by the demo): Docker recovery story
 
 ## 13. Live smoke status
 
-`skipped`. No live DeepSeek / DashScope / SEC / Yahoo calls were made for this
-release evidence pack. All validated numbers come from offline tests,
-deterministic stubs, or containerized infrastructure.
+On 2026-08-12, controlled synthetic data passed the production
+API → PostgreSQL → DashScope embedding → Milvus dense/native-BM25 → Qwen3
+rerank path with zero rerank fallback/degradation. A synthetic upload also
+completed a DeepSeek analysis. No user document was sent externally.
+
+Phase 6 also completed both repositories' full suites, the FinRun contract
+gate, image/runtime checks, backup verification, leak scan, and graceful stop.
+It did not run a fresh live SEC/Yahoo matrix; clean committed/tagged RC
+validation remains a Phase 7 boundary.
 
 ## 14. License boundary
 
-Code is portfolio/demo licensed as declared in the repository. PyMuPDF is AGPL —
-redistributing rendered filing images publicly is out of scope. SEC and Yahoo
-data usage follows each provider's terms; `SEC_USER_AGENT` must be operator
-owned in any real deployment.
+Project-owned source is MIT licensed, copyright 2026 Jiali Ma. That grant does
+not relicense dependencies or data. PyMuPDF and MinIO are AGPL-3.0 (or
+commercial terms where offered), and Redis 7.4 is RSALv2/SSPLv1. The current
+application image must not be represented as a purely MIT distributable.
+Details: `THIRD_PARTY_NOTICES.md`.
+
+SEC and Yahoo data usage follows each provider's terms; `SEC_USER_AGENT` must
+be operator owned in any real deployment.
 
 ## 15. Remaining roadmap (not in this release)
 
@@ -194,11 +209,9 @@ owned in any real deployment.
 5. Multi-hour soak with fault injection
 6. Managed vector infrastructure and horizontal worker autoscaling
 
-## 16. Recommended tag
+## 16. Tag boundary
 
-```powershell
-git tag -a v0.1.0-rc.2 -m "LumenFin portfolio release candidate v0.1.0-rc.2"
-git push origin v0.1.0-rc.2
-```
-
-Create the tag only after human review of this report.
+No tag is created by this report. Phase 7 must inspect existing local and
+remote tags, choose a fresh immutable RC version if required, update package and
+release metadata consistently, and obtain explicit approval before commit,
+push, tag, or release creation.
