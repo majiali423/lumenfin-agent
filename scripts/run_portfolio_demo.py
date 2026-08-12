@@ -451,13 +451,13 @@ def main() -> int:
         "validated_refs": {
             "phase32b": "20260804T095357Z",
             "phase33a_docker": "docker_20260804T100817Z",
-            # Frozen RC2 release evidence (not current dirty worktree counts).
+            # Stamped Phase 6 / Phase 3.2B-3.3A evidence (also shipped in v0.1.0-rc.3).
             "offline_tests": "495 passed, 2 skipped (Phase 6 Linux-image validation)",
             "mutation_detection": "4/4",
             "finagentbench_mean": 92.97,
             "evidence_note": (
-                "validated_refs cite stamped RC2 / Phase 3.2B-3.3A evidence; "
-                "do not treat as live uncommitted worktree test counts"
+                "validated_refs cite stamped Phase 6 / Phase 3.2B-3.3A evidence "
+                "shipped with tag v0.1.0-rc.3; not a live re-run of those gates"
             ),
         },
     }

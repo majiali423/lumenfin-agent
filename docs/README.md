@@ -13,7 +13,7 @@
 | [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope and gaps |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Release freeze evidence |
 | [Phase 6 full validation](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | Current two-repository, image, runtime, backup, and security gates |
-| [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline demo and live A/B/C interview flow |
+| [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline portfolio demo and optional live A/B/C walkthrough |
 | [../LICENSE](../LICENSE) | MIT license for LumenFin-owned source |
 | [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) | Dependency, image, provider, and data terms |
 

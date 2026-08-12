@@ -7,7 +7,7 @@ are **not** a certification of unrestricted production readiness.
 | Status | Meaning |
 |--------|---------|
 | Controlled environment acceptance | Phase 3.2B / 3.3A / offline regression PASS |
-| Suitable for | Internal demos, interview portfolio, limited operator-owned deploys |
+| Suitable for | Internal demos, portfolio showcases, limited operator-owned deploys |
 | Not claimed | Internet-scale production certification, exactly-once delivery |
 
 ## Current suitable scope
@@ -36,8 +36,9 @@ are **not** a certification of unrestricted production readiness.
 - Bulkheads are **per-process**, not a cross-process global rate limit
 - No shared circuit breaker across API processes
 - Controlled synthetic DeepSeek/DashScope/Qwen3 smoke passed locally on
-  2026-08-12; ordinary CI remains offline and the full release validation is
-  pending
+  2026-08-12; ordinary CI remains offline. Full two-repo validation is recorded
+  in `reports/current/PHASE6_FULL_VALIDATION_REPORT.md` and shipped in
+  `v0.1.0-rc.3`
 - No large-scale multi-day soak in the validated pack
 
 ### Infrastructure

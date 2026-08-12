@@ -1,6 +1,6 @@
 # LumenFin MCP Tool Layer
 
-Standalone MCP servers for **optional demos** (Cursor, scripts, interview tool-decoupling narrative).
+Standalone MCP servers for **optional demos** (Cursor, scripts, tool-decoupling demos).
 
 ## Production rule (read this first)
 

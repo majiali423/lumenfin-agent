@@ -1,17 +1,18 @@
 # LumenFin Portfolio Release Report
 
-Release candidate freeze evidence for interview / portfolio use. Every number
-below comes from a recorded run in this repository; nothing here is projected.
+Release candidate freeze evidence for portfolio / controlled-demo use. Every
+number below comes from a recorded run in this repository; nothing here is
+projected.
 
 ## 1. Release candidate
 
 | Field | Value |
 |-------|-------|
 | Name | **LumenFin Portfolio Release Candidate** |
-| Version | Working candidate `0.1.0rc3`; final closure tag pending |
-| Positioning | Portfolio release candidate / controlled deployment candidate |
+| Version | `0.1.0rc3` / published tag `v0.1.0-rc.3` |
+| Positioning | Controlled release candidate / portfolio demo candidate |
 | FinRun schema | `1.0` |
-| FinAgentBench pin | `v0.1.0-rc.3` |
+| FinAgentBench pin | `v0.1.0-rc.3` (evaluator); current FinAgentBench package tag `v0.1.0-rc.4` |
 
 > LumenFin is a portfolio release candidate validated under controlled
 > multi-process and deterministic fault-injection conditions. These results are
@@ -21,10 +22,10 @@ below comes from a recorded run in this repository; nothing here is projected.
 
 | Field | Value |
 |-------|-------|
-| Baseline branch | `main`; prior commits remain historical evidence |
-| Release commit | Not created; commit review is Phase 7 |
-| Worktree at this report update | Intentionally dirty with approved Milvus/BM25/Qwen3/production-hardening closure changes |
-| Tag | Not created or moved; inspect existing remote tags before choosing a fresh immutable RC tag |
+| Baseline branch | `main` |
+| Release commit | `e67ed5f0e5aa4d2585d063b99212c46f5002d1a3` |
+| Worktree at freeze | Clean at tag `v0.1.0-rc.3` |
+| Tag | `v0.1.0-rc.3` (published) |
 | Local Python | 3.12 (Windows) |
 | CI Python | 3.12 (`ubuntu-latest`) |
 | Exactly-once | **not claimed** |

@@ -116,12 +116,15 @@ fail-closed report.
 **External risk:** distinguish a transient provider outage from a genuinely
 unavailable private-company financial dataset.
 
-## Recommended interview order
+## Recommended demo order
 
-1. 30-second system spine from `FINAL_ARCHITECTURE.md`
+1. System spine from `FINAL_ARCHITECTURE.md`
 2. `python scripts/run_portfolio_demo.py` (A/B/C in one run)
 3. NVIDIA grounded success (live, optional)
 4. Multi-company isolation
 5. Fail-closed negative control
 6. Runtime reliability: Phase 3.2B worker-kill recovery + Phase 3.3A dual-API
 7. End with `PRODUCTION_LIMITATIONS.md`
+
+Published tags for this guide: LumenFin `v0.1.0-rc.3`, FinAgentBench
+evaluator pin `v0.1.0-rc.3` (current FinAgentBench package tag `v0.1.0-rc.4`).

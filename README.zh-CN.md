@@ -12,10 +12,9 @@
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-当前发布候选 **`0.1.0rc3`** · FinRun schema `1.0` · FinAgentBench 评测器
-pin **`v0.1.0-rc.3`** · 最终收口 commit/tag 尚未创建 · **作品集发布候选**，
-不是“无限制生产就绪”认证
-（[局限说明](docs/PRODUCTION_LIMITATIONS.md)）
+发布候选 **`0.1.0rc3`** / 标签 **`v0.1.0-rc.3`** · FinRun schema `1.0` ·
+FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · **受控发布候选**，不是“无限制
+生产就绪”认证（[局限说明](docs/PRODUCTION_LIMITATIONS.md)）
 
 [文档](docs/README.md) · [架构](docs/FINAL_ARCHITECTURE.md) ·
 [局限](docs/PRODUCTION_LIMITATIONS.md) · [演示](docs/DEMO_GUIDE.md) ·
@@ -274,8 +273,8 @@ PDF / SEC / Yahoo / market providers
 | **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback） |
 | **Production hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
 
-当前单元回归计数来自 2026-08-12 Phase 6 的有意未提交工作树。LumenFin
-通过最终 UID-10001 Linux 镜像中的 `scripts/run_tests.py` 运行；
+单元回归计数冻结于 2026-08-12 Phase 6 验证，并随标签 `v0.1.0-rc.3` 发布。
+LumenFin 在 UID-10001 Linux 镜像内通过 `scripts/run_tests.py` 运行；
 FinAgentBench 使用 unittest discovery。直接调用 `pytest` 可能按 subtest
 产生不同计数，因此不能混用 runner 总数。
 

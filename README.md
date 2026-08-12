@@ -14,10 +14,9 @@ what is verified.
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Working release candidate **`0.1.0rc3`** · FinRun schema `1.0` ·
-FinAgentBench evaluator pin **`v0.1.0-rc.3`** · final closure commit/tag not
-created yet · **portfolio release candidate**, not a certification of
-unrestricted production readiness
+Release candidate **`0.1.0rc3`** / tag **`v0.1.0-rc.3`** · FinRun schema `1.0` ·
+FinAgentBench evaluator pin **`v0.1.0-rc.3`** · **controlled release
+candidate**, not a certification of unrestricted production readiness
 ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
 [Docs](docs/README.md) · [Architecture](docs/FINAL_ARCHITECTURE.md) ·
@@ -283,11 +282,11 @@ Do **not** merge these into one “accuracy” number.
 | **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback) |
 | **Production hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
 
-Current unit-regression counts were frozen from the intentionally uncommitted
-Phase 6 worktrees on 2026-08-12. LumenFin ran through
-`scripts/run_tests.py` inside the final UID-10001 Linux image; FinAgentBench
-used unittest discovery. Invoking `pytest` directly can count subtests
-differently, so runner totals must not be mixed.
+Unit-regression counts were frozen during Phase 6 validation on 2026-08-12 and
+shipped in tag `v0.1.0-rc.3`. LumenFin ran through `scripts/run_tests.py`
+inside the UID-10001 Linux image; FinAgentBench used unittest discovery.
+Invoking `pytest` directly can count subtests differently, so runner totals
+must not be mixed.
 
 The benchmark row is informational and was produced with the earlier evaluator
 pin; it is **not** a score for the published `v0.1.0-rc.3` evaluator. What the
