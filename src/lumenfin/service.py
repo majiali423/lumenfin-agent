@@ -109,11 +109,16 @@ class LumenFinAnalysisService:
         system: LumenFinAgentSystem,
         thread_id: str,
         record: dict | None = None,
+        *,
+        tenant_id: str | None = None,
     ) -> dict | None:
         state = system.get_thread_state(thread_id)
         if state is not None:
             return state
-        record = record or self.checkpoint_repo.get(thread_id)
+        if record is None:
+            # Always pass tenant_id when known so a missing/forbidden record
+            # cannot fall back to an unscoped cross-tenant lookup.
+            record = self.checkpoint_repo.get(thread_id, tenant_id=tenant_id)
         if record is None:
             return None
         return system.bootstrap_thread_from_store(thread_id, self.checkpoint_repo, record=record)
@@ -185,13 +190,13 @@ class LumenFinAnalysisService:
         output_format: str | None = None,
     ) -> dict:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
-        base_checkpoint = self.checkpoint_repo.get(actual_thread_id)
+        tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
+        base_checkpoint = self.checkpoint_repo.get(actual_thread_id, tenant_id=tenant)
         expected_revision = int(base_checkpoint["revision"]) if base_checkpoint else 0
         from .integration_hooks import maybe_barrier_after_checkpoint_read
 
         maybe_barrier_after_checkpoint_read(actual_thread_id, expected_revision)
         system = self._system_for(actual_thread_id)
-        tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
         document_contexts: list[dict] = []
         rag_index_stats: dict = {}
         rag_document_ids: list[str] = list(document_ids or [])
@@ -250,6 +255,7 @@ class LumenFinAnalysisService:
             state=system.get_thread_state(actual_thread_id) or result,
             llm_backend=result.get("llm_backend", system.llm_client.backend_name),
             expected_revision=expected_revision,
+            tenant_id=tenant,
         )
         packaged = self._package_response(
             actual_thread_id,
@@ -272,16 +278,20 @@ class LumenFinAnalysisService:
         thread_id: str,
         clarification: dict,
         export_artifacts: bool = True,
+        *,
+        tenant_id: str | None = None,
     ) -> dict:
+        tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
         system = self._system_for(thread_id)
-        record = self.checkpoint_repo.get(thread_id)
-        prior = self._load_thread_state(system, thread_id, record=record)
+        record = self.checkpoint_repo.get(thread_id, tenant_id=tenant)
+        if record is None:
+            raise ValueError(f"No checkpoint found for thread_id={thread_id}")
+        prior = self._load_thread_state(system, thread_id, record=record, tenant_id=tenant)
         if prior is None:
             raise ValueError(f"No checkpoint found for thread_id={thread_id}")
         if prior.get("workflow_status") != "needs_clarification":
             raise ValueError(f"Thread {thread_id} is not awaiting clarification.")
         result = system.resume_with_clarification(thread_id, clarification)
-        assert record is not None
         query = record.get("query", "")
         committed_checkpoint = self.checkpoint_repo.upsert(
             thread_id=thread_id,
@@ -289,6 +299,7 @@ class LumenFinAnalysisService:
             state=system.get_thread_state(thread_id) or result,
             llm_backend=result.get("llm_backend", system.llm_client.backend_name),
             expected_revision=int(record["revision"]),
+            tenant_id=tenant,
         )
         return self._package_response(
             thread_id,
@@ -299,8 +310,9 @@ class LumenFinAnalysisService:
             checkpoint=committed_checkpoint,
         )
 
-    def get_checkpoint(self, thread_id: str) -> dict | None:
-        return self.checkpoint_repo.get(thread_id)
+    def get_checkpoint(self, thread_id: str, *, tenant_id: str | None = None) -> dict | None:
+        tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
+        return self.checkpoint_repo.get(thread_id, tenant_id=tenant)
 
     def _package_response(
         self,
@@ -361,11 +373,28 @@ class LumenFinAnalysisService:
             "artifacts": artifacts,
         }
 
-    def submit_job(self, query: str, thread_id: str | None = None) -> dict:
+    def submit_job(
+        self,
+        query: str,
+        thread_id: str | None = None,
+        *,
+        tenant_id: str | None = None,
+    ) -> dict:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
         job_id = f"job-{uuid4().hex[:10]}"
-        self.repository.create_job(job_id=job_id, thread_id=actual_thread_id, query=query)
-        return {"job_id": job_id, "thread_id": actual_thread_id, "status": "pending"}
+        tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
+        self.repository.create_job(
+            job_id=job_id,
+            thread_id=actual_thread_id,
+            query=query,
+            tenant_id=tenant,
+        )
+        return {
+            "job_id": job_id,
+            "thread_id": actual_thread_id,
+            "status": "pending",
+            "tenant_id": tenant,
+        }
 
     def enqueue_job(
         self,
@@ -375,6 +404,8 @@ class LumenFinAnalysisService:
         export_artifacts: bool = True,
         document_paths: list[str] | None = None,
         output_format: str | None = None,
+        *,
+        tenant_id: str | None = None,
     ) -> bool:
         if not self.config.redis_url:
             return False
@@ -393,6 +424,7 @@ class LumenFinAnalysisService:
                 "export_artifacts": export_artifacts,
                 "document_paths": document_paths or [],
                 "output_format": output_format,
+                "tenant_id": (tenant_id or self.config.rag_tenant_id).strip() or "default",
             }
         )
         return True
@@ -405,6 +437,7 @@ class LumenFinAnalysisService:
         export_artifacts: bool = True,
         document_paths: list[str] | None = None,
         output_format: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         """Execute an analysis job with at-least-once safe completion semantics.
 
@@ -430,6 +463,7 @@ class LumenFinAnalysisService:
                 export_artifacts=export_artifacts,
                 document_paths=document_paths,
                 output_format=output_format,
+                tenant_id=tenant_id,
             )
             # Mark completed only after analyze persisted checkpoint/artifacts.
             self.repository.update_job_status(
@@ -448,11 +482,15 @@ class LumenFinAnalysisService:
             )
             raise
 
-    def get_job(self, job_id: str) -> dict | None:
-        return self.repository.get_job(job_id)
+    def get_job(self, job_id: str, *, tenant_id: str) -> dict | None:
+        """Tenant-scoped job lookup. ``tenant_id`` is required (secure-by-default)."""
+        tenant = tenant_id.strip() or "default"
+        return self.repository.get_job(job_id, tenant_id=tenant)
 
-    def list_jobs(self, limit: int = 20) -> list[dict]:
-        return self.repository.list_jobs(limit=limit)
+    def list_jobs(self, limit: int = 20, *, tenant_id: str) -> list[dict]:
+        """Tenant-scoped job listing. ``tenant_id`` is required (secure-by-default)."""
+        tenant = tenant_id.strip() or "default"
+        return self.repository.list_jobs(limit=limit, tenant_id=tenant)
 
     def save_uploaded_files(self, files: list[tuple[str, bytes]]) -> list[str]:
         # Keep in sync with document_ingest parsers (.xls is accepted by older clients but not parsed).

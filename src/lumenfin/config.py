@@ -101,6 +101,9 @@ class AppConfig:
     host: str
     port: int
     api_key: str | None
+    api_key_client_id: str
+    api_key_tenant_id: str
+    api_key_principals_json: str | None
     app_env: str
     data_mode: str
     allow_local_fallback: bool | None
@@ -169,6 +172,24 @@ class AppConfig:
     def uses_sqlite(self) -> bool:
         return _is_sqlite_url(self.database_url)
 
+    def principal_directory(self):
+        from .api.auth import build_principal_directory
+
+        return build_principal_directory(
+            legacy_api_key=self.api_key,
+            legacy_client_id=self.api_key_client_id,
+            legacy_tenant_id=self.api_key_tenant_id or self.rag_tenant_id,
+            principals_json=self.api_key_principals_json,
+        )
+
+    def anonymous_principal(self):
+        from .api.auth import AuthenticatedPrincipal
+
+        return AuthenticatedPrincipal(
+            client_id="anonymous",
+            tenant_id=(self.rag_tenant_id or "default").strip() or "default",
+        )
+
     @classmethod
     def from_env(cls) -> "AppConfig":
         # Re-check on every load so preflight and runtime share the same path.
@@ -208,6 +229,12 @@ class AppConfig:
             host=os.getenv("MAS_HOST", "127.0.0.1"),
             port=int(os.getenv("MAS_PORT", "8000")),
             api_key=os.getenv("MAS_API_KEY") or None,
+            api_key_client_id=(os.getenv("MAS_API_KEY_CLIENT_ID", "default-client").strip() or "default-client"),
+            api_key_tenant_id=(
+                os.getenv("MAS_API_KEY_TENANT_ID") or os.getenv("MAS_RAG_TENANT_ID", "default")
+            ).strip()
+            or "default",
+            api_key_principals_json=os.getenv("MAS_API_KEY_PRINCIPALS") or None,
             app_env=app_env,
             data_mode=data_mode,
             allow_local_fallback=allow_local_fallback,

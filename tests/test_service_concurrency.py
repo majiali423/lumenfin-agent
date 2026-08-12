@@ -295,7 +295,7 @@ class ServiceConcurrencyIsolationTestCase(unittest.TestCase):
                     export_artifacts=False,
                 )
 
-        job = service.get_job(created["job_id"])
+        job = service.get_job(created["job_id"], tenant_id=created["tenant_id"])
         self.assertEqual(job["status"], "failed")
         self.assertIn("Checkpoint conflict", job["error_message"])
         self.assertIsNone(job["result"])

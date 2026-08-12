@@ -84,6 +84,7 @@ class InputGuardrailWorkflowTestCase(unittest.TestCase):
             base,
             input_guardrail_enabled=True,
             input_guardrail_mode=mode,
+            rag_enabled=False,
         )
         return LumenFinAgentSystem(
             llm_client=LocalFallbackLLMClient(),

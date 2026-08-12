@@ -46,6 +46,11 @@ class WorkflowCheckpointRepository:
                     "ALTER TABLE workflow_checkpoints "
                     "ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
                 )
+            if rows and "tenant_id" not in columns:
+                conn.exec_driver_sql(
+                    "ALTER TABLE workflow_checkpoints "
+                    "ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+                )
 
     def _validate_external_revision_column(self) -> None:
         if str(self.engine.url).startswith("sqlite"):
@@ -76,12 +81,14 @@ class WorkflowCheckpointRepository:
         state: dict[str, Any],
         llm_backend: str | None = None,
         expected_revision: int | None = None,
+        tenant_id: str = "default",
     ) -> dict[str, Any]:
         if expected_revision is None:
             raise ValueError("expected_revision is required for checkpoint writes")
         if expected_revision < 0:
             raise ValueError("expected_revision must be non-negative")
         now = utc_now()
+        tenant = (tenant_id or "default").strip() or "default"
         payload = json.dumps(state, ensure_ascii=False, default=str)
         clarification_questions = json.dumps(
             state.get("clarification_questions") or [],
@@ -93,6 +100,7 @@ class WorkflowCheckpointRepository:
             if expected_revision == 0:
                 row = WorkflowCheckpoint(
                     thread_id=thread_id,
+                    tenant_id=tenant,
                     query=query,
                     workflow_status=workflow_status,
                     state_json=payload,
@@ -122,6 +130,7 @@ class WorkflowCheckpointRepository:
                     "last_node": last_node,
                     "updated_at": now,
                     "revision": expected_revision + 1,
+                    "tenant_id": tenant,
                 }
                 if llm_backend is not None:
                     values["llm_backend"] = llm_backend
@@ -145,10 +154,16 @@ class WorkflowCheckpointRepository:
                 session.commit()
         return committed
 
-    def get(self, thread_id: str) -> Optional[dict[str, Any]]:
+    def get(self, thread_id: str, *, tenant_id: str | None = None) -> Optional[dict[str, Any]]:
         with Session(self.engine) as session:
             row = session.get(WorkflowCheckpoint, thread_id)
-            return self._row_to_dict(row) if row is not None else None
+            if row is None:
+                return None
+            if tenant_id is not None and str(getattr(row, "tenant_id", "default") or "default") != str(
+                tenant_id
+            ):
+                return None
+            return self._row_to_dict(row)
 
     def delete(self, thread_id: str) -> None:
         with Session(self.engine) as session:
@@ -174,6 +189,7 @@ class WorkflowCheckpointRepository:
     def _row_to_dict(row: WorkflowCheckpoint) -> dict[str, Any]:
         return {
             "thread_id": row.thread_id,
+            "tenant_id": getattr(row, "tenant_id", None) or "default",
             "query": row.query,
             "workflow_status": row.workflow_status,
             "state": json.loads(row.state_json),

@@ -25,6 +25,7 @@ class WorkflowCheckpoint(Base):
     __tablename__ = "workflow_checkpoints"
 
     thread_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text, nullable=False, default="default", index=True)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     workflow_status: Mapped[str] = mapped_column(Text, nullable=False)
     state_json: Mapped[str] = mapped_column(Text, nullable=False)
@@ -40,6 +41,7 @@ class AnalysisJob(Base):
     __tablename__ = "analysis_jobs"
 
     job_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text, nullable=False, default="default", index=True)
     thread_id: Mapped[str] = mapped_column(Text, nullable=False)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
@@ -98,13 +100,39 @@ class JobRepository:
             db_path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(database_url, future=True)
         Base.metadata.create_all(self.engine)
+        self._ensure_sqlite_tenant_columns()
 
-    def create_job(self, job_id: str, thread_id: str, query: str) -> None:
+    def _ensure_sqlite_tenant_columns(self) -> None:
+        if not str(self.engine.url).startswith("sqlite"):
+            return
+        with self.engine.begin() as conn:
+            job_rows = conn.exec_driver_sql("PRAGMA table_info(analysis_jobs)").fetchall()
+            job_cols = {str(row[1]) for row in job_rows}
+            if job_rows and "tenant_id" not in job_cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE analysis_jobs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+                )
+            cp_rows = conn.exec_driver_sql("PRAGMA table_info(workflow_checkpoints)").fetchall()
+            cp_cols = {str(row[1]) for row in cp_rows}
+            if cp_rows and "tenant_id" not in cp_cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE workflow_checkpoints ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+                )
+
+    def create_job(
+        self,
+        job_id: str,
+        thread_id: str,
+        query: str,
+        *,
+        tenant_id: str = "default",
+    ) -> None:
         now = utc_now()
         with Session(self.engine) as session:
             session.add(
                 AnalysisJob(
                     job_id=job_id,
+                    tenant_id=(tenant_id or "default").strip() or "default",
                     thread_id=thread_id,
                     query=query,
                     status="pending",
@@ -185,19 +213,27 @@ class JobRepository:
             session.commit()
             return "run"
 
-    def get_job(self, job_id: str) -> Optional[dict[str, Any]]:
+    def get_job(self, job_id: str, *, tenant_id: str) -> Optional[dict[str, Any]]:
+        tenant = (tenant_id or "").strip() or "default"
         with Session(self.engine) as session:
             job = session.get(AnalysisJob, job_id)
-            return self._row_to_dict(job) if job is not None else None
+            if job is None:
+                return None
+            if str(job.tenant_id or "default") != str(tenant):
+                return None
+            return self._row_to_dict(job)
 
-    def list_jobs(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_jobs(self, limit: int = 20, *, tenant_id: str) -> list[dict[str, Any]]:
+        tenant = (tenant_id or "").strip() or "default"
         with Session(self.engine) as session:
-            rows = session.scalars(select(AnalysisJob).order_by(AnalysisJob.created_at.desc()).limit(limit)).all()
+            stmt = select(AnalysisJob).where(AnalysisJob.tenant_id == tenant)
+            rows = session.scalars(stmt.order_by(AnalysisJob.created_at.desc()).limit(limit)).all()
             return [self._row_to_dict(row) for row in rows]
 
     def _row_to_dict(self, row: AnalysisJob) -> dict[str, Any]:
         return {
             "job_id": row.job_id,
+            "tenant_id": getattr(row, "tenant_id", None) or "default",
             "thread_id": row.thread_id,
             "query": row.query,
             "status": row.status,

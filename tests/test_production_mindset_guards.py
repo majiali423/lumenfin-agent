@@ -200,6 +200,7 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
             build_test_config(ROOT / "test_artifacts" / f"api-{uuid4().hex[:8]}"),
             api_key="test-key",
             app_env="test",
+            rag_enabled=False,
         )
         app = create_app(
             config,
@@ -246,7 +247,7 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
             rag_enabled=False,
         )
         repository = JobRepository(config.database_url, db_path=config.db_path)
-        repository.create_job("job-1", "thread-1", "Analyze synthetic company")
+        repository.create_job("job-1", "thread-1", "Analyze synthetic company", tenant_id="test-tenant")
         repository.update_job_status(
             "job-1",
             status="completed",

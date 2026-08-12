@@ -20,7 +20,7 @@ from ..market_data import MarketDataClient, probe_market_provider
 from ..provider_resilience import close_shared_http_clients, redact_provider_message
 from ..reporting import build_run_manifest, load_run_manifest
 from ..service import LumenFinAnalysisService
-from .auth import build_api_key_dependency
+from .auth import AuthenticatedPrincipal, build_api_key_dependency, resolve_effective_tenant
 from .schemas import (
     AnalyzeDataRequest,
     AnalyzeRequest,
@@ -67,10 +67,10 @@ def create_app(
 ) -> FastAPI:
     configure_logging()
     app_config = config or AppConfig.from_env()
-    if app_config.requires_api_key() and not app_config.api_key:
+    if app_config.requires_api_key() and not app_config.principal_directory():
         raise RuntimeError(
-            "MAS_API_KEY is required when APP_ENV is not dev/test. "
-            "Set MAS_API_KEY or use APP_ENV=dev for local demos."
+            "MAS_API_KEY (or MAS_API_KEY_PRINCIPALS) is required when APP_ENV is not "
+            "dev/test/integration. Set a key→principal mapping or use APP_ENV=dev for local demos."
         )
     service = LumenFinAnalysisService(
         app_config,
@@ -80,6 +80,8 @@ def create_app(
     auth_dependency = build_api_key_dependency(
         app_config.api_key,
         require_key=app_config.requires_api_key(),
+        principals=app_config.principal_directory(),
+        anonymous_principal=app_config.anonymous_principal(),
     )
 
     app = FastAPI(
@@ -226,7 +228,7 @@ def create_app(
 
         @app.get("/api/v1/provider-resilience/identity", response_model=ProviderIdentityResponse)
         def provider_resilience_identity(
-            _: None = Depends(auth_dependency),
+            _: AuthenticatedPrincipal = Depends(auth_dependency),
         ) -> ProviderIdentityResponse:
             """Test/integration-only worker identity for dual-API Docker evidence."""
             return _provider_identity_payload()
@@ -234,7 +236,7 @@ def create_app(
         @app.post("/api/v1/provider-resilience/probe", response_model=ProviderProbeResponse)
         def provider_resilience_probe(
             payload: ProviderProbeRequest,
-            _: None = Depends(auth_dependency),
+            _: AuthenticatedPrincipal = Depends(auth_dependency),
         ) -> ProviderProbeResponse:
             """Single logical LLM call for dual-API provider resilience harnesses."""
             import socket
@@ -341,7 +343,7 @@ def create_app(
             )
 
     @app.get("/api/v1/config")
-    def get_config(_: None = Depends(auth_dependency)) -> dict:
+    def get_config(_: AuthenticatedPrincipal = Depends(auth_dependency)) -> dict:
         return {
             "output_dir": str(app_config.output_dir),
             "upload_dir": str(app_config.upload_dir),
@@ -438,13 +440,18 @@ def create_app(
         )
 
     @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
-    def analyze(payload: AnalyzeRequest, _: None = Depends(auth_dependency)) -> AnalyzeResponse:
+    def analyze(
+        payload: AnalyzeRequest,
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
+    ) -> AnalyzeResponse:
+        tenant_id = resolve_effective_tenant(principal, None)
         try:
             response = service.analyze(
                 query=payload.query,
                 thread_id=payload.thread_id,
                 export_artifacts=payload.export_artifacts,
                 output_format=payload.output_format,
+                tenant_id=tenant_id,
             )
         except CheckpointConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -453,21 +460,34 @@ def create_app(
         return _to_response(response, include_state=payload.include_state)
 
     @app.post("/api/v1/clarify", response_model=AnalyzeResponse)
-    def clarify(payload: ClarifyRequest, _: None = Depends(auth_dependency)) -> AnalyzeResponse:
+    def clarify(
+        payload: ClarifyRequest,
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
+    ) -> AnalyzeResponse:
+        tenant_id = resolve_effective_tenant(principal, None)
         try:
             response = service.clarify(
                 thread_id=payload.thread_id,
                 clarification=payload.clarification,
                 export_artifacts=payload.export_artifacts,
+                tenant_id=tenant_id,
             )
         except CheckpointConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            # Hide cross-tenant checkpoint existence behind 404.
+            detail = str(exc)
+            if detail.startswith("No checkpoint found"):
+                raise HTTPException(status_code=404, detail=detail) from exc
+            raise HTTPException(status_code=400, detail=detail) from exc
         return _to_response(response, include_state=payload.include_state)
 
     @app.post("/api/v1/analyze-data", response_model=AnalyzeResponse)
-    def analyze_data(payload: AnalyzeDataRequest, _: None = Depends(auth_dependency)) -> AnalyzeResponse:
+    def analyze_data(
+        payload: AnalyzeDataRequest,
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
+    ) -> AnalyzeResponse:
+        tenant_id = resolve_effective_tenant(principal, None)
         try:
             response = service.analyze(
                 query=payload.query,
@@ -475,6 +495,7 @@ def create_app(
                 export_artifacts=payload.export_artifacts,
                 structured_metrics=payload.company_metrics,
                 output_format=payload.output_format,
+                tenant_id=tenant_id,
             )
         except CheckpointConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -490,8 +511,9 @@ def create_app(
         include_state: bool = Form(default=False),
         output_format: str | None = Form(default=None),
         files: list[UploadFile] = File(...),
-        _: None = Depends(auth_dependency),
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> AnalyzeResponse:
+        tenant_id = resolve_effective_tenant(principal, None)
         try:
             uploaded_files = [
                 (upload.filename or "document.pdf", await upload.read()) for upload in files
@@ -510,6 +532,7 @@ def create_app(
                 export_artifacts=export_artifacts,
                 document_paths=saved_paths,
                 output_format=output_format,
+                tenant_id=tenant_id,
             )
         except CheckpointConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -523,8 +546,9 @@ def create_app(
         files: list[UploadFile] = File(...),
         tenant_id: str | None = Form(default=None),
         async_mode: bool = Form(default=False),
-        _: None = Depends(auth_dependency),
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> DocumentIndexResponse:
+        effective_tenant = resolve_effective_tenant(principal, tenant_id)
         try:
             uploaded_files = [
                 (upload.filename or "document.pdf", await upload.read()) for upload in files
@@ -535,7 +559,6 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
-        effective_tenant = tenant_id or app_config.rag_tenant_id
         if async_mode:
             receipts = await run_in_threadpool(
                 service.enqueue_document_paths,
@@ -582,12 +605,13 @@ def create_app(
     def process_document(
         document_id: str,
         tenant_id: str | None = Query(default=None),
-        _: None = Depends(auth_dependency),
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> DocumentStatusResponse:
-        receipt = service.process_document_index(document_id, tenant_id=tenant_id)
+        effective_tenant = resolve_effective_tenant(principal, tenant_id)
+        receipt = service.process_document_index(document_id, tenant_id=effective_tenant)
         if receipt["status"] == "failed" and receipt.get("error") == "document not found":
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
-        record = service.get_document_status(document_id, tenant_id=tenant_id) or {}
+        record = service.get_document_status(document_id, tenant_id=effective_tenant) or {}
         return DocumentStatusResponse(
             document_id=receipt["document_id"],
             tenant_id=receipt["tenant_id"],
@@ -603,9 +627,10 @@ def create_app(
     def get_document_status(
         document_id: str,
         tenant_id: str | None = Query(default=None),
-        _: None = Depends(auth_dependency),
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> DocumentStatusResponse:
-        record = service.get_document_status(document_id, tenant_id=tenant_id)
+        effective_tenant = resolve_effective_tenant(principal, tenant_id)
+        record = service.get_document_status(document_id, tenant_id=effective_tenant)
         if record is None:
             raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
         return DocumentStatusResponse(
@@ -623,15 +648,21 @@ def create_app(
     def submit_job(
         payload: SubmitJobRequest,
         background_tasks: BackgroundTasks,
-        _: None = Depends(auth_dependency),
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> SubmitJobResponse:
-        created = service.submit_job(query=payload.query, thread_id=payload.thread_id)
+        tenant_id = resolve_effective_tenant(principal, None)
+        created = service.submit_job(
+            query=payload.query,
+            thread_id=payload.thread_id,
+            tenant_id=tenant_id,
+        )
         queued = service.enqueue_job(
             created["job_id"],
             payload.query,
             created["thread_id"],
             payload.export_artifacts,
             output_format=payload.output_format,
+            tenant_id=tenant_id,
         )
         if not queued:
             background_tasks.add_task(
@@ -642,8 +673,9 @@ def create_app(
                 payload.export_artifacts,
                 None,
                 payload.output_format,
+                tenant_id,
             )
-        return SubmitJobResponse(**created, queue_backend="redis" if queued else "background-task")
+        return SubmitJobResponse(**{k: v for k, v in created.items() if k != "tenant_id"}, queue_backend="redis" if queued else "background-task")
 
     @app.post("/api/v1/jobs/upload", response_model=SubmitJobResponse, status_code=202)
     async def submit_upload_job(
@@ -653,10 +685,11 @@ def create_app(
         export_artifacts: bool = Form(default=True),
         output_format: str | None = Form(default=None),
         files: list[UploadFile] = File(...),
-        _: None = Depends(auth_dependency),
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> SubmitJobResponse:
+        tenant_id = resolve_effective_tenant(principal, None)
         saved_paths = service.save_uploaded_files([(upload.filename or "document.pdf", await upload.read()) for upload in files])
-        created = service.submit_job(query=query, thread_id=thread_id)
+        created = service.submit_job(query=query, thread_id=thread_id, tenant_id=tenant_id)
         queued = service.enqueue_job(
             created["job_id"],
             query,
@@ -664,6 +697,7 @@ def create_app(
             export_artifacts,
             document_paths=saved_paths,
             output_format=output_format,
+            tenant_id=tenant_id,
         )
         if not queued:
             background_tasks.add_task(
@@ -674,12 +708,17 @@ def create_app(
                 export_artifacts,
                 saved_paths,
                 output_format,
+                tenant_id,
             )
-        return SubmitJobResponse(**created, queue_backend="redis" if queued else "background-task")
+        return SubmitJobResponse(**{k: v for k, v in created.items() if k != "tenant_id"}, queue_backend="redis" if queued else "background-task")
 
     @app.get("/api/v1/jobs/{job_id}", response_model=JobResponse)
-    def get_job(job_id: str, _: None = Depends(auth_dependency)) -> JobResponse:
-        job = service.get_job(job_id)
+    def get_job(
+        job_id: str,
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
+    ) -> JobResponse:
+        tenant_id = resolve_effective_tenant(principal, None)
+        job = service.get_job(job_id, tenant_id=tenant_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found.")
         return JobResponse(**_public_job(job))
@@ -687,11 +726,12 @@ def create_app(
     @app.get("/api/v1/jobs", response_model=list[JobResponse])
     def list_jobs(
         limit: int = Query(default=20, ge=1, le=100),
-        _: None = Depends(auth_dependency),
+        principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> list[JobResponse]:
+        tenant_id = resolve_effective_tenant(principal, None)
         return [
             JobResponse(**_public_job(job))
-            for job in service.list_jobs(limit=limit)
+            for job in service.list_jobs(limit=limit, tenant_id=tenant_id)
         ]
 
     return app

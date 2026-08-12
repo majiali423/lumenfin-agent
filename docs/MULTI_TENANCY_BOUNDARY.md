@@ -1,91 +1,93 @@
 # Multi-Tenancy Boundary
 
-**Scope:** RAG data-plane **tenant-aware logical isolation** for document
-indexing and retrieval. This is **not** a full SaaS IAM implementation.
-
-Evidence (Phase 3.2B integration): tenant leakage count = **0**
-(`outputs/phase32b_integration/20260804T095357Z/summary.json`).
+**Scope:** authentication-bound tenant authorization for API callers, plus
+RAG / job / checkpoint **logical isolation**. This is **not** full SaaS IAM,
+OIDC, or physical infrastructure isolation.
 
 ---
 
-## 1. Current multi-tenant goal
+## 1. Goal
 
-Prevent tenant A from reading tenant B’s indexed documents, chunks, or vectors
-when callers supply distinct `tenant_id` values through repository and retrieval
-APIs.
+Prevent tenant A from:
 
-## 2. `tenant_id` source
+1. Impersonating tenant B by sending `tenant_id=tenant-b` on a request
+2. Reading tenant B’s jobs, checkpoints, or indexed documents by ID
 
-- Config default: `MAS_RAG_TENANT_ID` (often `default`)
-- Upload / index API: optional `tenant_id` form field overrides for that job
-- Redis index payload: carries `tenant_id` for worker processing
-- Callers are trusted to pass the intended tenant — **no login/JWT binding**
+## 2. Identity chain
 
-## 3. Document ID namespace
+```
+X-API-Key
+  → AuthenticatedPrincipal(client_id, tenant_id)   # from server config
+  → resolve_effective_tenant(request.tenant_id?)   # mismatch → HTTP 403
+  → service / queue / checkpoint / RAG lookup
+```
 
-Canonical document IDs include **`tenant_id + content_hash`** so identical bytes
-under different tenants do not collide.
+Configuration:
 
-## 4. PostgreSQL isolation
+| Env | Role |
+|-----|------|
+| `MAS_API_KEY` | Legacy single key (bound to one tenant) |
+| `MAS_API_KEY_CLIENT_ID` | Client id for the legacy key |
+| `MAS_API_KEY_TENANT_ID` | Tenant bound to the legacy key (defaults toward `MAS_RAG_TENANT_ID`) |
+| `MAS_API_KEY_PRINCIPALS` | JSON map of key → `{client_id, tenant_id}` |
 
-RAG document / chunk CRUD filters by `tenant_id` in the repository layer.
-Not enforced via PostgreSQL Row-Level Security.
+Legacy keys cannot freely impersonate other tenants. Explicit request
+`tenant_id` must match the principal or the API returns **403**.
 
-## 5. Redis payload
+## 3. Resource ownership
 
-Index jobs include `tenant_id` in the message payload so workers restore
-tenant context after reserve/reclaim.
+| Resource | Lookup | Cross-tenant result |
+|----------|--------|---------------------|
+| Analysis job | `job_id` + authorized `tenant_id` | **404** |
+| Job list | filtered by `tenant_id` | foreign jobs omitted |
+| Checkpoint / clarify | `thread_id` + authorized `tenant_id` | **404** |
+| RAG document status | `document_id` + authorized `tenant_id` | **404** |
+| Document index form `tenant_id` | must match principal | **403** on mismatch |
 
-## 6. Worker tenant context
+Queue / worker payloads carry the already-authorized `tenant_id` from the
+API boundary; workers trust that internal payload, not a raw caller field.
 
-Index workers read `tenant_id` from the job payload and pass it into claim /
-index / finalize paths. Lost context without payload would be a defect; covered
-by integration scenarios.
+## 4. RAG data plane (unchanged shape)
 
-## 7. Milvus metadata filtering
+- Config default: `MAS_RAG_TENANT_ID`
+- Canonical document IDs include `tenant_id + content_hash`
+- Repository CRUD and Milvus metadata filters remain tenant-scoped
+- Index jobs include `tenant_id` in Redis payloads
 
-Vector rows store tenant metadata; search expressions push down `tenant_id`
-filters. Row keys are tenant-aware.
+## 5. What this is / is not
 
-## 8–9. Keyword / hybrid retrieval filtering
-
-Keyword and hybrid retrieval are tenant-scoped (repository + vector filter).
-
-## 10. Integration evidence
-
-| Check | Result |
+| Layer | Status |
 |-------|--------|
-| Phase 3.2B tenant isolation | PASS |
-| `tenant_leakage_count` | 0 |
-| Run id | `20260804T095357Z` |
+| Logical isolation (filters / metadata) | yes |
+| Authorization isolation (principal-bound tenant) | yes |
+| Physical isolation (separate DB/cluster per tenant) | no |
+| OAuth / OIDC / Keycloak | no |
+| Full RBAC / roles | no |
+| PostgreSQL Row-Level Security | no |
 
-## 11. Authentication gaps (not covered)
+## 6. Evidence
 
-- No binding of `tenant_id` to authenticated principal
-- No per-tenant API keys or JWT claims
-- A caller who can hit the API can attempt to pass another tenant’s id
+- Unit / API tests: `tests/test_tenant_authz.py`
+- RAG tenant isolation harnesses remain under the offline suite
+- Multi-process queue isolation evidence lives under integration validation
+  docs (see reliability / validation command references)
 
-## 12. Checkpoint / analysis job gaps (not covered)
+## 7. Evolution path (out of scope here)
 
-- Workflow checkpoints are not fully tenant-scoped
-- Analysis job tables are not a complete multi-tenant IAM boundary
-
-## 13. Production evolution path
-
-1. Authenticate callers; derive `tenant_id` from claims (ignore client spoof)
-2. Scope checkpoints and analysis jobs by tenant
-3. Optional PostgreSQL RLS as defense in depth
-4. Optional per-tenant collections / databases for stronger blast-radius limits
+1. External IdP (OIDC) issuing tenant claims
+2. Optional PostgreSQL RLS as defense in depth
+3. Optional per-tenant collections / databases for stronger blast-radius limits
 
 ---
 
 ## Threat boundary table
 
-| Risk | Current protection | Status |
-|------|--------------------|--------|
-| A reads B’s RAG documents | tenant-scoped repository query | covered |
-| A retrieves B’s vectors | Milvus tenant filter | covered |
+| Risk | Protection | Status |
+|------|------------|--------|
+| A reads B’s RAG documents | tenant-scoped repository + authz tenant | covered |
+| A retrieves B’s vectors | Milvus tenant filter + authorized tenant | covered |
 | Redis worker loses tenant context | `tenant_id` in payload | covered |
-| User forges `tenant_id` | no identity binding | **not covered** |
-| Cross-tenant checkpoint | checkpoint not fully tenant scoped | **not covered** |
-| DB query forgets tenant filter | repository encapsulation + tests; no RLS | **partially covered** |
+| User forges `tenant_id` | principal binding → **403** | covered |
+| Cross-tenant job / checkpoint | tenant-scoped lookup → **404** | covered |
+| DB query forgets tenant filter | repository encapsulation + tests; no RLS | partially covered |
+| Compromised API key for tenant A | full access within A only | by design |

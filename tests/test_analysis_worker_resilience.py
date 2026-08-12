@@ -1,6 +1,6 @@
-"""Deterministic Analysis Worker at-least-once / redelivery tests.
+﻿"""Deterministic Analysis Worker at-least-once / redelivery tests.
 
-Covers the Redis reserve → run_job → commit → ACK window without Docker.
+Covers the Redis reserve 鈫?run_job 鈫?commit 鈫?ACK window without Docker.
 Docker multi-worker kill/reclaim remains remaining work (see Phase 3.2B index harness).
 """
 
@@ -124,7 +124,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
         self.assertEqual(queue.depths()["pending"], 1)
         self.assertEqual(queue.depths()["processing"], 0)
         self.assertEqual(queue.depths()["dead_letter"], 0)
-        failed = service.get_job(job_id)
+        failed = service.get_job(job_id, tenant_id="default")
         assert failed is not None
         self.assertEqual(failed["status"], "failed")
         self.assertIn("injected analysis failure", failed["error_message"] or "")
@@ -143,7 +143,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
         self.assertEqual(depths["pending"], 0)
         self.assertEqual(depths["processing"], 0)
         self.assertEqual(depths["dead_letter"], 0)
-        done = service.get_job(job_id)
+        done = service.get_job(job_id, tenant_id="default")
         assert done is not None
         self.assertEqual(done["status"], "completed")
         self.assertIsNone(done["error_message"])
@@ -170,7 +170,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
         self.assertEqual(depths["pending"], 0)
         self.assertEqual(depths["processing"], 0)
         self.assertEqual(depths["dead_letter"], 1)
-        job = service.get_job(job_id)
+        job = service.get_job(job_id, tenant_id="default")
         assert job is not None
         self.assertEqual(job["status"], "failed")
         self.assertIn("injected analysis failure", job["error_message"] or "")
@@ -190,7 +190,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
             thread_id=f"thread-{job_id}",
             export_artifacts=False,
         )
-        first = service.get_job(job_id)
+        first = service.get_job(job_id, tenant_id="default")
         assert first is not None
         self.assertEqual(first["status"], "completed")
         self.assertEqual(first["result"]["final_report"], "canonical-result-1")
@@ -214,7 +214,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
         )
         self.assertEqual(action, "acked")
         self.assertEqual(service.analyze_calls, 1)
-        second = service.get_job(job_id)
+        second = service.get_job(job_id, tenant_id="default")
         assert second is not None
         self.assertEqual(second["status"], "completed")
         self.assertEqual(second["result"], first["result"])
@@ -254,7 +254,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
 
         self.assertEqual(actions, ["acked", "acked"])
         self.assertEqual(service.analyze_calls, 1)
-        job = service.get_job(job_id)
+        job = service.get_job(job_id, tenant_id="default")
         assert job is not None
         self.assertEqual(job["status"], "completed")
         self.assertEqual(job["result"]["final_report"], "canonical-result-1")
@@ -278,7 +278,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
             status="failed",
             error_message="should-not-stick",
         )
-        job = service.get_job(job_id)
+        job = service.get_job(job_id, tenant_id="default")
         assert job is not None
         self.assertEqual(job["status"], "completed")
         self.assertEqual(job["result"]["final_report"], "keep-me")
@@ -303,7 +303,7 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
                 thread_id=f"thread-{job_id}",
                 export_artifacts=False,
             )
-        job = service.get_job(job_id)
+        job = service.get_job(job_id, tenant_id="default")
         assert job is not None
         self.assertEqual(job["status"], "completed")
         self.assertEqual(job["result"]["final_report"], "canonical-result-1")

@@ -21,6 +21,7 @@ def execute_analysis_job(
     export_artifacts: bool = True,
     document_paths: list[str] | None = None,
     output_format: str | None = None,
+    tenant_id: str | None = None,
     *,
     service: LumenFinAnalysisService | None = None,
 ) -> None:
@@ -34,6 +35,7 @@ def execute_analysis_job(
         export_artifacts=export_artifacts,
         document_paths=document_paths or [],
         output_format=output_format,
+        tenant_id=tenant_id,
     )
 
 
@@ -67,6 +69,7 @@ def process_reserved_analysis_message(
             export_artifacts=payload.get("export_artifacts", True),
             document_paths=payload.get("document_paths", []),
             output_format=payload.get("output_format"),
+            tenant_id=payload.get("tenant_id"),
             service=service,
         )
     except Exception as exc:  # noqa: BLE001 - persist failure then retry/DLQ

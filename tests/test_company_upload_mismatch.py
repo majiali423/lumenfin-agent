@@ -80,7 +80,12 @@ class CompanyUploadMismatchHitlTestCase(unittest.TestCase):
         self.assertEqual(route_after_query_planner({"missing_fields": []}), "supervisor")
 
     def test_mismatch_workflow_pause_and_resume_with_scope(self) -> None:
-        config = build_test_config(ROOT / "test_artifacts" / f"mismatch-{uuid4().hex[:8]}")
+        from dataclasses import replace
+
+        config = replace(
+            build_test_config(ROOT / "test_artifacts" / f"mismatch-{uuid4().hex[:8]}"),
+            rag_enabled=False,
+        )
         app = LumenFinAgentSystem(
             llm_client=LocalFallbackLLMClient(),
             app_config=config,

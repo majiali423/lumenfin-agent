@@ -96,8 +96,10 @@ class CheckpointPersistenceTestCase(unittest.TestCase):
         self.assertEqual(node, "await_clarification")
 
     def test_hitl_survives_service_restart(self) -> None:
+        from dataclasses import replace
+
         root = ROOT / "test_artifacts" / f"checkpoint-{uuid4().hex[:8]}"
-        config = build_test_config(root)
+        config = replace(build_test_config(root), rag_enabled=False)
         repo = WorkflowCheckpointRepository.from_database_url(config.database_url, db_path=config.db_path)
 
         service1 = LumenFinAnalysisService(

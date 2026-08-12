@@ -17,12 +17,25 @@ psql $psqlUrl `
 psql $psqlUrl `
     -v ON_ERROR_STOP=1 `
     -f migrations/postgresql/002_add_rag_index_lease.sql
+
+psql $psqlUrl `
+    -v ON_ERROR_STOP=1 `
+    -f migrations/postgresql/003_add_tenant_ownership.sql
 ```
 
 `MAS_DATABASE_URL` uses SQLAlchemy's `postgresql+psycopg://` scheme, while `psql`
 accepts the libpq `postgresql://` (or `postgres://`) scheme. The replacement changes
 only the driver scheme; credentials, host, port, and database name are preserved.
 
-The migration is safe to run repeatedly. Startup fails with an actionable error if an
-existing non-SQLite `workflow_checkpoints` table does not contain `revision`, or if
-`rag_documents` is missing the indexing lease columns.
+The migrations are safe to run repeatedly (`IF NOT EXISTS`). Startup fails with an
+actionable error if an existing non-SQLite `workflow_checkpoints` table does not
+contain `revision`, or if `rag_documents` is missing the indexing lease columns.
+
+`003_add_tenant_ownership.sql` is a **pre-production / RC schema migration**
+(manual `psql`, same style as 001/002)—not a zero-downtime online migration
+framework. On existing databases it adds `analysis_jobs.tenant_id` and
+`workflow_checkpoints.tenant_id` as `TEXT NOT NULL DEFAULT 'default'`, so legacy
+rows bind to the product default tenant (`default`). Apply it before relying on
+principal-bound job/checkpoint isolation on upgraded PostgreSQL databases.
+Operators who previously used a non-default logical tenant must re-bind data or
+principals explicitly.
