@@ -9,6 +9,7 @@ from .hybrid_retriever import HybridEvidenceRetriever
 from .indexer import DocumentIndexer
 from .milvus_client import resolve_milvus_uri
 from .milvus_store import MilvusRAGStore
+from .rerank import build_reranker
 
 
 def build_rag_store(config: AppConfig) -> MilvusRAGStore | None:
@@ -28,6 +29,7 @@ def build_rag_store(config: AppConfig) -> MilvusRAGStore | None:
         uri=resolved,
         embedder=embedder,
         collection_name=config.milvus_collection,
+        bm25_enabled=config.rag_bm25_enabled,
     )
 
 
@@ -74,6 +76,23 @@ def build_hybrid_retriever(
         degrade_on_vector_error=config.rag_degrade_on_vector_error,
         rerank_enabled=config.rag_rerank_enabled,
         rerank_candidates=config.rag_rerank_candidates,
+        reranker=(
+            build_reranker(
+                config.rag_rerank_provider,
+                model=config.rag_rerank_model,
+                base_url=config.rag_rerank_base_url,
+                instruct=config.rag_rerank_instruct,
+                timeout_seconds=config.rag_rerank_timeout_seconds,
+                max_attempts=config.rag_rerank_max_attempts,
+                backoff_seconds=config.rag_rerank_backoff_seconds,
+                max_inflight=config.rag_rerank_max_inflight_per_process,
+                acquire_timeout_seconds=config.provider_acquire_timeout_seconds,
+                max_document_chars=config.rag_rerank_max_document_chars,
+            )
+            if config.rag_rerank_enabled
+            else None
+        ),
+        bm25_rrf_weight=config.rag_bm25_rrf_weight,
     )
 
 

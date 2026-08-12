@@ -36,6 +36,18 @@ class VectorStore(Protocol):
         top_k: int = 5,
     ) -> list[dict[str, Any]]: ...
 
+    def bm25_search(
+        self,
+        query: str,
+        *,
+        session_id: str | None = None,
+        tenant_id: str | None = None,
+        document_ids: list[str] | None = None,
+        source_document_ids: list[str] | None = None,
+        companies: list[str] | None = None,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]: ...
+
     def delete_by_source_document(self, *, tenant_id: str, source_document_id: str) -> None: ...
 
     def prime_query_embedding(self, query: str) -> list[float]: ...

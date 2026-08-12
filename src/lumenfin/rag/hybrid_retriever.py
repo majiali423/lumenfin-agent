@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..provider_resilience import redact_provider_message
 from .lexical import lexical_overlap, query_has_any, tokenize_text
 from .milvus_store import EmbeddingQueryError, MilvusRAGStore
-from .rerank import rerank_hits
+from .rerank import LexicalReranker, Reranker
 from .vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -191,20 +192,25 @@ def reciprocal_rank_fusion(
     ranked_lists: list[list[dict[str, Any]]],
     *,
     k: int = 60,
+    retrieval_method: str = "hybrid_rrf",
+    weights: list[float] | None = None,
 ) -> list[dict[str, Any]]:
+    if weights is not None and len(weights) != len(ranked_lists):
+        raise ValueError("RRF weights must match the number of ranked lists")
     fused_scores: dict[str, float] = {}
     payload_by_id: dict[str, dict[str, Any]] = {}
-    for ranked in ranked_lists:
+    for list_index, ranked in enumerate(ranked_lists):
+        weight = float(weights[list_index]) if weights is not None else 1.0
         for rank, item in enumerate(ranked, start=1):
             chunk_id = item["chunk_id"]
-            fused_scores[chunk_id] = fused_scores.get(chunk_id, 0.0) + 1.0 / (k + rank)
+            fused_scores[chunk_id] = fused_scores.get(chunk_id, 0.0) + weight / (k + rank)
             payload_by_id.setdefault(chunk_id, item)
     ordered = sorted(fused_scores.items(), key=lambda pair: pair[1], reverse=True)
     merged: list[dict[str, Any]] = []
     for chunk_id, score in ordered:
         hit = dict(payload_by_id[chunk_id])
         hit["fusion_score"] = round(score, 6)
-        hit["retrieval_method"] = "hybrid_rrf"
+        hit["retrieval_method"] = retrieval_method
         merged.append(hit)
     return merged
 
@@ -215,8 +221,8 @@ def _apply_min_score(hits: list[dict[str, Any]], min_score: float) -> list[dict[
     kept: list[dict[str, Any]] = []
     for hit in hits:
         method = str(hit.get("retrieval_method") or "")
-        if method == "hybrid_rrf":
-            # RRF scores are small (~0.01–0.03); do not apply keyword-scale thresholds.
+        if "rrf" in method or method == "bm25":
+            # RRF and BM25 scores are not on the cosine/local-lexical scale.
             kept.append(hit)
             continue
         score = float(hit.get("score") or 0.0)
@@ -226,7 +232,7 @@ def _apply_min_score(hits: list[dict[str, Any]], min_score: float) -> list[dict[
 
 
 class HybridEvidenceRetriever:
-    """Vector + keyword fusion tailored for financial diligence queries."""
+    """Dense + Milvus BM25 fusion with a local lexical emergency fallback."""
 
     def __init__(
         self,
@@ -238,6 +244,8 @@ class HybridEvidenceRetriever:
         degrade_on_vector_error: bool = True,
         rerank_enabled: bool = False,
         rerank_candidates: int = 20,
+        reranker: Reranker | None = None,
+        bm25_rrf_weight: float = 1.1,
     ) -> None:
         self.rag_store = rag_store
         self.top_k = top_k
@@ -246,6 +254,8 @@ class HybridEvidenceRetriever:
         self.degrade_on_vector_error = bool(degrade_on_vector_error)
         self.rerank_enabled = bool(rerank_enabled)
         self.rerank_candidates = max(int(rerank_candidates or top_k), int(top_k))
+        self.reranker = reranker or (LexicalReranker() if self.rerank_enabled else None)
+        self.bm25_rrf_weight = max(0.0, float(bm25_rrf_weight))
 
     def retrieve_for_company(
         self,
@@ -292,114 +302,243 @@ class HybridEvidenceRetriever:
             )
 
         if stored_chunks is not None:
-            keyword_hits = _hits_from_scored_chunks(
+            lexical_fallback_hits = _hits_from_scored_chunks(
                 stored_chunks,
                 company=company,
                 query=query,
                 top_k=candidate_k,
             )
         else:
-            keyword_hits = _keyword_search(
+            lexical_fallback_hits = _keyword_search(
                 document_contexts,
                 company=company,
                 query=query,
                 top_k=candidate_k,
             )
 
+        bm25_enabled = bool(
+            self.rag_store
+            and getattr(self.rag_store, "bm25_enabled", False)
+            and callable(getattr(self.rag_store, "bm25_search", None))
+        )
         meta: dict[str, Any] = {
             "degraded": False,
             "degrade_reason": "",
-            "mode": "keyword_only",
+            "mode": "lexical_fallback_only",
             "vector_hits": 0,
-            "keyword_hits": len(keyword_hits),
+            "bm25_hits": 0,
+            # Backward-compatible aggregate name used by existing metrics clients.
+            "keyword_hits": 0,
+            "lexical_fallback_hits": len(lexical_fallback_hits),
+            "bm25_enabled": bm25_enabled,
+            "bm25_rrf_weight": self.bm25_rrf_weight,
             "filtered_by_min_score": 0,
             "rerank_enabled": self.rerank_enabled,
             "rerank_candidates": candidate_k if self.rerank_enabled else 0,
+            "rerank_requested_provider": (
+                self.reranker.provider_name if self.reranker is not None else ""
+            ),
+            "rerank_provider": "",
+            "rerank_model": "",
+            "rerank_latency_ms": 0.0,
+            "rerank_attempts": 0,
+            "rerank_tokens": 0,
+            "rerank_fallback": False,
+            "rerank_error_type": "",
         }
+        degrade_reasons: list[str] = []
 
-        def _finalize(hits: list[dict[str, Any]], *, mode: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        def _record_degrade(branch: str, exc: Exception) -> None:
+            reason = f"{branch}: {redact_provider_message(str(exc))}"
+            degrade_reasons.append(reason[:500])
+            meta["degraded"] = True
+            meta["degrade_reason"] = "; ".join(degrade_reasons)[:500]
+            meta[f"{branch}_error_type"] = type(exc).__name__
+            meta.setdefault("error_type", type(exc).__name__)
+
+        def _finalize(
+            hits: list[dict[str, Any]],
+            *,
+            mode: str,
+        ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             selected = hits
-            if self.rerank_enabled and selected:
-                selected = rerank_hits(query, selected, top_k=self.top_k)
-                meta["mode"] = f"{mode}+rerank"
+            if self.rerank_enabled and selected and self.reranker is not None:
+                try:
+                    selected, rerank_meta = self.reranker.rerank(
+                        query,
+                        selected,
+                        top_k=self.top_k,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Unexpected reranker failure; using lexical fallback: %s",
+                        redact_provider_message(str(exc)),
+                    )
+                    selected, rerank_meta = LexicalReranker().rerank(
+                        query,
+                        selected,
+                        top_k=self.top_k,
+                    )
+                    rerank_meta.update(
+                        {
+                            "rerank_requested_provider": self.reranker.provider_name,
+                            "rerank_requested_model": self.reranker.model_name,
+                            "rerank_fallback": True,
+                            "rerank_error_type": type(exc).__name__,
+                            "rerank_error": redact_provider_message(str(exc)),
+                            "rerank_mode_suffix": "lexical_rerank_fallback",
+                        }
+                    )
+                meta.update(rerank_meta)
+                suffix = str(rerank_meta.get("rerank_mode_suffix") or "rerank")
+                meta["mode"] = f"{mode}+{suffix}"
+                if bool(rerank_meta.get("rerank_fallback")):
+                    reason = str(rerank_meta.get("rerank_error") or "provider failure")
+                    degrade_reasons.append(f"rerank: {reason}"[:500])
+                    meta["degraded"] = True
+                    meta["degrade_reason"] = "; ".join(degrade_reasons)[:500]
+                    meta.setdefault(
+                        "error_type",
+                        str(rerank_meta.get("rerank_error_type") or "rerank_failure"),
+                    )
             else:
                 selected = selected[: self.top_k]
                 meta["mode"] = mode
             filtered = _apply_min_score(selected, self.min_score)
             meta["filtered_by_min_score"] = max(0, len(selected) - len(filtered))
+            if meta["degraded"]:
+                for hit in filtered:
+                    hit["rag_degraded"] = True
             return filtered, meta
 
-        if not self.rag_store:
-            return _finalize(keyword_hits, mode="keyword_only")
-        if not document_contexts and not source_document_ids:
-            return _finalize(keyword_hits, mode="keyword_only")
+        if not self.rag_store or (not document_contexts and not source_document_ids):
+            meta["keyword_hits"] = len(lexical_fallback_hits)
+            return _finalize(lexical_fallback_hits, mode="lexical_fallback_only")
 
+        scoped_session = None if (tenant_id and source_document_ids) else session_id
+
+        def _company_post_filter(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return [
+                hit
+                for hit in hits
+                if company in list(hit.get("companies") or [])
+                or company.lower() in str(hit.get("text") or "").lower()
+                or not hit.get("companies")
+            ][:candidate_k]
+
+        bm25_hits: list[dict[str, Any]] = []
+        if bm25_enabled:
+            try:
+                bm25_hits = self.rag_store.bm25_search(
+                    query,
+                    session_id=scoped_session,
+                    tenant_id=tenant_id,
+                    source_document_ids=source_document_ids,
+                    companies=[company],
+                    top_k=candidate_k,
+                )
+                if not bm25_hits:
+                    broadened = self.rag_store.bm25_search(
+                        query,
+                        session_id=scoped_session,
+                        tenant_id=tenant_id,
+                        source_document_ids=source_document_ids,
+                        companies=None,
+                        top_k=max(candidate_k * 2, candidate_k),
+                    )
+                    bm25_hits = _company_post_filter(broadened)
+                    if bm25_hits:
+                        meta["bm25_company_filter_relaxed"] = True
+            except Exception as exc:
+                if not self.degrade_on_vector_error:
+                    raise
+                logger.warning(
+                    "BM25 search failed for company=%s; retaining other retrieval paths: %s",
+                    company,
+                    redact_provider_message(str(exc)),
+                )
+                _record_degrade("bm25", exc)
+        meta["bm25_hits"] = len(bm25_hits)
+        meta["keyword_hits"] = len(bm25_hits) if bm25_enabled else len(lexical_fallback_hits)
+
+        vector_hits: list[dict[str, Any]] = []
         try:
             vector_hits = self.rag_store.vector_search(
                 query,
-                session_id=None if (tenant_id and source_document_ids) else session_id,
+                session_id=scoped_session,
                 tenant_id=tenant_id,
                 source_document_ids=source_document_ids,
                 companies=[company],
                 top_k=candidate_k,
             )
-            # Shared path with agent: if company-tagged filter yields empty, retry
-            # without company filter then post-filter (issuer tags may be sparse).
             if not vector_hits:
                 broadened = self.rag_store.vector_search(
                     query,
-                    session_id=None if (tenant_id and source_document_ids) else session_id,
+                    session_id=scoped_session,
                     tenant_id=tenant_id,
                     source_document_ids=source_document_ids,
                     companies=None,
                     top_k=max(candidate_k * 2, candidate_k),
                 )
-                vector_hits = [
-                    hit
-                    for hit in broadened
-                    if company in list(hit.get("companies") or [])
-                    or company.lower() in str(hit.get("text") or "").lower()
-                    or not hit.get("companies")
-                ][:candidate_k]
+                vector_hits = _company_post_filter(broadened)
                 if vector_hits:
                     meta["company_filter_relaxed"] = True
         except Exception as exc:
             if not self.degrade_on_vector_error:
                 raise
-            reason = str(exc)
             logger.warning(
-                "Vector search failed for company=%s; falling back to keyword-only: %s",
+                "Vector search failed for company=%s; retaining lexical retrieval paths: %s",
                 company,
-                reason,
+                redact_provider_message(str(exc)),
             )
-            meta.update(
-                {
-                    "degraded": True,
-                    "degrade_reason": reason[:500],
-                    "error_type": type(exc).__name__,
-                }
-            )
-            hits, meta = _finalize(keyword_hits, mode="keyword_only_degraded")
-            for hit in hits:
-                hit["rag_degraded"] = True
-            meta["keyword_hits"] = len(hits)
-            return hits, meta
-
+            _record_degrade("vector", exc)
         meta["vector_hits"] = len(vector_hits)
-        if not vector_hits:
-            if self.rag_store is not None:
-                logger.warning(
-                    "RAG mode mismatch risk: vector_hits=0 for company=%s tenant=%s; "
-                    "falling back to keyword_only (agent/showcase expect hybrid_rrf when indexed).",
-                    company,
-                    tenant_id or session_id,
-                )
-            return _finalize(keyword_hits, mode="keyword_only")
-        if not keyword_hits:
-            return _finalize(vector_hits, mode="vector_only")
 
-        fused = reciprocal_rank_fusion([vector_hits, keyword_hits])[:candidate_k]
-        return _finalize(fused, mode="hybrid_rrf")
+        if not bm25_enabled:
+            if vector_hits and lexical_fallback_hits:
+                fused = reciprocal_rank_fusion([vector_hits, lexical_fallback_hits])[:candidate_k]
+                return _finalize(fused, mode="hybrid_rrf")
+            if vector_hits:
+                return _finalize(vector_hits, mode="vector_only")
+            return _finalize(
+                lexical_fallback_hits,
+                mode="keyword_only_degraded" if meta["degraded"] else "keyword_only",
+            )
+
+        if vector_hits and bm25_hits:
+            fused = reciprocal_rank_fusion(
+                [vector_hits, bm25_hits],
+                retrieval_method="hybrid_dense_bm25_rrf",
+                weights=[1.0, self.bm25_rrf_weight],
+            )[:candidate_k]
+            return _finalize(fused, mode="hybrid_dense_bm25_rrf")
+        if bm25_hits:
+            mode = "bm25_only_degraded" if meta["degraded"] else "bm25_only"
+            return _finalize(bm25_hits, mode=mode)
+        if vector_hits:
+            if meta["degraded"] and lexical_fallback_hits:
+                fused = reciprocal_rank_fusion(
+                    [vector_hits, lexical_fallback_hits],
+                    retrieval_method="hybrid_dense_lexical_fallback_rrf",
+                )[:candidate_k]
+                return _finalize(fused, mode="hybrid_dense_lexical_fallback_rrf_degraded")
+            return _finalize(
+                vector_hits,
+                mode="vector_only_degraded" if meta["degraded"] else "vector_only",
+            )
+
+        if self.rag_store is not None:
+            logger.warning(
+                "RAG retrieval returned no dense/BM25 hits for company=%s tenant=%s; "
+                "using local lexical fallback.",
+                company,
+                tenant_id or session_id,
+            )
+        meta["keyword_hits"] = len(lexical_fallback_hits)
+        return _finalize(
+            lexical_fallback_hits,
+            mode="lexical_fallback_only_degraded" if meta["degraded"] else "lexical_fallback_only",
+        )
 
     def build_source_documents(self, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         documents: list[dict[str, Any]] = []
@@ -415,6 +554,9 @@ class HybridEvidenceRetriever:
                     "retrieval_method": hit.get("retrieval_method"),
                     "fusion_score": hit.get("fusion_score", hit.get("score")),
                     "rerank_score": hit.get("rerank_score"),
+                    "rerank_provider": hit.get("rerank_provider"),
+                    "rerank_model": hit.get("rerank_model"),
+                    "rerank_fallback": bool(hit.get("rerank_fallback")),
                     "rag_degraded": bool(hit.get("rag_degraded")),
                 }
             )

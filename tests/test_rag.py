@@ -136,6 +136,24 @@ class RagModuleTestCase(unittest.TestCase):
         self.assertEqual(merged[0]["chunk_id"], "a")
         self.assertIn("fusion_score", merged[0])
 
+    def test_weighted_rrf_breaks_cross_rank_tie_for_bm25(self) -> None:
+        dense = [
+            {"chunk_id": "noise", "text": "noise"},
+            {"chunk_id": "relevant", "text": "relevant"},
+        ]
+        bm25 = [
+            {"chunk_id": "relevant", "text": "relevant"},
+            {"chunk_id": "noise", "text": "noise"},
+        ]
+
+        merged = reciprocal_rank_fusion([dense, bm25], weights=[1.0, 1.1])
+
+        self.assertEqual(merged[0]["chunk_id"], "relevant")
+
+    def test_rrf_rejects_weight_count_mismatch(self) -> None:
+        with self.assertRaisesRegex(ValueError, "weights"):
+            reciprocal_rank_fusion([[{"chunk_id": "a"}]], weights=[1.0, 1.1])
+
 
 if __name__ == "__main__":
     unittest.main()

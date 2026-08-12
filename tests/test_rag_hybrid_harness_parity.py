@@ -66,8 +66,9 @@ class HybridHarnessParityTestCase(unittest.TestCase):
             )
             self.assertGreaterEqual(len(hits), 1)
             mode = str(meta.get("mode") or "")
-            self.assertIn("hybrid_rrf", mode, msg=f"expected hybrid mode, got {meta}")
+            self.assertIn("hybrid_dense_bm25_rrf", mode, msg=f"expected hybrid mode, got {meta}")
             self.assertGreater(int(meta.get("vector_hits") or 0), 0)
+            self.assertGreater(int(meta.get("bm25_hits") or 0), 0)
         finally:
             try:
                 store.close()

@@ -35,6 +35,34 @@ class RetrievalSanitizeTestCase(unittest.TestCase):
 
 
 class RagTelemetryTestCase(unittest.TestCase):
+    def test_bm25_hybrid_mode_has_priority_and_counts_sparse_hits(self) -> None:
+        summary = summarize_rag_telemetry(
+            rag_index_stats={},
+            company_metas=[
+                {
+                    "vector_hits": 2,
+                    "bm25_hits": 3,
+                    "keyword_hits": 3,
+                    "lexical_fallback_hits": 4,
+                    "degraded": False,
+                    "mode": "hybrid_dense_bm25_rrf",
+                },
+                {
+                    "vector_hits": 0,
+                    "bm25_hits": 1,
+                    "keyword_hits": 1,
+                    "lexical_fallback_hits": 2,
+                    "degraded": True,
+                    "mode": "bm25_only_degraded",
+                },
+            ],
+        )
+
+        self.assertEqual(summary["mode"], "hybrid_dense_bm25_rrf")
+        self.assertEqual(summary["vector_hits"], 2)
+        self.assertEqual(summary["bm25_hits"], 4)
+        self.assertEqual(summary["lexical_fallback_hits"], 6)
+
     def test_summarize_includes_hits_and_degrade(self) -> None:
         summary = summarize_rag_telemetry(
             rag_index_stats={
@@ -60,6 +88,41 @@ class RagTelemetryTestCase(unittest.TestCase):
         self.assertEqual(summary["embed_ms"], 12.5)
         self.assertEqual(summary["mode"], "hybrid_rrf")
         self.assertIn("hybrid_rrf", summary["retrieve_modes"])
+
+    def test_rerank_provider_telemetry_is_aggregated(self) -> None:
+        summary = summarize_rag_telemetry(
+            rag_index_stats=None,
+            company_metas=[
+                {
+                    "mode": "hybrid_dense_bm25_rrf+qwen3_rerank",
+                    "rerank_provider": "dashscope",
+                    "rerank_requested_provider": "dashscope",
+                    "rerank_model": "qwen3-rerank",
+                    "rerank_latency_ms": 14.25,
+                    "rerank_attempts": 1,
+                    "rerank_tokens": 120,
+                },
+                {
+                    "mode": "hybrid_dense_bm25_rrf+lexical_rerank_fallback",
+                    "rerank_provider": "lexical",
+                    "rerank_requested_provider": "dashscope",
+                    "rerank_model": "qwen3-rerank",
+                    "rerank_latency_ms": 20.5,
+                    "rerank_attempts": 2,
+                    "rerank_fallback": True,
+                    "rerank_error_type": "timeout",
+                },
+            ],
+        )
+
+        self.assertEqual(summary["rerank_providers"], ["dashscope", "lexical"])
+        self.assertEqual(summary["rerank_requested_providers"], ["dashscope"])
+        self.assertEqual(summary["rerank_models"], ["qwen3-rerank"])
+        self.assertEqual(summary["rerank_latency_ms"], 34.75)
+        self.assertEqual(summary["rerank_attempts"], 3)
+        self.assertEqual(summary["rerank_tokens"], 120)
+        self.assertEqual(summary["rerank_fallbacks"], 1)
+        self.assertEqual(summary["rerank_error_types"], ["timeout"])
 
     def test_eval_gates_fail_on_low_recall(self) -> None:
         summary = {

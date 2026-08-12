@@ -177,7 +177,8 @@ class QueryCacheAndDegradeTestCase(unittest.TestCase):
                 document_contexts=documents,
             )
             self.assertTrue(meta["degraded"])
-            self.assertEqual(meta["mode"], "keyword_only_degraded")
+            self.assertEqual(meta["mode"], "bm25_only_degraded")
+            self.assertGreater(meta["bm25_hits"], 0)
             self.assertGreaterEqual(len(hits), 1)
             self.assertTrue(all(hit.get("rag_degraded") for hit in hits))
             self.assertTrue(any("supply chain" in hit["text"].lower() for hit in hits))

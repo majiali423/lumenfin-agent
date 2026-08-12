@@ -1,0 +1,122 @@
+[
+  {
+    "id": "apple-revenue-period",
+    "query": "What was Apple consolidated revenue in FY2025?",
+    "candidates": [
+      {"id": "wrong-period", "text": "Apple consolidated revenue in FY2024 was 391 billion dollars.", "relevance": 0},
+      {"id": "segment", "text": "Apple Services net sales grew in FY2025, but this passage does not state consolidated revenue.", "relevance": 1},
+      {"id": "correct", "text": "Apple reported consolidated net sales of 416 billion dollars for FY2025.", "relevance": 3},
+      {"id": "wrong-company", "text": "Microsoft consolidated revenue in FY2025 was 282 billion dollars.", "relevance": 0},
+      {"id": "wrong-metric", "text": "Apple FY2025 net income was 112 billion dollars.", "relevance": 0},
+      {"id": "generic", "text": "Apple discussed revenue growth and product demand in its annual report.", "relevance": 1}
+    ]
+  },
+  {
+    "id": "msft-rd-intensity",
+    "query": "Microsoft FY2025 R&D intensity as a percentage of revenue",
+    "candidates": [
+      {"id": "spend-only", "text": "Microsoft research and development expense was 32.5 billion dollars in FY2025.", "relevance": 1},
+      {"id": "wrong-company", "text": "Apple FY2025 R&D intensity increased as a percentage of revenue.", "relevance": 0},
+      {"id": "correct", "text": "Microsoft FY2025 R&D expense was 32.5 billion on revenue of 281.7 billion, an R&D intensity of about 11.5 percent.", "relevance": 3},
+      {"id": "wrong-period", "text": "Microsoft FY2024 R&D intensity was calculated from the prior annual report.", "relevance": 0},
+      {"id": "revenue-only", "text": "Microsoft FY2025 revenue reached 281.7 billion dollars.", "relevance": 1},
+      {"id": "policy", "text": "Microsoft updated its hybrid work and employee training policies.", "relevance": 0}
+    ]
+  },
+  {
+    "id": "nvidia-accelerator-constraint",
+    "query": "Did GB200 NVL72 supply constrain NVIDIA FY2025 data center growth?",
+    "candidates": [
+      {"id": "topical-no-answer", "text": "NVIDIA launched the GB200 NVL72 platform for data center customers in FY2025.", "relevance": 1},
+      {"id": "different-chip", "text": "NVIDIA H100 demand remained strong and channel inventory normalized.", "relevance": 1},
+      {"id": "correct", "text": "GB200 NVL72 rack integration and component availability constrained NVIDIA shipments despite strong FY2025 data center demand.", "relevance": 3},
+      {"id": "wrong-company", "text": "AMD accelerator supply constrained data center revenue during FY2025.", "relevance": 0},
+      {"id": "office", "text": "NVIDIA renewed several office leases during FY2025.", "relevance": 0},
+      {"id": "generic", "text": "NVIDIA data center growth remained strong in FY2025.", "relevance": 1}
+    ]
+  },
+  {
+    "id": "tsmc-capex-period",
+    "query": "TSMC 2025 capital expenditure guidance for advanced process capacity",
+    "candidates": [
+      {"id": "wrong-period", "text": "TSMC 2024 capital expenditure supported advanced process capacity.", "relevance": 0},
+      {"id": "correct", "text": "TSMC guided 2025 capital expenditure to 38 to 42 billion dollars, primarily for advanced process capacity.", "relevance": 3},
+      {"id": "wrong-company", "text": "Intel guided 2025 capital expenditure for new fabrication capacity.", "relevance": 0},
+      {"id": "revenue", "text": "TSMC reported 2025 revenue growth from advanced process demand.", "relevance": 1},
+      {"id": "generic", "text": "TSMC continued investing in manufacturing capacity.", "relevance": 1},
+      {"id": "risk", "text": "TSMC discussed geographic concentration and supply chain risk.", "relevance": 0}
+    ]
+  },
+  {
+    "id": "apple-margin-scope",
+    "query": "Apple FY2025 consolidated operating margin",
+    "candidates": [
+      {"id": "segment", "text": "Apple Services segment gross margin increased in FY2025.", "relevance": 0},
+      {"id": "prior-period", "text": "Apple consolidated operating margin was 31 percent in FY2024.", "relevance": 0},
+      {"id": "correct", "text": "Apple FY2025 consolidated operating income divided by net sales produced an operating margin of 32 percent.", "relevance": 3},
+      {"id": "gross-margin", "text": "Apple FY2025 consolidated gross margin was 47 percent.", "relevance": 0},
+      {"id": "topical", "text": "Apple discussed operating leverage and margin expansion in FY2025.", "relevance": 1},
+      {"id": "wrong-company", "text": "Microsoft FY2025 consolidated operating margin was 45 percent.", "relevance": 0}
+    ]
+  },
+  {
+    "id": "cross-lingual-risk",
+    "query": "台积电先进制程扩产面临什么地缘政治供应链风险？",
+    "candidates": [
+      {"id": "topic-only", "text": "TSMC continued expanding advanced process capacity outside Taiwan.", "relevance": 1},
+      {"id": "correct", "text": "TSMC warned that geographic concentration, export controls, and cross-strait tension could disrupt the supply chain for advanced-node expansion.", "relevance": 3},
+      {"id": "employee", "text": "台积电增加了员工培训时间并改善园区绿化。", "relevance": 0},
+      {"id": "wrong-company", "text": "三星先进制程扩产面临设备供应链风险。", "relevance": 0},
+      {"id": "demand", "text": "台积电先进制程需求受到人工智能加速器推动。", "relevance": 1},
+      {"id": "finance", "text": "台积电公布季度营收和毛利率。", "relevance": 0}
+    ]
+  },
+  {
+    "id": "filing-item-precision",
+    "query": "AAPL 10-K Item 7 discussion of capital expenditures",
+    "candidates": [
+      {"id": "wrong-item", "text": "AAPL 10-K Item 8 contains the audited financial statements and notes.", "relevance": 0},
+      {"id": "generic-capex", "text": "Apple capital expenditures supported tooling and data centers.", "relevance": 1},
+      {"id": "correct", "text": "AAPL Form 10-K Item 7 management discussion states that capital expenditures were 9.4 billion dollars.", "relevance": 3},
+      {"id": "wrong-form", "text": "AAPL Form 10-Q discusses quarterly capital expenditures.", "relevance": 0},
+      {"id": "item7-no-capex", "text": "AAPL 10-K Item 7 discusses foreign exchange and product demand.", "relevance": 1},
+      {"id": "wrong-company", "text": "MSFT 10-K Item 7 reports capital expenditures for cloud infrastructure.", "relevance": 0}
+    ]
+  },
+  {
+    "id": "net-vs-operating-income",
+    "query": "Microsoft FY2025 net income attributable to shareholders",
+    "candidates": [
+      {"id": "operating-income", "text": "Microsoft FY2025 operating income was 128.5 billion dollars.", "relevance": 0},
+      {"id": "correct", "text": "Microsoft reported FY2025 net income attributable to shareholders of 101.8 billion dollars.", "relevance": 3},
+      {"id": "non-gaap", "text": "Microsoft discussed adjusted operating profit for FY2025.", "relevance": 0},
+      {"id": "prior-period", "text": "Microsoft FY2024 net income attributable to shareholders was reported in the prior filing.", "relevance": 0},
+      {"id": "topical", "text": "Microsoft FY2025 earnings benefited from cloud growth.", "relevance": 1},
+      {"id": "wrong-company", "text": "Apple FY2025 net income attributable to shareholders was 112 billion dollars.", "relevance": 0}
+    ]
+  },
+  {
+    "id": "debt-maturity-year",
+    "query": "Which Apple debt tranche matures in 2027?",
+    "candidates": [
+      {"id": "wrong-year", "text": "Apple senior notes with a 3.20 percent coupon mature in 2029.", "relevance": 0},
+      {"id": "correct", "text": "Apple 2.90 percent senior notes have a contractual maturity in 2027.", "relevance": 3},
+      {"id": "aggregate", "text": "Apple disclosed aggregate debt maturities for the next five years.", "relevance": 1},
+      {"id": "wrong-company", "text": "Microsoft senior notes mature in 2027.", "relevance": 0},
+      {"id": "wrong-instrument", "text": "Apple commercial paper matures within one year.", "relevance": 0},
+      {"id": "liquidity", "text": "Apple maintained substantial cash and marketable securities.", "relevance": 0}
+    ]
+  },
+  {
+    "id": "negative-evidence",
+    "query": "Did Apple disclose a material weakness in internal control for FY2025?",
+    "candidates": [
+      {"id": "keyword-trap", "text": "Apple evaluated whether a material weakness in internal control existed for FY2025.", "relevance": 1},
+      {"id": "correct", "text": "Apple management concluded that internal control over financial reporting was effective and disclosed no material weakness for FY2025.", "relevance": 3},
+      {"id": "wrong-company", "text": "Another issuer disclosed a material weakness in internal control for FY2025.", "relevance": 0},
+      {"id": "prior-period", "text": "Apple reported effective internal control for FY2024.", "relevance": 0},
+      {"id": "audit", "text": "The auditor described its procedures for testing internal control.", "relevance": 1},
+      {"id": "risk", "text": "Apple listed cybersecurity and supply chain risks.", "relevance": 0}
+    ]
+  }
+]

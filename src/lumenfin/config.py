@@ -12,6 +12,7 @@ from .llm import LLMSettings
 _PROJECT_ROOT = bootstrap_dotenv(strict_conflicts=True)
 
 _RAG_INDEX_MODES = frozenset({"sync_on_run", "async_on_upload"})
+_RAG_RERANK_PROVIDERS = frozenset({"lexical", "qwen3"})
 
 
 def _normalize_rag_index_mode(raw: str | None) -> str:
@@ -30,6 +31,22 @@ def _positive_int_env(name: str, default: int) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be a positive integer")
     return value
+
+
+def _normalize_rag_rerank_provider(raw: str | None) -> str:
+    provider = (raw or "lexical").strip().lower() or "lexical"
+    aliases = {
+        "local": "lexical",
+        "offline": "lexical",
+        "dashscope": "qwen3",
+        "dashscope-qwen3": "qwen3",
+    }
+    provider = aliases.get(provider, provider)
+    if provider not in _RAG_RERANK_PROVIDERS:
+        raise ValueError(
+            "MAS_RAG_RERANK_PROVIDER must be one of: lexical, qwen3"
+        )
+    return provider
 
 
 def _is_sqlite_url(database_url: str) -> bool:
@@ -107,9 +124,20 @@ class AppConfig:
     embedding_timeout_seconds: float
     rag_min_score: float
     rag_degrade_on_vector_error: bool
+    rag_bm25_enabled: bool
+    rag_bm25_rrf_weight: float
     rag_sanitize_hits: bool
     rag_rerank_enabled: bool
     rag_rerank_candidates: int
+    rag_rerank_provider: str
+    rag_rerank_model: str
+    rag_rerank_base_url: str
+    rag_rerank_instruct: str
+    rag_rerank_timeout_seconds: float
+    rag_rerank_max_attempts: int
+    rag_rerank_backoff_seconds: float
+    rag_rerank_max_inflight_per_process: int
+    rag_rerank_max_document_chars: int
     critic_max_iterations: int
     company_parallelism: int
     profile_llm_max_attempts: int
@@ -207,9 +235,48 @@ class AppConfig:
             rag_min_score=float(os.getenv("MAS_RAG_MIN_SCORE", "0")),
             rag_degrade_on_vector_error=os.getenv("MAS_RAG_DEGRADE_ON_VECTOR_ERROR", "true").lower()
             in {"1", "true", "yes"},
+            # Staged rollout: keep dense-only collections usable until the operator
+            # explicitly switches to a BM25-capable versioned collection.
+            rag_bm25_enabled=os.getenv("MAS_RAG_BM25_ENABLED", "false").lower()
+            in {"1", "true", "yes"},
+            rag_bm25_rrf_weight=max(
+                0.0,
+                float(os.getenv("MAS_RAG_BM25_RRF_WEIGHT", "1.1")),
+            ),
             rag_sanitize_hits=os.getenv("MAS_RAG_SANITIZE_HITS", "true").lower() in {"1", "true", "yes"},
             rag_rerank_enabled=os.getenv("MAS_RAG_RERANK_ENABLED", "true").lower() in {"1", "true", "yes"},
             rag_rerank_candidates=max(1, int(os.getenv("MAS_RAG_RERANK_CANDIDATES", "20"))),
+            rag_rerank_provider=_normalize_rag_rerank_provider(
+                os.getenv("MAS_RAG_RERANK_PROVIDER", "lexical")
+            ),
+            rag_rerank_model=(
+                os.getenv("DASHSCOPE_RERANK_MODEL", "qwen3-rerank").strip()
+                or "qwen3-rerank"
+            ),
+            rag_rerank_base_url=os.getenv("DASHSCOPE_RERANK_BASE_URL", "").strip(),
+            rag_rerank_instruct=(
+                os.getenv(
+                    "MAS_RAG_RERANK_INSTRUCT",
+                    "Given a financial due diligence query, retrieve passages that "
+                    "directly answer it. Prefer the correct company, reporting period, "
+                    "metric, scope, and filing context over merely topical passages.",
+                ).strip()
+            ),
+            rag_rerank_timeout_seconds=max(
+                0.1, float(os.getenv("MAS_RAG_RERANK_TIMEOUT_SECONDS", "12"))
+            ),
+            rag_rerank_max_attempts=_positive_int_env(
+                "MAS_RAG_RERANK_MAX_ATTEMPTS", 2
+            ),
+            rag_rerank_backoff_seconds=max(
+                0.0, float(os.getenv("MAS_RAG_RERANK_BACKOFF_SECONDS", "0.25"))
+            ),
+            rag_rerank_max_inflight_per_process=_positive_int_env(
+                "MAS_RAG_RERANK_MAX_INFLIGHT_PER_PROCESS", 2
+            ),
+            rag_rerank_max_document_chars=_positive_int_env(
+                "MAS_RAG_RERANK_MAX_DOCUMENT_CHARS", 4000
+            ),
             critic_max_iterations=int(os.getenv("MAS_CRITIC_MAX_ITERATIONS", "2")),
             company_parallelism=int(os.getenv("MAS_COMPANY_PARALLELISM", "4")),
             profile_llm_max_attempts=max(

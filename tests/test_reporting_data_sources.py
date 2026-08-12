@@ -162,6 +162,31 @@ class ReportingDataSourcesTestCase(unittest.TestCase):
         self.assertEqual(dedupe_report.count("| Apple |"), 2)
         self.assertIn("Distinct R&D", dedupe_report)
 
+    def test_rag_citations_preserve_rerank_order_over_retrieval_score(self) -> None:
+        report = "\n".join(
+            format_rag_citation_section(
+                {
+                    "Apple": [
+                        {
+                            "citation": "wrong-period.pdf#p1",
+                            "score": 0.99,
+                            "rerank_score": 0.1,
+                            "text": "Apple FY2024 revenue distractor",
+                        },
+                        {
+                            "citation": "correct-period.pdf#p2",
+                            "score": 0.2,
+                            "rerank_score": 0.95,
+                            "text": "Apple FY2025 revenue answer",
+                        },
+                    ]
+                },
+                max_rows_per_company=2,
+            )
+        )
+
+        self.assertLess(report.index("correct-period.pdf"), report.index("wrong-period.pdf"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,11 +37,12 @@ MAS_MILVUS_URI=data/milvus_lite.db
 MAS_MILVUS_ISOLATE=true
 ```
 
-生产共享 Server：
+生产共享 Server（Compose 默认；见 `docker-compose.yml` / `MILVUS3_CUTOVER.md`）：
 
 ```env
 MAS_MILVUS_URI=http://127.0.0.1:19530
-MAS_MILVUS_COLLECTION=lumenfin_chunks
+MAS_MILVUS_COLLECTION=lumenfin_chunks_v4_bm25
+MAS_RAG_BM25_ENABLED=true
 # isolate 对 http/tcp URI 无效（不会改写为 _p{PID}.db）
 ```
 
@@ -79,7 +80,10 @@ MAS_RAG_RERANK_CANDIDATES=20
 MAS_RAG_TOP_K=5
 ```
 
-先召回 `candidates`，lexical rerank（CJK n-gram + 中英财务同义词）后再截断到 `top_k`。无依赖 cross-encoder，便于离线/CI。
+Dense 与 Milvus-native BM25 分支先召回 `candidates`，经加权 RRF 融合后再
+rerank 并截断到 `top_k`。代码/CI 默认使用 lexical rerank（CJK n-gram +
+中英财务同义词）；经批准的本地生产配置使用远程 Qwen3，并在失败时自动回退
+lexical。详见 `BM25_CUTOVER.md` 与 `QWEN3_RERANK.md`。
 
 ## 异步索引 Worker
 
@@ -97,7 +101,7 @@ python scripts/run_rag_index_worker.py
 
 1. **页级切片 + 财务信号标注**：`financial_metric` / `risk_signal` / `narrative`
 2. **Milvus Lite 向量索引**：本地 `data/milvus_lite.db`，无需 Docker
-3. **Hybrid RRF**：向量召回 + 关键词召回，用 Reciprocal Rank Fusion 融合
+3. **Hybrid RRF**：DashScope dense 向量召回 + Milvus-native BM25，用加权 Reciprocal Rank Fusion 融合
 4. **证据引用**：每条 chunk 带 `filename#p{page}` citation，写入 `rag_evidence` 与 audit log
 5. **与样例 DB 并存**：有 `SAMPLE_FINANCIAL_DATA` 的公司仍走结构化数据，PDF 走向量检索
 
@@ -111,13 +115,14 @@ MAS_RAG_INDEX_MODE=async_on_upload
 MAS_EMBEDDING_PROVIDER=dashscope
 MAS_EMBEDDING_DIMENSION=1024
 MAS_MILVUS_URI=data/milvus_lite_dashscope.db
-MAS_MILVUS_COLLECTION=lumenfin_chunks_ds
+MAS_MILVUS_COLLECTION=lumenfin_chunks_v4_bm25
+MAS_RAG_BM25_ENABLED=true
 MAS_RAG_RERANK_ENABLED=true
 MAS_RAG_DEGRADE_ON_VECTOR_ERROR=true
 MAS_RAG_SANITIZE_HITS=true
 ```
 
-`run_demo.py` / `start_api.py` / live showcase 脚本会对**缺失**的 RAG 键自动补全上述 profile；已写在 `.env` 里的值优先。
+`run_demo.py` / `start_api.py` / live showcase 脚本会对**缺失**的 RAG 键自动补全上述 profile；已写在 `.env` 里的值优先。生产 Compose 路径以 `lumenfin_chunks_v4_bm25` + BM25 为准（见 `BM25_CUTOVER.md`）；Lite showcase 也可使用独立 collection 名，但不要与生产 v4 混用。
 
 **单测 / CI** — `scripts/run_tests.py` 与 GitHub Actions 强制：
 
@@ -128,7 +133,7 @@ MAS_EMBEDDING_DIMENSION=384
 MAS_MILVUS_URI=data/milvus_lite_ci.db
 ```
 
-暂缓：Milvus Server、Redis index worker、模型 rerank（多 worker / 多用户并发再上）。
+生产多进程栈（Milvus Server、Redis index worker、可选 Qwen3 rerank）已落地：见 `MILVUS3_CUTOVER.md`、`BM25_CUTOVER.md`、`QWEN3_RERANK.md`。
 
 可选语义向量：
 
@@ -147,6 +152,7 @@ DASHSCOPE_EMBEDDING_MODEL=text-embedding-v3
 DASHSCOPE_EMBEDDING_DIMENSION=1024
 # 换维度后请换新库，勿复用旧的 384 维 milvus_lite.db
 MAS_MILVUS_URI=data/milvus_lite_dashscope.db
+# Local Lite showcase collection (not Compose production BM25 v4)
 MAS_MILVUS_COLLECTION=lumenfin_chunks_ds
 ```
 

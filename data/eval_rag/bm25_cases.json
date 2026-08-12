@@ -1,0 +1,92 @@
+[
+  {
+    "id": "zh-operating-margin-rd",
+    "session_id": "bm25-zh-margin",
+    "company": "Apple",
+    "query": "苹果 FY2025 营业利润率和研发强度",
+    "document": {
+      "document_id": "bm25-apple-zh",
+      "filename": "Apple_FY2025_zh.md",
+      "detected_companies": ["Apple"],
+      "pages": [
+        "苹果 FY2025 营业利润率为 31%，研发强度继续提高。",
+        "苹果员工餐厅与办公家具政策在本季度更新。",
+        "Apple services subscriber engagement remained stable."
+      ]
+    },
+    "relevant_terms": ["营业利润率", "研发强度"],
+    "k_values": [1, 3, 5]
+  },
+  {
+    "id": "exact-filing-code",
+    "session_id": "bm25-aapl-10k",
+    "company": "Apple",
+    "query": "AAPL 10-K Item 7 capital expenditures",
+    "document": {
+      "document_id": "bm25-aapl-filing",
+      "filename": "AAPL_10-K.md",
+      "detected_companies": ["Apple"],
+      "pages": [
+        "AAPL Form 10-K Item 7 reports capital expenditures of 9.4 billion dollars.",
+        "Apple corporate cafeteria procurement policy was renewed.",
+        "General investor relations contact information."
+      ]
+    },
+    "relevant_terms": ["10-k", "item 7", "capital expenditures"],
+    "k_values": [1, 3, 5]
+  },
+  {
+    "id": "rare-accelerator-name",
+    "session_id": "bm25-nvda-nvl72",
+    "company": "NVIDIA",
+    "query": "NVIDIA GB200 NVL72 H100 supply constraints",
+    "document": {
+      "document_id": "bm25-nvidia-accelerators",
+      "filename": "NVIDIA_accelerators.md",
+      "detected_companies": ["NVIDIA"],
+      "pages": [
+        "NVIDIA GB200 NVL72 and H100 demand exceeded supply, creating accelerator constraints.",
+        "NVIDIA office lease expenses were unchanged.",
+        "Gaming channel inventory normalized during the quarter."
+      ]
+    },
+    "relevant_terms": ["gb200", "nvl72", "h100"],
+    "k_values": [1, 3, 5]
+  },
+  {
+    "id": "rare-financial-metric",
+    "session_id": "bm25-msft-ebitda",
+    "company": "Microsoft",
+    "query": "Microsoft adjusted EBITDA FY2025",
+    "document": {
+      "document_id": "bm25-msft-ebitda",
+      "filename": "Microsoft_metrics.md",
+      "detected_companies": ["Microsoft"],
+      "pages": [
+        "Microsoft adjusted EBITDA reached 142 billion in FY2025.",
+        "Microsoft revenue commentary discussed Azure growth without EBITDA figures.",
+        "Microsoft updated its hybrid work policy."
+      ]
+    },
+    "relevant_terms": ["adjusted ebitda", "142 billion"],
+    "k_values": [1, 3, 5]
+  },
+  {
+    "id": "zh-supply-risk",
+    "session_id": "bm25-tsmc-risk",
+    "company": "TSMC",
+    "query": "台积电 先进制程 供应链 地缘政治风险",
+    "document": {
+      "document_id": "bm25-tsmc-risk",
+      "filename": "TSMC_risk_zh.md",
+      "detected_companies": ["TSMC"],
+      "pages": [
+        "台积电先进制程扩产面临供应链集中与地缘政治风险。",
+        "TSMC employee training hours increased.",
+        "台积电办公园区绿化项目完成。"
+      ]
+    },
+    "relevant_terms": ["先进制程", "供应链", "地缘政治风险"],
+    "k_values": [1, 3, 5]
+  }
+]

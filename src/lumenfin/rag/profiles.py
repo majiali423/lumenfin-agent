@@ -8,7 +8,8 @@ from __future__ import annotations
 import os
 from typing import Mapping, MutableMapping
 
-# Local Lite only — do not enable Milvus Server / Redis worker here.
+# Local Lite only — do not enable Milvus Server / Redis worker / BM25 v4 here.
+# Production Compose uses lumenfin_chunks_v4_bm25 (see BM25_CUTOVER.md).
 SHOWCASE_RAG_ENV: dict[str, str] = {
     "MAS_RAG_ENABLED": "true",
     "MAS_RAG_INDEX_MODE": "async_on_upload",

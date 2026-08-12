@@ -401,7 +401,9 @@ class AgentRuntime:
             "degrade_reason": "",
             "mode": "",
             "vector_hits": 0,
+            "bm25_hits": 0,
             "keyword_hits": 0,
+            "lexical_fallback_hits": 0,
         }
         if self.rag_enabled and self.hybrid_retriever and document_contexts:
             source_document_ids = list(state.get("rag_document_ids") or [])

@@ -80,6 +80,8 @@ idna==3.18
     #   anyio
     #   httpx
     #   requests
+jieba==0.42.1
+    # via lumenfin-agent (pyproject.toml)
 jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.1.1
@@ -294,6 +296,5 @@ yfinance==1.5.2
     # via lumenfin-agent (pyproject.toml)
 zstandard==0.25.0
     # via langsmith
-
-# The following packages are considered to be unsafe in a requirements file:
-# setuptools
+setuptools==78.1.1
+    # via pymilvus; pinned to avoid unstable setuptools 84.x wheel hash mismatches during image builds

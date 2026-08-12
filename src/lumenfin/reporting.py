@@ -803,7 +803,14 @@ def format_rag_citation_section(
             continue
         scored_hits = [h for h in hits if isinstance(h, dict)]
         scored_hits.sort(
-            key=lambda h: float(h.get("score") or h.get("rerank_score") or 0.0),
+            key=lambda h: float(
+                h.get("rerank_score")
+                if h.get("rerank_score") is not None
+                else h.get("fusion_score")
+                if h.get("fusion_score") is not None
+                else h.get("score")
+                or 0.0
+            ),
             reverse=True,
         )
         kept_for_company = 0

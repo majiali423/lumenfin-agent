@@ -8,6 +8,7 @@ import sys
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +17,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.rag.chunking import chunk_document
-from lumenfin.rag.embeddings import DeterministicEmbeddingProvider
+from lumenfin.rag.embeddings import DeterministicEmbeddingProvider, build_embedding_provider
 from lumenfin.rag.milvus_client import (
     build_vector_filter_expr,
     company_match_expr,
@@ -207,6 +208,94 @@ class DocumentReplaceAndFilterTestCase(unittest.TestCase):
         health = self.store.health()
         self.assertEqual(health["backend"], "milvus-lite")
         self.assertTrue(health["ready"])
+        self.assertTrue(health["bm25_enabled"])
+
+    def test_index_waits_for_write_visibility_before_returning(self) -> None:
+        original_flush = self.store.client.flush
+        self.store.client.flush = Mock(wraps=original_flush)
+        chunks = chunk_document(
+            {
+                "document_id": "visibility-doc",
+                "filename": "visibility.md",
+                "detected_companies": ["Apple"],
+                "pages": ["FIRST_READ_VISIBILITY_TOKEN belongs to Apple."],
+            }
+        )
+
+        self.store.index_chunks(
+            chunks,
+            tenant_id="visibility-tenant",
+            source_document_id="visibility-source",
+        )
+
+        self.store.client.flush.assert_called_once_with(collection_name="phase2")
+        hits = self.store.vector_search(
+            "FIRST_READ_VISIBILITY_TOKEN",
+            tenant_id="visibility-tenant",
+            source_document_ids=["visibility-source"],
+        )
+        self.assertTrue(hits)
+        bm25_hits = self.store.bm25_search(
+            "FIRST_READ_VISIBILITY_TOKEN",
+            tenant_id="visibility-tenant",
+            source_document_ids=["visibility-source"],
+        )
+        self.assertTrue(bm25_hits)
+
+
+@unittest.skipUnless(os.getenv("MAS_TEST_MILVUS_URI"), "MAS_TEST_MILVUS_URI is not set")
+class MilvusServerFirstReadTestCase(unittest.TestCase):
+    """Live regression: the first search after upsert must see the new document."""
+
+    def setUp(self) -> None:
+        self.collection = f"first_read_{uuid4().hex[:12]}"
+        provider_name = os.getenv("MAS_TEST_EMBEDDING_PROVIDER", "deterministic")
+        dimension = int(os.getenv("MAS_TEST_EMBEDDING_DIMENSION", "384"))
+        self.store = MilvusRAGStore(
+            os.environ["MAS_TEST_MILVUS_URI"],
+            build_embedding_provider(provider_name, dimension),
+            collection_name=self.collection,
+            shared_client=False,
+        )
+
+    def tearDown(self) -> None:
+        try:
+            if self.store.client.has_collection(self.collection):
+                self.store.client.drop_collection(self.collection)
+        finally:
+            self.store.close()
+
+    def test_first_search_sees_just_indexed_document(self) -> None:
+        chunks = chunk_document(
+            {
+                "document_id": "server-first-read",
+                "filename": "server-first-read.md",
+                "detected_companies": ["Apple"],
+                "pages": ["SERVER_FIRST_READ_TOKEN describes Apple liquidity."],
+            }
+        )
+
+        self.store.index_chunks(
+            chunks,
+            tenant_id="server-visibility-tenant",
+            source_document_id="server-visibility-source",
+        )
+        first_hits = self.store.vector_search(
+            "SERVER_FIRST_READ_TOKEN Apple liquidity",
+            tenant_id="server-visibility-tenant",
+            source_document_ids=["server-visibility-source"],
+            top_k=3,
+        )
+
+        self.assertTrue(first_hits)
+        self.assertTrue(any("SERVER_FIRST_READ_TOKEN" in hit["text"] for hit in first_hits))
+        first_bm25_hits = self.store.bm25_search(
+            "SERVER_FIRST_READ_TOKEN Apple liquidity",
+            tenant_id="server-visibility-tenant",
+            source_document_ids=["server-visibility-source"],
+            top_k=3,
+        )
+        self.assertTrue(first_bm25_hits)
 
 
 class SharedClientPoolTestCase(unittest.TestCase):
