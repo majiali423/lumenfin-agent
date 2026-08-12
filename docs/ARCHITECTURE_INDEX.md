@@ -1,6 +1,7 @@
-# LumenFin Architecture Index (Release Candidate / Final Packaging)
+# LumenFin Architecture Index
 
-Generated for documentation organization. This index does **not** change runtime behavior.
+Generated for documentation organization. This index does **not** change runtime
+behavior.
 
 ## Final packaging (start here)
 
@@ -9,12 +10,16 @@ Generated for documentation organization. This index does **not** change runtime
 | [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md) | System overview, diagram, data flow |
 | [ENGINEERING_EVOLUTION.md](ENGINEERING_EVOLUTION.md) | Phase 1–6 failure-driven history |
 | [FINAGENTBENCH_DESIGN.md](FINAGENTBENCH_DESIGN.md) | Reliability evaluation framework design |
-| [portfolio/INTERVIEW_NOTES.md](portfolio/INTERVIEW_NOTES.md) | Optional portfolio Q&A (not a release gate) |
-| [FINAL_RESULTS.md](FINAL_RESULTS.md) | Before → After + limitations |
+| [FINAL_RESULTS.md](FINAL_RESULTS.md) | Before → After packaging snapshot (banner may mark historical rows) |
 | [CONFIGURATION.md](CONFIGURATION.md) | Runtime/provider configuration |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Locked install + release gates |
 | [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Controlled deployment boundary |
-| [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline and live demo runbook |
+| [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline and optional live demo runbook |
+| [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Current RC freeze evidence |
+| [../reports/current/PHASE6_FULL_VALIDATION_REPORT.md](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | Two-repo full validation |
+
+Local interview notes under `docs/portfolio/` are gitignored and are **not**
+part of the public release surface.
 
 ## System spine
 
@@ -46,10 +51,13 @@ Reliability layers (current):
 
 | Doc | Purpose |
 |-----|---------|
-| [RAG_MILVUS.md](RAG_MILVUS.md) | Milvus Lite hybrid RAG |
-| [RAG_PRODUCTION_PLAN.md](RAG_PRODUCTION_PLAN.md) | Production RAG roadmap (non-goals: RAG≠AST) |
+| [RAG_MILVUS.md](RAG_MILVUS.md) | Hybrid RAG / Milvus Lite + Server |
+| [BM25_CUTOVER.md](BM25_CUTOVER.md) | Native BM25 v4 cutover |
+| [MILVUS3_CUTOVER.md](MILVUS3_CUTOVER.md) | Milvus 3.0 cutover |
+| [QWEN3_RERANK.md](QWEN3_RERANK.md) | Qwen3 rerank rollout |
 | [TICKER_RESOLVE.md](TICKER_RESOLVE.md) | Ticker / company resolution |
-| [TOOLS_HONESTY_FIXES.md](TOOLS_HONESTY_FIXES.md) | Tool honesty / provenance |
+| [../reports/history/RAG_PRODUCTION_PLAN.md](../reports/history/RAG_PRODUCTION_PLAN.md) | Historical production RAG plan |
+| [../reports/history/TOOLS_HONESTY_FIXES.md](../reports/history/TOOLS_HONESTY_FIXES.md) | Historical tool honesty notes |
 
 ## Safety & control plane
 
@@ -57,13 +65,14 @@ Reliability layers (current):
 |-----|---------|
 | [INPUT_GUARDRAIL.md](INPUT_GUARDRAIL.md) | Upload/query guardrails |
 | [HITL_CLARIFICATION.md](HITL_CLARIFICATION.md) | Clarification pause / resume |
-| [AGENT_NODE_OPTIMIZATIONS.md](AGENT_NODE_OPTIMIZATIONS.md) | Node cost/latency notes |
+| [../reports/history/AGENT_NODE_OPTIMIZATIONS.md](../reports/history/AGENT_NODE_OPTIMIZATIONS.md) | Historical node cost notes |
 
 ## Ops
 
 | Doc | Purpose |
 |-----|---------|
 | [ENCODING.md](ENCODING.md) | Windows/UTF-8 notes |
+| [PRODUCTION_BACKUP_RESTORE.md](PRODUCTION_BACKUP_RESTORE.md) | Backup / restore rehearsal |
 
 ## External evaluation (FinAgentBench)
 
@@ -78,16 +87,9 @@ Primary repo: sibling `../finagentbench-demo/docs/`
 
 ## Release artifacts
 
-| Report | Role |
-|--------|------|
-| [LumenFin_Final_Release_Report.md](../reports/current/LumenFin_Final_Release_Report.md) | LumenFin release evidence |
-| [Joint_Compatibility_Report.md](../reports/current/Joint_Compatibility_Report.md) | Cross-repository contract |
-| [LumenFin_RC_Final_Reliability_Report.md](../reports/current/LumenFin_RC_Final_Reliability_Report.md) | Live RC pack evidence |
-| [Release_Checklist.md](../Release_Checklist.md) | Blocking release checklist |
-
-## Non-goals (do not regress)
-
-- Do not replace AST/SEC fundamentals with pure RAG
-- Do not prompt-force citations
-- Do not lower FinAgentBench thresholds to pass RC
-- Do not invent numbers on `incomplete_data`
+| Doc | Purpose |
+|-----|---------|
+| [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Current freeze |
+| [../Release_Checklist.md](../Release_Checklist.md) | Historical rc1 checklist (bannered) |
+| [../reports/current/](../reports/current/) | Current evidence only |
+| [../reports/history/](../reports/history/) | Superseded snapshots |

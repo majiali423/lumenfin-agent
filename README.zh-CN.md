@@ -119,6 +119,8 @@ fundamentals 证据（见 `claims.py` 的 `FORMULA_INPUTS`），不能写成缺�
 实现：`src/lumenfin/graph.py` 中的 **LangGraph 状态机**专职节点。节点共享同一个
 `FinanceState`；它们不是独立的多智能体动作循环。
 
+![LumenFin 控制流](docs/assets/lumenfin-control-flow.png)
+
 ```mermaid
 flowchart TD
     IN["Query + optional PDFs"] --> IG["Input Guardrail"]
@@ -285,8 +287,8 @@ FinAgentBench `v0.1.0-rc.3` 接受并回放。
 证据：[PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
 [Phase 6 full validation](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) ·
-[RC reliability](reports/current/LumenFin_RC_Final_Reliability_Report.md) ·
-[Compatibility](reports/current/Joint_Compatibility_Report.md)
+[作品集发布报告](docs/PORTFOLIO_RELEASE_REPORT.md) ·
+[历史 RC 快照](reports/history/)
 
 ---
 
@@ -404,9 +406,12 @@ pin 可通过 workflow dispatch 配置。
 - Per-process bulkhead — **不是**跨进程全局限流
 - DeepSeek、DashScope embedding 与 Qwen3 rerank 的受控合成 live smoke 已通过；
   两仓库 Phase 6 本地全量门禁均已通过
-- Clean commit/tag RC 验证与远端 CI 仍属于 Phase 7 边界
+- 已发布标签 `v0.1.0-rc.3`，`main` / tag 上 GitHub Actions 为绿；剩余缺口是
+  soak、身份绑定租户、公开镜像分发 — 不是“尚未打 tag”
+- `main` 上的文档可能比不可变 RC tag 超前若干 commit
 - 不构成投资建议；仍需人工财务审阅
-- PyMuPDF 许可限制公开图片再分发
+- PyMuPDF / MinIO 的 AGPL（以及 Redis RSALv2/SSPL）限制公开镜像分发；
+  不要把应用镜像表述为纯 MIT 可分发 Docker 产物
 
 全文：[docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 
@@ -425,7 +430,7 @@ pin 可通过 workflow dispatch 配置。
 | [docs/PORTFOLIO_RELEASE_REPORT.md](docs/PORTFOLIO_RELEASE_REPORT.md) | 冻结证据 |
 | [docs/PHASE32B_INTEGRATION_REPORT.md](docs/PHASE32B_INTEGRATION_REPORT.md) | 多进程 queue/worker 证据 |
 | [docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) | Provider 故障注入证据 |
-| [reports/current/Joint_Compatibility_Report.md](reports/current/Joint_Compatibility_Report.md) | LumenFin ↔ FinAgentBench 契约 |
+| [reports/current/PHASE6_FULL_VALIDATION_REPORT.md](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | 双仓全量验证 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
 | [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | 支持的命令 |
 

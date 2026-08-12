@@ -1,7 +1,7 @@
 [project]
 name = "lumenfin-agent"
 version = "0.1.0rc3"
-description = "LumenFin: evidence-grounded multi-agent financial diligence built with LangGraph."
+description = "LumenFin: evidence-grounded financial diligence with LangGraph specialist nodes (planner–critic–repair)."
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 classifiers = [

@@ -85,7 +85,7 @@ def create_app(
     app = FastAPI(
         title="LumenFin API",
         version=_package_version(),
-        description="Deployable multi-agent finance research and compliance API powered by LangGraph and DeepSeek.",
+        description="Evidence-grounded financial research API: LangGraph specialist nodes, hybrid RAG, and fail-closed claim binding.",
         lifespan=_app_lifespan,
     )
     app.middleware("http")(request_logging_middleware)

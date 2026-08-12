@@ -124,6 +124,8 @@ Implementation: a **LangGraph state machine** of specialist nodes in
 `src/lumenfin/graph.py`. Nodes share one `FinanceState`; they are not
 independent multi-agent action loops.
 
+![LumenFin control flow](docs/assets/lumenfin-control-flow.png)
+
 ```mermaid
 flowchart TD
     IN["Query + optional PDFs"] --> IG["Input Guardrail"]
@@ -296,8 +298,8 @@ replayed by FinAgentBench `v0.1.0-rc.3`.
 Evidence: [PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
 [PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
 [Phase 6 full validation](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) ·
-[RC reliability](reports/current/LumenFin_RC_Final_Reliability_Report.md) ·
-[Compatibility](reports/current/Joint_Compatibility_Report.md)
+[Portfolio release report](docs/PORTFOLIO_RELEASE_REPORT.md) ·
+[Historical RC snapshots](reports/history/)
 
 ---
 
@@ -419,9 +421,12 @@ deterministic fault-injection conditions, not in sustained production traffic.
 - Per-process bulkhead — **not** cross-process global rate limit
 - Controlled synthetic live smoke passed for DeepSeek, DashScope embedding,
   and Qwen3 rerank; both repositories' full local Phase 6 gates passed
-- Clean committed/tagged RC validation and remote CI remain Phase 7 boundaries
+- Published tag `v0.1.0-rc.3` with green GitHub Actions on `main` / tag; remaining
+  gaps are soak, IAM-bound tenancy, and public image redistribution — not “untagged”
+- Docs on `main` may be one or more commits ahead of the immutable RC tag
 - Not investment advice; human financial review required
-- PyMuPDF license limits public image redistribution
+- PyMuPDF / MinIO AGPL (and Redis RSALv2/SSPL) limit public image redistribution;
+  do not present the application image as a pure-MIT Docker distribute
 
 Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 
@@ -440,7 +445,7 @@ Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 | [docs/PORTFOLIO_RELEASE_REPORT.md](docs/PORTFOLIO_RELEASE_REPORT.md) | Freeze evidence |
 | [docs/PHASE32B_INTEGRATION_REPORT.md](docs/PHASE32B_INTEGRATION_REPORT.md) | Multi-process queue/worker evidence |
 | [docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) | Provider fault-injection evidence |
-| [reports/current/Joint_Compatibility_Report.md](reports/current/Joint_Compatibility_Report.md) | LumenFin ↔ FinAgentBench contract |
+| [reports/current/PHASE6_FULL_VALIDATION_REPORT.md](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | Two-repo full validation |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | Supported commands |
 

@@ -1,14 +1,18 @@
 # Release Checklist
 
-> Historical `0.1.0rc1` checklist. Statuses below describe that earlier
-> closure and must not be read as the current release gate. The active
-> `0.1.0rc3` closure is tracked in `docs/PORTFOLIO_RELEASE_REPORT.md`; current
-> full validation is recorded in
-> `reports/current/PHASE6_FULL_VALIDATION_REPORT.md`.
+> **Historical `0.1.0rc1` checklist — not the current release gate.**
+>
+> Current published candidate: LumenFin **`0.1.0rc3` / `v0.1.0-rc.3`**  
+> Authority: [`docs/PORTFOLIO_RELEASE_REPORT.md`](docs/PORTFOLIO_RELEASE_REPORT.md)  
+> Full validation: [`reports/current/PHASE6_FULL_VALIDATION_REPORT.md`](reports/current/PHASE6_FULL_VALIDATION_REPORT.md)
+>
+> The tables below are retained only as an audit snapshot of the earlier rc1
+> closure (license/push were still blocked then). Do **not** treat BLOCKED /
+> NOT DONE rows as today's status.
 
-Target: LumenFin + FinAgentBench `0.1.0rc1`
+Target (historical): LumenFin + FinAgentBench `0.1.0rc1`
 
-| Item | Status | Evidence |
+| Item | Status (rc1 era) | Evidence |
 |------|:------:|----------|
 | Secrets removed | PASS | No committed key/token pattern; `.env` ignored; blank examples |
 | Env conflict fail-fast | PASS | `env_bootstrap` + `tests.test_env_bootstrap_conflicts` |
@@ -16,34 +20,25 @@ Target: LumenFin + FinAgentBench `0.1.0rc1`
 | Local DB/output/log/cache excluded | PASS | `.gitignore`; `git ls-files` found none |
 | Dependencies locked | PASS | `requirements-lock.txt`; CI/Docker consume it |
 | FinRun contract versioned | PASS | schema `1.0`; unknown versions rejected |
-| FinAgentBench tagged | **BLOCKED** | Tag/push not authorized in this pass |
-| LumenFin pinned to FAB ref | PREPARED | CI defaults to `v0.1.0-rc.1`; tag must exist first |
-| LumenFin offline tests | PASS | 271 tests, 1 skipped (final HEAD clean worktree) |
+| FinAgentBench tagged | **BLOCKED (then)** | Tag/push not authorized in that pass |
+| LumenFin pinned to FAB ref | PREPARED (then) | CI defaulted to `v0.1.0-rc.1` |
+| LumenFin offline tests | PASS | 271 tests, 1 skipped (rc1 HEAD) |
 | FinAgentBench offline tests | PASS | 78 tests (1 skipped) |
 | Mutation 4/4 | PASS | clean worktree mutation suite |
 | Correctness / offline demo | PASS | baseline + mutations detected |
 | Cross-repo gate | PASS | FinRun `1.0`, profile `ci`, dirty=false |
-| Live RC 8/8 | PASS | deepseek / deepseek-v4-flash; 401=0; fallback=0; FAB mean 92.97 |
-| Entity/numeric/evidence floors | PASS | completed cases 100/100/100 |
-| Live RC fallback abort | PASS | RC runner forces `allow_local_fallback=False` and aborts on fallback |
-| Final HEAD clean-clone | PASS | `reports/Clean_Clone_Validation_Report.md` |
-| Tracked fixtures modified | PASS | No fixture changes in post-live commits |
-| Docker build | **BLOCKED** | Docker daemon / public publish not in this pass |
-| Public distribution license | **BLOCKED** | Owner must select license before public release |
+| Live RC 8/8 | PASS | deepseek / deepseek-v4-flash; FAB mean 92.97 under pin `v0.1.0-rc.1` |
 | Documentation complete | PASS | RC reports + configuration/reproducibility/limits |
 | Known limitations documented | PASS | `docs/PRODUCTION_LIMITATIONS.md` |
-| Clean release worktrees | PASS | post-docs commit (ignored local data only) |
-| Push / tag / GitHub Release | **NOT DONE** | Explicitly out of scope |
+| Public distribution license | **BLOCKED (then)** | Owner had not selected license yet |
+| Push / tag / GitHub Release | **NOT DONE (then)** | Explicitly out of scope for that pass |
 
-## Remaining before a public RC cut
+## Current published status (read this)
 
-1. Owner creates FinAgentBench `v0.1.0-rc.1` after push review.
-2. Resolve Docker build evidence on a host with Docker.
-3. Select a license before any public distribution.
-4. Push is a separate authorized step — not performed here.
-
-## Current decision
-
-**READY FOR PUSH REVIEW**
-
-Live reliability and final-HEAD offline clean-clone gates are green. Remote push, tag, and public Docker/license remain owner-controlled blockers outside this local finalize pass.
+| Item | Status |
+|------|--------|
+| License | MIT (`LICENSE`) + `THIRD_PARTY_NOTICES.md` |
+| LumenFin tag | `v0.1.0-rc.3` published |
+| FinAgentBench package tag | `v0.1.0-rc.4` published |
+| LumenFin evaluator pin | FinAgentBench `v0.1.0-rc.3` |
+| Public Docker image | **Not** published (AGPL/RSAL boundary) |

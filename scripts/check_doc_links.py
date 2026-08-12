@@ -8,7 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
+    "Release_Checklist.md",
     "docs/README.md",
     "docs/FINAL_ARCHITECTURE.md",
     "docs/PRODUCTION_LIMITATIONS.md",
@@ -16,6 +18,8 @@ TARGETS = [
     "docs/PORTFOLIO_RELEASE_REPORT.md",
     "docs/DEMO_GUIDE.md",
     "docs/CONFIGURATION.md",
+    "docs/REPRODUCIBILITY.md",
+    "docs/ARCHITECTURE_INDEX.md",
 ]
 LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 

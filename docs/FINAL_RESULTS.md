@@ -1,7 +1,13 @@
 # Final Results Summary
 
+> Packaging narrative (Before → After). **Authoritative RC numbers** live in
+> [`PORTFOLIO_RELEASE_REPORT.md`](PORTFOLIO_RELEASE_REPORT.md) and
+> [`../reports/current/PHASE6_FULL_VALIDATION_REPORT.md`](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md).
+> Rows below that cite mean **92.97** / live 8/8 are historical packaging
+> snapshots under earlier evaluator pins — do not treat them as the current
+> `v0.1.0-rc.3` scoreboard.
+
 Before → After packaging summary for LumenFin + FinAgentBench.
-Source of truth for RC numbers: `LumenFin_RC_Final_Reliability_Report.md` / readiness assessment.
 
 ---
 

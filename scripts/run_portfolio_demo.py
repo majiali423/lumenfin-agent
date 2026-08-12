@@ -457,7 +457,8 @@ def main() -> int:
             "finagentbench_mean": 92.97,
             "evidence_note": (
                 "validated_refs cite stamped Phase 6 / Phase 3.2B-3.3A evidence "
-                "shipped with tag v0.1.0-rc.3; not a live re-run of those gates"
+                "shipped with tag v0.1.0-rc.3; finagentbench_mean 92.97 is "
+                "informational under historical evaluator pin v0.1.0-rc.1"
             ),
         },
     }

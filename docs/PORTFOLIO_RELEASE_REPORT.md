@@ -114,7 +114,8 @@ Kept separate on purpose — these gates answer different questions.
 | Current FinAgentBench full regression | Does the evaluator pass its complete suite? | Phase 6 current worktree | **149 passed** |
 | Infrastructure integration (Phase 3.2B) | Do multi-process queue/worker/DB semantics hold under kill? | `20260804T095357Z` | **PASS** |
 | Provider fault validation (Phase 3.3A) | Do deadlines/retries/bulkheads hold under injected faults across two API containers? | `docker_20260804T100817Z` | **PASS** |
-| Benchmark reliability (FinAgentBench) | Are exported runs judged reliable by an external gate? | pin `v0.1.0-rc.3` | completed-case mean **92.97**, mutation **4/4** |
+| Benchmark reliability (FinAgentBench) | Are exported runs judged reliable by an external gate? | informational pin `v0.1.0-rc.1` | completed-case mean **92.97**, mutation **4/4** (not a score for current pin `v0.1.0-rc.3`) |
+| Evaluator compatibility (FinAgentBench) | Does the frozen FinRun export replay on the current pin? | pin `v0.1.0-rc.3` | **PASS** (schema `1.0`; core 4/4 + extended 7/7 on compatibility gate) |
 | Native BM25 cutover | Does dense + native BM25 weighted RRF pass offline and live first-search gates? | 2026-08-12 local closure | **PASS** |
 | Qwen3 rerank | Do hard-negative quality and telemetry gates pass with zero fallback? | 2026-08-12 synthetic live gate | **PASS** |
 | Cross-repository contract | Does current FinRun `1.0` pass the evaluator and negative controls? | Phase 6 current worktrees | score **100**, mutations **11/11** |
@@ -171,7 +172,8 @@ Optional (not started by the demo): Docker recovery story
 - Per-process bulkheads, **not** a cross-process global rate limit
 - No shared circuit breaker across API processes
 - Controlled synthetic DeepSeek, DashScope embedding, and Qwen3 rerank smoke
-  passed; clean committed/tagged RC validation remains a Phase 7 boundary
+  passed; tag `v0.1.0-rc.3` and remote CI are published/green. Remaining gaps
+  are soak, IAM-bound tenancy, and public image redistribution
 - No large-scale soak / long-duration endurance run
 - Tenant identity is not bound to authentication (no IAM tenant binding)
 - No PostgreSQL Row-Level Security
@@ -187,8 +189,9 @@ completed a DeepSeek analysis. No user document was sent externally.
 
 Phase 6 also completed both repositories' full suites, the FinRun contract
 gate, image/runtime checks, backup verification, leak scan, and graceful stop.
-It did not run a fresh live SEC/Yahoo matrix; clean committed/tagged RC
-validation remains a Phase 7 boundary.
+It did not run a fresh live SEC/Yahoo matrix. Published RC tag `v0.1.0-rc.3`
+and green remote CI close the former Phase 7 commit/tag/release boundary;
+remaining roadmap items are in §15.
 
 ## 14. License boundary
 
@@ -212,7 +215,7 @@ be operator owned in any real deployment.
 
 ## 16. Tag boundary
 
-No tag is created by this report. Phase 7 must inspect existing local and
-remote tags, choose a fresh immutable RC version if required, update package and
-release metadata consistently, and obtain explicit approval before commit,
-push, tag, or release creation.
+Published immutable tag: **`v0.1.0-rc.3`**
+(`e67ed5f0e5aa4d2585d063b99212c46f5002d1a3`). Subsequent `main` docs commits
+may land ahead of that tag without changing the RC code freeze. Do not move or
+reuse the tag; cut a new RC if another immutable snapshot is required.
