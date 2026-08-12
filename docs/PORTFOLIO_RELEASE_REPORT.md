@@ -1,4 +1,4 @@
-# LumenFin Portfolio Release Report
+﻿# LumenFin Portfolio Release Report
 
 Release candidate freeze evidence for portfolio / controlled-demo use. Every
 number below comes from a recorded run in this repository; nothing here is
@@ -112,8 +112,8 @@ Kept separate on purpose — these gates answer different questions.
 |------|----------|--------|--------|
 | Current LumenFin full regression | Does the final Linux image pass the complete suite? | Phase 6 current worktree | **495 passed, 2 skipped** |
 | Current FinAgentBench full regression | Does the evaluator pass its complete suite? | Phase 6 current worktree | **149 passed** |
-| Infrastructure integration (Phase 3.2B) | Do multi-process queue/worker/DB semantics hold under kill? | `20260804T095357Z` | **PASS** |
-| Provider fault validation (Phase 3.3A) | Do deadlines/retries/bulkheads hold under injected faults across two API containers? | `docker_20260804T100817Z` | **PASS** |
+| Infrastructure integration (queue/worker) | Do multi-process queue/worker/DB semantics hold under kill? | `20260804T095357Z` | **PASS** |
+| Provider fault validation (provider resilience) | Do deadlines/retries/bulkheads hold under injected faults across two API containers? | `docker_20260804T100817Z` | **PASS** |
 | Benchmark reliability (FinAgentBench) | Are exported runs judged reliable by an external gate? | informational pin `v0.1.0-rc.1` | completed-case mean **92.97**, mutation **4/4** (not a score for current pin `v0.1.0-rc.3`) |
 | Evaluator compatibility (FinAgentBench) | Does the frozen FinRun export replay on the current pin? | pin `v0.1.0-rc.3` | **PASS** (schema `1.0`; core 4/4 + extended 7/7 on compatibility gate) |
 | Native BM25 cutover | Does dense + native BM25 weighted RRF pass offline and live first-search gates? | 2026-08-12 local closure | **PASS** |
@@ -121,22 +121,22 @@ Kept separate on purpose — these gates answer different questions.
 | Cross-repository contract | Does current FinRun `1.0` pass the evaluator and negative controls? | Phase 6 current worktrees | score **100**, mutations **11/11** |
 | Production hardening | Do immutable builds, UID 10001, readiness, persistence, fallback, backup, leak, and graceful-stop gates pass? | 2026-08-12 Phase 6 | **PASS** |
 
-Phase 3.2B detail: worker-kill manual redelivery `false`; tenant leakage `0`;
+Queue/worker detail: worker-kill manual redelivery `false`; tenant leakage `0`;
 orphan chunks / vectors `0 / 0`.
 
-Phase 3.3A Docker detail: provider logical calls `20`; physical attempts `25`;
+Provider-resilience Docker detail: provider logical calls `20`; physical attempts `25`;
 cross-container context leakage `0`; unexpected failures `0`.
 
-The full Phase 6 evidence, including harness corrections and the dirty-worktree
+The full validation evidence, including harness corrections and the dirty-worktree
 boundary, is frozen in
-[`PHASE6_FULL_VALIDATION_REPORT.md`](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md).
+[`PRODUCTION_LIMITATIONS.md`](../docs/PRODUCTION_LIMITATIONS.md).
 
 ## 10. CI
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `.github/workflows/ci.yml` | push, pull_request | Offline regression (`run_tests.py`) + doc link check + portfolio demo, Python 3.12, lockfile, no API keys, no live providers |
-| `.github/workflows/integration-manual.yml` | `workflow_dispatch` | Documents Docker-capable Phase 3.2B / 3.3A commands; not a per-commit gate |
+| `.github/workflows/integration-manual.yml` | `workflow_dispatch` | Documents Docker-capable queue/worker / provider-resilience commands; not a per-commit gate |
 | `.github/workflows/test.yml` | `workflow_dispatch` | Extended cross-repo FinAgentBench gate (was per-push; demoted so cross-repo checkout does not block every commit) |
 
 Local equivalents of every `ci.yml` step were executed on Windows before the
@@ -164,7 +164,7 @@ Offline, no API key, no live provider access, writes only under
 
 Optional (not started by the demo): Docker recovery story
 `worker A killed → automatic reclaim → worker B attempt=2 → ready`
-([Phase 3.2B](PHASE32B_INTEGRATION_REPORT.md)).
+([queue/worker](QUEUE_WORKER_INTEGRATION.md)).
 
 ## 12. Known limitations
 

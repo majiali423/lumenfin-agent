@@ -1,8 +1,8 @@
-name: integration-manual
+﻿name: integration-manual
 
-# Heavy Docker suites (Phase 3.2B / 3.3A dual-API). Manual only.
-# Requires a runner with Docker Desktop / Docker Engine and substantial disk/RAM.
-# Do not enable as a required check on every commit.
+# Heavy Docker suites (queue/worker integration + provider-resilience dual-API).
+# Manual only. Requires a runner with Docker Desktop / Docker Engine and
+# substantial disk/RAM. Do not enable as a required check on every commit.
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ on:
         default: both
         type: choice
         options:
-          - phase32b
-          - phase33a-docker
+          - queue-worker
+          - provider-resilience-docker
           - both
 
 jobs:
@@ -29,11 +29,11 @@ jobs:
           echo "This workflow does not start Docker Desktop automatically on GitHub-hosted runners"
           echo "with enough resources for Milvus + dual API. Run on a Docker-capable machine:"
           echo ""
-          echo "### Phase 3.2B"
-          echo "python scripts/run_phase32b_integration.py"
+          echo "### Queue / worker integration"
+          echo "python scripts/run_queue_worker_integration.py"
           echo ""
-          echo "### Phase 3.3A Docker dual-API"
-          echo "python scripts/run_phase33a_dual_api_docker.py"
+          echo "### Provider resilience Docker dual-API"
+          echo "python scripts/validate_provider_resilience_docker.py"
           echo ""
           echo "Selected suite input: ${{ inputs.suite }}"
-          echo "See docs/PHASE32B_INTEGRATION_REPORT.md and docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md"
+          echo "See docs/QUEUE_WORKER_INTEGRATION.md and docs/PROVIDER_RESILIENCE.md"

@@ -1,4 +1,4 @@
-# LumenFin
+﻿# LumenFin
 
 **English** | [中文](README.zh-CN.md)
 
@@ -15,11 +15,10 @@ Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
 Release candidate **`0.1.0rc3`** / tag **`v0.1.0-rc.3`** · FinRun schema `1.0` ·
-FinAgentBench evaluator pin **`v0.1.0-rc.3`** · **controlled release
-candidate**, not a certification of unrestricted production readiness
-([limitations](docs/PRODUCTION_LIMITATIONS.md))
+FinAgentBench evaluator pin **`v0.1.0-rc.3`** · controlled RC under documented
+limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
-[Docs](docs/README.md) · [Architecture](docs/FINAL_ARCHITECTURE.md) ·
+[Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Limitations](docs/PRODUCTION_LIMITATIONS.md) · [Demo](docs/DEMO_GUIDE.md) ·
 [Release report](docs/PORTFOLIO_RELEASE_REPORT.md)
 
@@ -41,6 +40,76 @@ refuses unsupported numeric conclusions when fundamentals are missing.
 
 ---
 
+## Architecture sketch
+
+LangGraph specialist nodes share one `FinanceState`
+(`src/lumenfin/graph.py`):
+
+`query → plan → retrieve → analyze → critic/repair → claim bind → synthesize`
+
+Runtime roles (not a single linear pipe): FastAPI ↔ PostgreSQL / Milvus;
+Redis analysis queue → Analysis Worker; Redis index queue → Index Worker
+(lease + attempt fencing). Detail:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Reliability (designed properties)
+
+- Fail-closed numeric claims when fundamentals are missing
+- Claim → evidence binding before material assertions
+- At-least-once Redis queues with worker reclaim (not exactly-once)
+- Single retry owner per provider call; per-process bulkhead
+- FinRun export for offline replay scoring (not a live market oracle)
+
+---
+
+## Quick start
+
+Supported CI Python: **3.12**. Prefer the lockfile path.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-lock.txt
+.\.venv\Scripts\python -m pip install -e . --no-deps
+copy .env.example .env
+
+# The unit suite runs on the SQLite test backend. .env.example ships
+# APP_ENV=dev, which is PostgreSQL-first and refuses SQLite by default.
+$env:APP_ENV = "test"
+.\.venv\Scripts\python scripts\run_tests.py
+.\.venv\Scripts\python scripts\run_portfolio_demo.py
+```
+
+Serve the API (reads `.env`, defaults to `127.0.0.1:8000`):
+
+```powershell
+.\.venv\Scripts\python start_api.py
+```
+
+Live providers need keys in `.env` (never commit them). Configuration:
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md) · reproducing frozen
+evidence: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
+
+### Evaluation (FinRun → FinAgentBench)
+
+FinAgentBench is a **sibling replay evaluator**: it scores exported FinRun
+states and mutation controls. It does **not** import LumenFin app code and is
+not a third-party independent market benchmark. Reproduce the compatibility
+gate against pin **`v0.1.0-rc.3`**
+([majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)):
+
+```powershell
+git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
+cd finagentbench-demo
+python -m pip install -e .
+$env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
+python scripts\validate_cross_repo.py --profile ci
+```
+
+The summary records both commits, FinRun schema, profile, and core/extended
+mutation results. LumenFin CI also runs this gate at the pinned evaluator tag.
+
+---
+
 ## One-command offline demo
 
 Deterministic · offline · no API key · non-zero exit on failure.
@@ -56,8 +125,9 @@ python scripts/run_portfolio_demo.py
 | **C** Fail-closed | Forced missing SEC + Yahoo → `workflow_status = incomplete_data`, zero numeric claims |
 
 The run also **prints** validated references it does not re-prove offline
-(Phase 3.2B tenant leakage `0`, Phase 3.3A Docker run id); the Docker stack is
-not started by this entrypoint. Walkthrough: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+(queue/worker tenant leakage `0`, provider-resilience Docker run id); the Docker
+stack is not started by this entrypoint. Walkthrough:
+[docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
 
 ### What a verified claim looks like
 
@@ -174,7 +244,7 @@ flowchart TD
 | Publish (in-graph) | `synthesizer` → `END` | Verified-only report; LangGraph ends here |
 | Evaluate (out-of-graph) | FinRun export, FinAgentBench | Post-run artifact + independent sibling evaluator |
 
-Routing details and edge conditions: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md).
+Routing details and edge conditions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Critic vs Repair vs Claim Binder
 
@@ -271,20 +341,20 @@ Do **not** merge these into one “accuracy” number.
 |------|------------------|--------|
 | **LumenFin unit regression** | Full Linux-image Python suite | **495 passed, 2 skipped** |
 | **FinAgentBench unit regression** | Full Python suite | **149 passed** |
-| **Infrastructure integration** | Phase 3.2B multi-process Docker | **PASS** (`20260804T095357Z`) |
+| **Infrastructure integration** | Queue/worker multi-process Docker | **PASS** (`20260804T095357Z`) |
 | Worker-kill recovery | Does a killed worker's job need human redelivery? | **no** — lease expiry + attempt fencing reclaim it |
 | Tenant leakage | Cross-tenant RAG read | **0** |
 | Orphan chunks / vectors | Index compensation | **0 / 0** |
-| **Provider fault validation** | Phase 3.3A + Docker dual-API | **PASS** (`docker_20260804T100817Z`) |
+| **Provider fault validation** | Provider-resilience + Docker dual-API | **PASS** (`docker_20260804T100817Z`) |
 | Retry amplification across 2 API containers | Logical provider calls → physical HTTP attempts | **20 → 25** (1.25×); stub observed exactly **25** |
 | Provider unexpected failures | Scenario G | **0** |
 | **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational; measured under evaluator pin `v0.1.0-rc.1`) |
 | Core mutation detection | Wrong entity / number / citation / risk | **4/4** |
 | **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.3` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
 | **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback) |
-| **Production hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
+| **Compose hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
 
-Unit-regression counts were frozen during Phase 6 validation on 2026-08-12 and
+Unit-regression counts were frozen during full validation on 2026-08-12 and
 shipped in tag `v0.1.0-rc.3`. LumenFin ran through `scripts/run_tests.py`
 inside the UID-10001 Linux image; FinAgentBench used unittest discovery.
 Invoking `pytest` directly can count subtests differently, so runner totals
@@ -295,11 +365,10 @@ pin; it is **not** a score for the published `v0.1.0-rc.3` evaluator. What the
 current pin verifies is compatibility: the frozen FinRun export is accepted and
 replayed by FinAgentBench `v0.1.0-rc.3`.
 
-Evidence: [PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
-[PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
-[Phase 6 full validation](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) ·
-[Portfolio release report](docs/PORTFOLIO_RELEASE_REPORT.md) ·
-[Historical RC snapshots](reports/history/)
+Evidence: [queue/worker](docs/QUEUE_WORKER_INTEGRATION.md) ·
+[provider resilience](docs/PROVIDER_RESILIENCE.md) ·
+[full validation](docs/PRODUCTION_LIMITATIONS.md) ·
+[Portfolio release report](docs/PORTFOLIO_RELEASE_REPORT.md)
 
 ---
 
@@ -341,7 +410,7 @@ flowchart LR
 - Bulkhead is **per-process**, not a global distributed rate limit
 - Provider HTTP retry ≠ Redis job retry ≠ appendix replan (different layers)
 
-Full topology notes: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md).
+Full topology notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -351,7 +420,7 @@ Full topology notes: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md).
   delivery would need far heavier coordination; instead PostgreSQL leases and
   attempt fencing make redelivery safe, so a killed worker recovers without
   human action.
-- **Bounded repair instead of open-ended self-correction.** `critic_max_iterations`
+- **Bounded repair instead of unbounded critic loops.** `critic_max_iterations`
   caps the loop, and only retrieval-worthy violation codes may re-run expensive
   retrieval — an unbounded critic loop burns provider budget for little gain.
 - **Fail-closed over graceful-looking defaults.** A missing-fundamentals run
@@ -363,64 +432,16 @@ Full topology notes: [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md).
 
 ---
 
-## Quick start
-
-Supported CI Python: **3.12**. Prefer the lockfile path.
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-lock.txt
-.\.venv\Scripts\python -m pip install -e . --no-deps
-copy .env.example .env
-
-# The unit suite runs on the SQLite test backend. .env.example ships
-# APP_ENV=dev, which is PostgreSQL-first and refuses SQLite by default.
-$env:APP_ENV = "test"
-.\.venv\Scripts\python scripts\run_tests.py
-.\.venv\Scripts\python scripts\run_portfolio_demo.py
-```
-
-Serve the API (reads `.env`, defaults to `127.0.0.1:8000`):
-
-```powershell
-.\.venv\Scripts\python start_api.py
-```
-
-Live providers need keys in `.env` (never commit them). Configuration:
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md) · reproducing the frozen
-evidence: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
-
-### Independent evaluation
-
-The evaluator lives in a separate repository and never imports LumenFin's app
-layer. Reproduce the compatibility gate from the FinAgentBench side against the
-published tag **`v0.1.0-rc.3`**
-([majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)):
-
-```powershell
-git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
-cd finagentbench-demo
-python -m pip install -e .
-$env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
-python scripts\validate_cross_repo.py --profile ci
-```
-
-The summary records both commits, both worktree states, FinRun schema, profile,
-and core/extended mutation results. LumenFin CI also runs this gate at the
-pinned evaluator tag; the pin is configurable per workflow dispatch.
-
----
-
 ## Limitations
 
 The validated results above were produced under controlled multi-process and
 deterministic fault-injection conditions, not in sustained production traffic.
 
-- Portfolio RC / controlled deployment candidate — **not** unrestricted production-ready
+- Portfolio RC / controlled deployment candidate — **not** unrestricted production readiness
 - At-least-once queues — **not** exactly-once
 - Per-process bulkhead — **not** cross-process global rate limit
 - Controlled synthetic live smoke passed for DeepSeek, DashScope embedding,
-  and Qwen3 rerank; both repositories' full local Phase 6 gates passed
+  and Qwen3 rerank; both repositories' full local validation gates passed
 - Published tag `v0.1.0-rc.3` with green GitHub Actions on `main` / tag; remaining
   gaps are soak, IAM-bound tenancy, and public image redistribution — not “untagged”
 - Docs on `main` may be one or more commits ahead of the immutable RC tag
@@ -437,15 +458,15 @@ Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 | Doc | Purpose |
 |-----|---------|
 | [docs/README.md](docs/README.md) | Doc index |
-| [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md) | Agent control flow + runtime architecture |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Agent control flow + runtime architecture |
 | [docs/MULTI_TENANCY_BOUNDARY.md](docs/MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Environment variables and provider pins |
 | [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) | Reproducing the frozen evidence |
 | [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | Offline demo walkthrough |
 | [docs/PORTFOLIO_RELEASE_REPORT.md](docs/PORTFOLIO_RELEASE_REPORT.md) | Freeze evidence |
-| [docs/PHASE32B_INTEGRATION_REPORT.md](docs/PHASE32B_INTEGRATION_REPORT.md) | Multi-process queue/worker evidence |
-| [docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) | Provider fault-injection evidence |
-| [reports/current/PHASE6_FULL_VALIDATION_REPORT.md](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | Two-repo full validation |
+| [docs/QUEUE_WORKER_INTEGRATION.md](docs/QUEUE_WORKER_INTEGRATION.md) | Multi-process queue/worker evidence |
+| [docs/PROVIDER_RESILIENCE.md](docs/PROVIDER_RESILIENCE.md) | Provider fault-injection evidence |
+| [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md) | Controlled RC boundary + validated gate summary |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | Supported commands |
 
@@ -456,7 +477,7 @@ Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 ```text
 src/lumenfin/     Agent runtime, grounding, claims, FinRun, RAG, providers
 tests/            Offline regression
-scripts/          Tests, demos, Phase 3.2B/3.3A harnesses
+scripts/          Tests, demos, queue/worker + provider-resilience harnesses
 docs/             Architecture and release docs
 reports/current/  Authoritative RC evidence packs
 ```

@@ -1,4 +1,4 @@
-# Production Boundaries and Limitations
+﻿# Production Boundaries and Limitations
 
 LumenFin is a **portfolio release candidate** validated under controlled
 multi-process and deterministic fault-injection conditions. These results
@@ -6,7 +6,7 @@ are **not** a certification of unrestricted production readiness.
 
 | Status | Meaning |
 |--------|---------|
-| Controlled environment acceptance | Phase 3.2B / 3.3A / offline regression PASS |
+| Controlled environment acceptance | Queue/worker integration, provider-resilience, and offline regression PASS |
 | Suitable for | Internal demos, portfolio showcases, limited operator-owned deploys |
 | Not claimed | Internet-scale production certification, exactly-once delivery |
 
@@ -33,13 +33,28 @@ are **not** a certification of unrestricted production readiness.
 ### Delivery and concurrency
 
 - Queue semantics are **at-least-once**, not exactly-once
+- Reserve moves pending→processing with a short poll sleep (Lua atomic move);
+  not BRPOP-style blocking waits
 - Bulkheads are **per-process**, not a cross-process global rate limit
 - No shared circuit breaker across API processes
 - Controlled synthetic DeepSeek/DashScope/Qwen3 smoke passed locally on
-  2026-08-12; ordinary CI remains offline. Full two-repo validation is recorded
-  in `reports/current/PHASE6_FULL_VALIDATION_REPORT.md` and shipped in
+  2026-08-12; ordinary CI remains offline. Full two-repo validation summary
+  (Linux image suite 495 passed / 2 skipped, FinAgentBench 149, FinRun
+  mutations 11/11) is recorded in the table below and shipped with
   `v0.1.0-rc.3`
 - No large-scale multi-day soak in the validated pack
+
+### Validated integration evidence (controlled)
+
+| Gate | Result | Evidence |
+|------|--------|----------|
+| Queue/worker multi-process Docker | PASS (`20260804T095357Z`) — worker-kill reclaim without manual redelivery; tenant leakage `0`; orphan chunks/vectors `0/0` | [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) |
+| Provider resilience dual-API Docker | PASS (`docker_20260804T100817Z`) — logical calls `20` → physical attempts `25` (1.25×); unexpected failures `0`; context leakage `0` | [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md) |
+| Two-repo full validation | PASS (2026-08-12) — LumenFin 495/2 skip; FinAgentBench 149; FinRun mutations 11/11 | this document + CI / `scripts/run_tests.py` + `scripts/run_cross_repo_ci.py` |
+
+Integration harnesses use deterministic embeddings / demo market providers and a
+deterministic provider stub for fault injection. Combined observed inflight
+across API containers may reach the **sum** of per-process bulkhead limits.
 
 ### Infrastructure
 
@@ -52,11 +67,15 @@ are **not** a certification of unrestricted production readiness.
 
 ### Multi-tenancy
 
-- RAG data-plane is tenant-aware (logical isolation). See
-  [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md)
-- Tenant identity is **not** bound to login credentials / JWT claims
-- Checkpoint and analysis jobs are **not** fully tenant-scoped
+- API keys map to an `AuthenticatedPrincipal` with a fixed `tenant_id`
+  (see [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md))
+- Jobs, checkpoints, and RAG lookups are tenant-scoped on authorized paths
+- This is API-key authorization isolation, **not** OAuth/OIDC/RBAC or
+  physical infrastructure isolation
 - PostgreSQL Row-Level Security is **not** enabled
+- Schema upgrade for existing PostgreSQL databases:
+  `migrations/postgresql/003_add_tenant_ownership.sql` (legacy rows bind to
+  `tenant_id='default'`)
 
 ### External providers
 
@@ -67,6 +86,7 @@ are **not** a certification of unrestricted production readiness.
 - Provider resilience (deadline, Retry-After, single retry owner, degraded
   fallback) is validated with a deterministic stub plus bounded synthetic live
   smoke — not a live soak
+- Provider HTTP retry ≠ Redis job retry ≠ critic replan (different layers)
 
 ### Evidence and data
 
@@ -79,8 +99,8 @@ are **not** a certification of unrestricted production readiness.
 
 - Reports are research artifacts, **not investment advice**
 - Human review remains required for material decisions
-- FinAgentBench measures execution reliability; it does not prove future
-  investment performance
+- FinAgentBench measures FinRun replay / execution reliability; it does not
+  prove future investment performance or act as a third-party market benchmark
 - Project-owned source is MIT licensed
 - PyMuPDF licensing (AGPL-3.0 and/or commercial terms) remains a blocker for
   publishing the application image as a purely MIT artifact

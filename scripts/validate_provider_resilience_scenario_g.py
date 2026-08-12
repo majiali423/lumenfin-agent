@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 3.3A dual-API Scenario G: two OS processes + shared provider stub."""
+"""Dual-API provider resilience Scenario G: two OS processes + shared provider stub."""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ for path in (ROOT, SRC, SCRIPTS):
 
 from provider_stub.server import serve, reset_state, snapshot
 
-OUTPUT_DIR = ROOT / "outputs" / "phase33a_provider_resilience"
-STUB_PORT = int(os.getenv("PHASE33A_STUB_PORT", "18090"))
-API_A_PORT = int(os.getenv("PHASE33A_API_A_PORT", "18180"))
-API_B_PORT = int(os.getenv("PHASE33A_API_B_PORT", "18181"))
+OUTPUT_DIR = ROOT / "outputs" / "provider_resilience"
+STUB_PORT = int(os.getenv("PROVIDER_RESILIENCE_STUB_PORT", os.getenv("PHASE33A_STUB_PORT", "18090")))
+API_A_PORT = int(os.getenv("PROVIDER_RESILIENCE_API_A_PORT", os.getenv("PHASE33A_API_A_PORT", "18180")))
+API_B_PORT = int(os.getenv("PROVIDER_RESILIENCE_API_B_PORT", os.getenv("PHASE33A_API_B_PORT", "18181")))
 
 
 def _wait_health(url: str, *, timeout: float = 60.0) -> dict:
@@ -90,7 +90,7 @@ def _spawn_api(port: int, worker_id: str, stub_base: str) -> subprocess.Popen:
     if not has_dotenv_key:
         env["DEEPSEEK_API_KEY"] = "stub-key"
     # Isolated sqlite paths per API process.
-    data_dir = ROOT / "outputs" / "phase33a_provider_resilience" / "_dual_api_runtime" / worker_id
+    data_dir = ROOT / "outputs" / "provider_resilience" / "_dual_api_runtime" / worker_id
     data_dir.mkdir(parents=True, exist_ok=True)
     env["MAS_DB_PATH"] = str(data_dir / "app.db")
     env["MAS_OUTPUT_DIR"] = str(data_dir / "outputs")
@@ -136,17 +136,17 @@ def _fault_plan() -> list[tuple[str, str]]:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Phase 3.3A dual-API Scenario G")
+    parser = argparse.ArgumentParser(description="Provider resilience dual-API Scenario G")
     parser.add_argument(
         "--mode",
         choices=("process", "docker"),
         default="process",
-        help="process=local OS subprocesses (default); docker=real containers via run_phase33a_dual_api_docker.py",
+        help="process=local OS subprocesses (default); docker=real containers via validate_provider_resilience_docker.py",
     )
     args, unknown = parser.parse_known_args(argv)
     if args.mode == "docker":
         # Explicit Docker mode only — never silently fall back to OS processes.
-        import run_phase33a_dual_api_docker as docker_runner
+        import validate_provider_resilience_docker as docker_runner
 
         # Forward remaining args to the Docker runner (e.g. --keep).
         return docker_runner.main()

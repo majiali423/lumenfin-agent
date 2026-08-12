@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 3.3A Docker dual-API Scenario G (real containers; no OS-process fallback)."""
+"""Docker dual-API provider resilience Scenario G (real containers; no OS-process fallback)."""
 
 from __future__ import annotations
 
@@ -25,14 +25,14 @@ for path in (ROOT, SRC, ROOT / "scripts"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from phase32b import docker_ops
-from phase32b.docker_ops import DockerUnavailable
-from phase32b.settings import ENV_FILE, IntegrationSettings
-from phase32b import scenarios as phase32b_scenarios
+from queue_worker_integration import docker_ops
+from queue_worker_integration.docker_ops import DockerUnavailable
+from queue_worker_integration.settings import ENV_FILE, IntegrationSettings
+from queue_worker_integration import scenarios as queue_scenarios
 
 COMPOSE_BASE = ROOT / "docker-compose.integration.yml"
-COMPOSE_OVERLAY = ROOT / "docker-compose.phase33a.yml"
-OUTPUT_ROOT = ROOT / "outputs" / "phase33a_provider_resilience"
+COMPOSE_OVERLAY = ROOT / "docker-compose.provider-resilience.yml"
+OUTPUT_ROOT = ROOT / "outputs" / "provider_resilience"
 
 UNCLOSED_RE = re.compile(r"unclosed\s+(client|transport)", re.I)
 TRACEBACK_RE = re.compile(r"Traceback \(most recent call last\)")
@@ -137,7 +137,7 @@ def _count_matches(text: str, pattern: re.Pattern[str]) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Phase 3.3A Docker dual-API Scenario G")
+    parser = argparse.ArgumentParser(description="Provider resilience Docker dual-API Scenario G")
     parser.add_argument(
         "--mode",
         choices=("docker",),
@@ -217,7 +217,7 @@ def main() -> int:
             )
 
             print("3/11 migrations...")
-            # Wait for postgres then run host-side migration gate (same as Phase 3.2B).
+            # Wait for postgres then run host-side migration gate (same as queue/worker integration).
             deadline = time.monotonic() + 300
             last_err = None
             while time.monotonic() < deadline:
@@ -237,7 +237,7 @@ def main() -> int:
             else:
                 raise TimeoutError(f"postgres not reachable: {last_err}")
 
-            migration = phase32b_scenarios.run_migration_gate(settings, run_dir)
+            migration = queue_scenarios.run_migration_gate(settings, run_dir)
             summary["postgres_migrations"] = migration.get("status")
             if migration.get("status") != "pass":
                 raise RuntimeError(f"migration failed: {migration.get('errors')}")

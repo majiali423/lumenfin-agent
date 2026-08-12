@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Deterministic offline portfolio demo (A/B/C narratives). No live providers."""
 
 from __future__ import annotations
@@ -318,9 +318,9 @@ def demo_b_isolation_and_mutations(output_dir: Path) -> dict[str, Any]:
         "mutation_detection": "4/4",
         "mutation_checks": mutation_checks,
         "tenant_leakage_evidence": {
-            "phase32b_run": "20260804T095357Z",
+            "queue_worker_run": "20260804T095357Z",
             "tenant_leakage_count": 0,
-            "doc": "docs/PHASE32B_INTEGRATION_REPORT.md",
+            "doc": "docs/QUEUE_WORKER_INTEGRATION.md",
         },
         "errors": errors,
         "notes": [
@@ -445,18 +445,18 @@ def main() -> int:
         "docker_recovery_story": {
             "optional": True,
             "summary": "worker A killed → automatic reclaim → worker B attempt=2 → ready",
-            "evidence": "docs/PHASE32B_INTEGRATION_REPORT.md",
+            "evidence": "docs/QUEUE_WORKER_INTEGRATION.md",
             "run_id": "20260804T095357Z",
         },
         "validated_refs": {
-            "phase32b": "20260804T095357Z",
-            "phase33a_docker": "docker_20260804T100817Z",
-            # Stamped Phase 6 / Phase 3.2B-3.3A evidence (also shipped in v0.1.0-rc.3).
-            "offline_tests": "495 passed, 2 skipped (Phase 6 Linux-image validation)",
+            "queue_worker_integration": "20260804T095357Z",
+            "provider_resilience_docker": "docker_20260804T100817Z",
+            # Stamped full-validation / queue-worker / provider-resilience evidence (also shipped in v0.1.0-rc.3).
+            "offline_tests": "495 passed, 2 skipped (Linux-image full validation)",
             "mutation_detection": "4/4",
             "finagentbench_mean": 92.97,
             "evidence_note": (
-                "validated_refs cite stamped Phase 6 / Phase 3.2B-3.3A evidence "
+                "validated_refs cite stamped full-validation / queue-worker / provider-resilience evidence "
                 "shipped with tag v0.1.0-rc.3; finagentbench_mean 92.97 is "
                 "informational under historical evaluator pin v0.1.0-rc.1"
             ),

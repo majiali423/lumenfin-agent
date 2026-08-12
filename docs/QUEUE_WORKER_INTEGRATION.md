@@ -1,8 +1,11 @@
-# Phase 3.2B Integration Report
+﻿# Queue / worker integration evidence
 
 Desensitized validation record for PostgreSQL-first runtime and reliable Redis
-delivery. Generated from a real PASS run; not a claimed production-ready
-certification.
+delivery. Generated from a real PASS run; not a certification of unrestricted
+production readiness.
+
+**Runner:** `python scripts/run_queue_worker_integration.py`  
+**Compose:** `docker-compose.integration.yml`
 
 ## Test metadata
 
@@ -90,17 +93,17 @@ Dead-letter scenario peak: `dead_letter=1` with `message_id`, `payload`, `attemp
 - Reserve polls with short sleep (Lua atomic move); not BRPOP blocking
 - Analysis and index workers share the reliable queue abstraction; reclaim is cooperative per-worker
 - Integration uses deterministic embeddings and demo/fake market providers
-- Not production-ready certification; controlled multi-process validation only
+- Not unrestricted production readiness; controlled multi-process validation only
 
 ## Artifacts (local, gitignored)
 
 ```text
-outputs/phase32b_integration/20260804T075952Z/summary.json
-outputs/phase32b_integration/20260804T075952Z/api-a.log
-outputs/phase32b_integration/20260804T075952Z/api-b.log
-outputs/phase32b_integration/20260804T075952Z/index-worker-a.log
-outputs/phase32b_integration/20260804T075952Z/index-worker-b.log
-outputs/phase32b_integration/summary.json
+outputs/queue_worker_integration/20260804T075952Z/summary.json
+outputs/queue_worker_integration/20260804T075952Z/api-a.log
+outputs/queue_worker_integration/20260804T075952Z/api-b.log
+outputs/queue_worker_integration/20260804T075952Z/index-worker-a.log
+outputs/queue_worker_integration/20260804T075952Z/index-worker-b.log
+outputs/queue_worker_integration/summary.json
 ```
 
 Migration detail is under the run directory scenario JSON / postgres logs as produced by the harness.

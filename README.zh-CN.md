@@ -1,4 +1,4 @@
-# LumenFin
+﻿# LumenFin
 
 [English](README.md) | **中文**
 
@@ -13,10 +13,10 @@ Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
 发布候选 **`0.1.0rc3`** / 标签 **`v0.1.0-rc.3`** · FinRun schema `1.0` ·
-FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · **受控发布候选**，不是“无限制
-生产就绪”认证（[局限说明](docs/PRODUCTION_LIMITATIONS.md)）
+FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · 受控 RC，边界见
+[局限说明](docs/PRODUCTION_LIMITATIONS.md)
 
-[文档](docs/README.md) · [架构](docs/FINAL_ARCHITECTURE.md) ·
+[文档](docs/README.md) · [架构](docs/ARCHITECTURE.md) ·
 [局限](docs/PRODUCTION_LIMITATIONS.md) · [演示](docs/DEMO_GUIDE.md) ·
 [发布报告](docs/PORTFOLIO_RELEASE_REPORT.md)
 
@@ -37,6 +37,74 @@ LumenFin 让这些失败模式变得**可见**，并以 **fail-closed** 方式�
 
 ---
 
+## 架构速览
+
+LangGraph 专职节点共享一个 `FinanceState`（`src/lumenfin/graph.py`）：
+
+`query → plan → retrieve → analyze → critic/repair → claim bind → synthesize`
+
+运行时角色（不是单一线性管道）：FastAPI ↔ PostgreSQL / Milvus；
+Redis analysis 队列 → Analysis Worker；Redis index 队列 → Index Worker
+（lease + attempt fencing）。详见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+### 可靠性（设计属性）
+
+- 缺少 fundamentals 时数值主张 fail-closed
+- 进入正文前的 Claim → Evidence 绑定
+- At-least-once Redis 队列 + worker 回收（不是 exactly-once）
+- 每个 provider 调用单一重试所有者；per-process bulkhead
+- FinRun 导出供离线回放评分（不是实时市场真值源）
+
+---
+
+## 快速开始
+
+受支持的 CI Python：**3.12**。优先使用 lockfile 路径。
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-lock.txt
+.\.venv\Scripts\python -m pip install -e . --no-deps
+copy .env.example .env
+
+# 单元套件使用 SQLite test backend。.env.example 默认 APP_ENV=dev，
+# 该模式以 PostgreSQL 为主，并默认拒绝 SQLite。
+$env:APP_ENV = "test"
+.\.venv\Scripts\python scripts\run_tests.py
+.\.venv\Scripts\python scripts\run_portfolio_demo.py
+```
+
+启动 API（读取 `.env`，默认 `127.0.0.1:8000`）：
+
+```powershell
+.\.venv\Scripts\python start_api.py
+```
+
+Live provider 需要把密钥放进 `.env`（切勿提交）。配置说明：
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md) · 复现冻结证据：
+[docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md)。
+
+### 评测（FinRun → FinAgentBench）
+
+FinAgentBench 是**兄弟仓库回放评测器**：对导出的 FinRun 状态与 mutation
+控件打分。它**不** import LumenFin app 代码，也不是第三方独立市场基准。
+对照 pin **`v0.1.0-rc.3`** 复现兼容性门禁
+（[majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)）：
+
+```powershell
+git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
+cd finagentbench-demo
+python -m pip install -e .
+$env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
+python scripts\validate_cross_repo.py --profile ci
+```
+
+摘要记录双方 commit、FinRun schema、profile 与 core/extended mutation 结果。
+LumenFin CI 也会在 pin 的评测器 tag 上运行该门禁。
+
+---
+
 ## 一键离线演示
 
 确定性 · 离线 · 无需 API key · 失败时非零退出。
@@ -51,8 +119,8 @@ python scripts/run_portfolio_demo.py
 | **B** 隔离与错误检出 | Apple/Microsoft 保持在范围内；错误数值 / 错误实体 / 缺失引用 / 缺失风险均被拒绝（**4/4**） |
 | **C** Fail-closed | 强制缺失 SEC + Yahoo → `workflow_status = incomplete_data`，零数值主张 |
 
-该入口还会**打印**离线不复证的已验证引用（Phase 3.2B 租户泄漏 `0`、Phase 3.3A
-Docker run id）；本入口不会启动 Docker 栈。完整走读：
+该入口还会**打印**离线不复证的已验证引用（queue/worker 租户泄漏 `0`、
+provider-resilience Docker run id）；本入口不会启动 Docker 栈。完整走读：
 [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
 
 ### 已验证 claim 长什么样
@@ -169,7 +237,7 @@ flowchart TD
 | Publish（图内） | `synthesizer` → `END` | 仅发布已验证报告；LangGraph 在此结束 |
 | Evaluate（图外） | FinRun export、FinAgentBench | 运行后产物 + 独立 sibling 评测器 |
 
-路由细节与边条件见 [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)。
+路由细节与边条件见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ### Critic vs Repair vs Claim Binder
 
@@ -262,20 +330,20 @@ PDF / SEC / Yahoo / market providers
 |------|------------------|--------|
 | **LumenFin unit regression** | Linux 最终镜像全量 Python 测试 | **495 passed, 2 skipped** |
 | **FinAgentBench unit regression** | 全量 Python 测试 | **149 passed** |
-| **Infrastructure integration** | Phase 3.2B 多进程 Docker | **PASS**（`20260804T095357Z`） |
+| **Infrastructure integration** | Queue/worker 多进程 Docker | **PASS**（`20260804T095357Z`） |
 | Worker-kill recovery | 被杀 worker 的任务是否需要人工重投？ | **否** — lease 过期 + attempt fencing 自动回收 |
 | Tenant leakage | 跨租户 RAG 读取 | **0** |
 | Orphan chunks / vectors | Index 补偿 | **0 / 0** |
-| **Provider fault validation** | Phase 3.3A + Docker 双 API | **PASS**（`docker_20260804T100817Z`） |
+| **Provider fault validation** | Provider-resilience + Docker 双 API | **PASS**（`docker_20260804T100817Z`） |
 | Retry amplification across 2 API containers | 逻辑 provider 调用 → 物理 HTTP 尝试 | **20 → 25**（1.25×）；stub 精确观测到 **25** |
 | Provider unexpected failures | Scenario G | **0** |
 | **Benchmark reliability** | FinAgentBench 完成案例均分 | **92.97**（informational；在评测器 pin `v0.1.0-rc.1` 下测得） |
 | Core mutation detection | 错误实体 / 数值 / 引用 / 风险 | **4/4** |
 | **Evaluator compatibility** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.3` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
 | **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback） |
-| **Production hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
+| **Compose hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
 
-单元回归计数冻结于 2026-08-12 Phase 6 验证，并随标签 `v0.1.0-rc.3` 发布。
+单元回归计数冻结于 2026-08-12 全量验证，并随标签 `v0.1.0-rc.3` 发布。
 LumenFin 在 UID-10001 Linux 镜像内通过 `scripts/run_tests.py` 运行；
 FinAgentBench 使用 unittest discovery。直接调用 `pytest` 可能按 subtest
 产生不同计数，因此不能混用 runner 总数。
@@ -284,11 +352,10 @@ Benchmark 行仅供参考，是在更早的评测器 pin 下测得；**不是**�
 `v0.1.0-rc.3` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
 FinAgentBench `v0.1.0-rc.3` 接受并回放。
 
-证据：[PHASE32B](docs/PHASE32B_INTEGRATION_REPORT.md) ·
-[PHASE33A](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) ·
-[Phase 6 full validation](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) ·
-[作品集发布报告](docs/PORTFOLIO_RELEASE_REPORT.md) ·
-[历史 RC 快照](reports/history/)
+证据：[queue/worker](docs/QUEUE_WORKER_INTEGRATION.md) ·
+[provider resilience](docs/PROVIDER_RESILIENCE.md) ·
+[全量验证](docs/PRODUCTION_LIMITATIONS.md) ·
+[作品集发布报告](docs/PORTFOLIO_RELEASE_REPORT.md)
 
 ---
 
@@ -329,7 +396,7 @@ flowchart LR
 - Bulkhead 是 **per-process**，不是跨进程全局限流
 - Provider HTTP retry ≠ Redis job retry ≠ appendix replan（不同层级）
 
-完整拓扑说明见 [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md)。
+完整拓扑说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ---
 
@@ -338,7 +405,7 @@ flowchart LR
 - **At-least-once 队列 + fencing，而不是 exactly-once。** 分布式 exactly-once
   交付需要更重的协调；PostgreSQL lease 与 attempt fencing 让重投安全，因此被杀
   worker 无需人工介入即可恢复。
-- **有界 repair，而不是开放式自我修正。** `critic_max_iterations` 限制循环，且
+- **有界 repair，而不是无界 critic 循环。** `critic_max_iterations` 限制循环，且
   只有值得重新检索的违规码才会重跑昂贵的 retrieval —— 无界 critic 循环只会消耗
   provider 预算。
 - **Fail-closed，而不是看起来体面的默认值。** 缺少 fundamentals 时返回
@@ -350,62 +417,15 @@ flowchart LR
 
 ---
 
-## 快速开始
-
-受支持的 CI Python：**3.12**。优先使用 lockfile 路径。
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-lock.txt
-.\.venv\Scripts\python -m pip install -e . --no-deps
-copy .env.example .env
-
-# 单元套件使用 SQLite test backend。.env.example 默认 APP_ENV=dev，
-# 该模式以 PostgreSQL 为主，并默认拒绝 SQLite。
-$env:APP_ENV = "test"
-.\.venv\Scripts\python scripts\run_tests.py
-.\.venv\Scripts\python scripts\run_portfolio_demo.py
-```
-
-启动 API（读取 `.env`，默认 `127.0.0.1:8000`）：
-
-```powershell
-.\.venv\Scripts\python start_api.py
-```
-
-Live provider 需要把密钥放进 `.env`（切勿提交）。配置说明：
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md) · 复现冻结证据：
-[docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md)。
-
-### 独立评测
-
-评测器位于独立仓库，且不会 import LumenFin 的 app 层。可从 FinAgentBench 侧
-对照已发布 tag **`v0.1.0-rc.3`** 复现兼容性门禁
-（[majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)）：
-
-```powershell
-git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
-cd finagentbench-demo
-python -m pip install -e .
-$env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
-python scripts\validate_cross_repo.py --profile ci
-```
-
-摘要会记录双方 commit、双方 worktree 状态、FinRun schema、profile，以及
-core / extended mutation 结果。LumenFin CI 也会在 pin 的评测器 tag 上运行该门禁；
-pin 可通过 workflow dispatch 配置。
-
----
-
 ## 局限
 
 以上验证结果产生于受控的多进程与确定性故障注入条件，而非持续生产流量。
 
-- 作品集 RC / 受控部署候选 — **不是**无限制生产就绪
+- 作品集 RC / 受控部署候选 — **不是**无限制生产就绪认证
 - At-least-once 队列 — **不是** exactly-once
 - Per-process bulkhead — **不是**跨进程全局限流
 - DeepSeek、DashScope embedding 与 Qwen3 rerank 的受控合成 live smoke 已通过；
-  两仓库 Phase 6 本地全量门禁均已通过
+  两仓库本地全量验证门禁均已通过
 - 已发布标签 `v0.1.0-rc.3`，`main` / tag 上 GitHub Actions 为绿；剩余缺口是
   soak、身份绑定租户、公开镜像分发 — 不是“尚未打 tag”
 - `main` 上的文档可能比不可变 RC tag 超前若干 commit
@@ -422,15 +442,15 @@ pin 可通过 workflow dispatch 配置。
 | Doc | Purpose |
 |-----|---------|
 | [docs/README.md](docs/README.md) | 文档索引 |
-| [docs/FINAL_ARCHITECTURE.md](docs/FINAL_ARCHITECTURE.md) | Agent 控制流 + 运行时架构 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Agent 控制流 + 运行时架构 |
 | [docs/MULTI_TENANCY_BOUNDARY.md](docs/MULTI_TENANCY_BOUNDARY.md) | 租户隔离范围 |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | 环境变量与 provider pin |
 | [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) | 复现冻结证据 |
 | [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md) | 离线演示走读 |
 | [docs/PORTFOLIO_RELEASE_REPORT.md](docs/PORTFOLIO_RELEASE_REPORT.md) | 冻结证据 |
-| [docs/PHASE32B_INTEGRATION_REPORT.md](docs/PHASE32B_INTEGRATION_REPORT.md) | 多进程 queue/worker 证据 |
-| [docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md](docs/PHASE33A_PROVIDER_RESILIENCE_REPORT.md) | Provider 故障注入证据 |
-| [reports/current/PHASE6_FULL_VALIDATION_REPORT.md](reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | 双仓全量验证 |
+| [docs/QUEUE_WORKER_INTEGRATION.md](docs/QUEUE_WORKER_INTEGRATION.md) | 多进程 queue/worker 证据 |
+| [docs/PROVIDER_RESILIENCE.md](docs/PROVIDER_RESILIENCE.md) | Provider 故障注入证据 |
+| [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md) | 受控 RC 边界与已验证门禁摘要 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
 | [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | 支持的命令 |
 
@@ -441,7 +461,7 @@ pin 可通过 workflow dispatch 配置。
 ```text
 src/lumenfin/     Agent 运行时、grounding、claims、FinRun、RAG、providers
 tests/            离线回归
-scripts/          测试、演示、Phase 3.2B/3.3A harness
+scripts/          测试、演示、queue/worker + provider-resilience harness
 docs/             架构与发布文档
 reports/current/  权威 RC 证据包
 ```

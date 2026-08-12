@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = ROOT / "docker-compose.integration.yml"
 ENV_FILE = ROOT / ".env.integration.example"
-OUTPUT_DIR = ROOT / "outputs" / "phase32b_integration"
+OUTPUT_DIR = ROOT / "outputs" / "queue_worker_integration"
 
 
 @dataclass(frozen=True)

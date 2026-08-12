@@ -1,4 +1,4 @@
-# LumenFin Final Architecture
+﻿# LumenFin Final Architecture
 
 Trustworthy Financial Research Agent — architecture for **portfolio release
 candidate** `0.1.0rc3` (FinRun schema `1.0`, FinAgentBench pin **`v0.1.0-rc.3`**).
@@ -243,7 +243,7 @@ via `bootstrap_thread_from_store` before resume.
 
 ## 4. Runtime topology
 
-Validated multi-process reference (Phase 3.2B / 3.3A Docker). Analysis and
+Validated multi-process reference (queue/worker + provider-resilience Docker). Analysis and
 index work use **separate** Redis queues:
 
 ```text
@@ -312,13 +312,13 @@ Single retry owner per logical provider call (`call_with_policy`):
 - Process-local shared `httpx.Client` (`trust_env=False`)
 - Fallback marked `degraded` (does not hide primary failure class)
 - Per-process bulkhead (`provider_busy` is not HTTP-retried)
-- Deterministic provider stub for Phase 3.3A (no live keys required)
+- Deterministic provider stub for provider-resilience suites (no live keys required)
 
 **Note:** per-process bulkhead ≠ cross-process global rate limit.
 **Note:** provider HTTP retry ≠ `appendix_replan` supplementary retrieval ≠
 Redis job reclaim.
 
-Evidence: [PHASE33A_PROVIDER_RESILIENCE_REPORT.md](PHASE33A_PROVIDER_RESILIENCE_REPORT.md)
+Evidence: [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md)
 (`docker_20260804T100817Z`).
 
 ---
@@ -371,8 +371,8 @@ Quant / risk → Claims → Evidence binding → Report
 |-----|------|
 | [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope |
 | [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Portfolio RC positioning |
-| [PHASE32B_INTEGRATION_REPORT.md](PHASE32B_INTEGRATION_REPORT.md) | Multi-process infra |
-| [PHASE33A_PROVIDER_RESILIENCE_REPORT.md](PHASE33A_PROVIDER_RESILIENCE_REPORT.md) | Provider faults |
+| [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) | Multi-process infra |
+| [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md) | Provider faults |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Release freeze evidence |
 | [FINAGENTBENCH_DESIGN.md](FINAGENTBENCH_DESIGN.md) | Evaluation design |
 | [CONFIGURATION.md](CONFIGURATION.md) | Env / FinAgentBench pin |

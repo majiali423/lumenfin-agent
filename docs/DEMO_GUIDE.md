@@ -1,4 +1,4 @@
-# Release Demo Guide
+﻿# Release Demo Guide
 
 Use the offline demo first. Live demos require configured providers and should
 never print API keys.
@@ -16,17 +16,17 @@ Covers three narratives in one run:
 | Demo | Story | Assertion |
 |------|-------|-----------|
 | A | Trusted normal analysis | issuer-only scope, grounded claims, internal contract score, FinRun-exportable state |
-| B | Isolation + error detection | Apple/Microsoft only; wrong number / wrong entity / missing citation / missing risk all rejected (**local claim-binder checks 4/4**; stamped Phase 3.2B tenant leakage `0`) |
+| B | Isolation + error detection | Apple/Microsoft only; wrong number / wrong entity / missing citation / missing risk all rejected (**local claim-binder checks 4/4**; stamped queue/worker tenant leakage `0`) |
 | C | Fail-closed | forced missing SEC+Yahoo → `incomplete_data`, zero numeric claims |
 
 The portfolio demo's "evaluator score" is an **internal LumenFin contract
 score**, not a FinAgentBench completed-case mean. For the external evaluator,
 use FinAgentBench `scripts/run_offline_demo.py` or the pinned cross-repo gate.
 
-The demo also prints validated references (Phase 3.2B run, Phase 3.3A Docker
+The demo also prints validated references (queue/worker run, provider-resilience Docker
 run, tenant leakage 0) and the optional Docker recovery story:
 `worker A killed → automatic reclaim → worker B attempt=2 → ready`
-([Phase 3.2B evidence](PHASE32B_INTEGRATION_REPORT.md)). The full Docker stack
+([queue/worker evidence](QUEUE_WORKER_INTEGRATION.md)). The full Docker stack
 is **not** started by the default demo.
 
 ## Report length mode (UI / API)
@@ -119,10 +119,10 @@ unavailable private-company financial dataset.
 
 ## Recommended demo order
 
-1. System spine from `FINAL_ARCHITECTURE.md`
+1. System spine from `ARCHITECTURE.md`
 2. `python scripts/run_portfolio_demo.py` (offline A/B/C in one run)
 3. Optional live 1–3 on an operator machine with fixtures/keys
-4. Runtime reliability references: Phase 3.2B worker-kill recovery + Phase 3.3A dual-API
+4. Runtime reliability references: queue/worker kill recovery + provider-resilience dual-API
 5. End with `PRODUCTION_LIMITATIONS.md`
 
 Published tags for this guide: LumenFin `v0.1.0-rc.3`, FinAgentBench

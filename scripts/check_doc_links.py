@@ -12,7 +12,7 @@ TARGETS = [
     "CHANGELOG.md",
     "Release_Checklist.md",
     "docs/README.md",
-    "docs/FINAL_ARCHITECTURE.md",
+    "docs/ARCHITECTURE.md",
     "docs/PRODUCTION_LIMITATIONS.md",
     "docs/MULTI_TENANCY_BOUNDARY.md",
     "docs/PORTFOLIO_RELEASE_REPORT.md",

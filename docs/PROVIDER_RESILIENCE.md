@@ -1,11 +1,17 @@
-# Phase 3.3A Provider Resilience Report
+﻿# Provider resilience evidence
 
-**Phase 3.3A: PASS**
+**Result: PASS**
 
 Desensitized validation record for unified provider call policy, request
 deadlines, Retry-After/jitter, fallback degradation, dual-API multi-process
 fault injection (OS process + **Docker containers**), and embedding failure
-compensation. Not a production-ready certification. Not exactly-once.
+compensation. Not a certification of unrestricted production readiness. Not
+exactly-once.
+
+**Runners:** `scripts/validate_provider_resilience.py`,
+`scripts/validate_provider_resilience_docker.py`,
+`scripts/validate_provider_resilience_scenario_g.py`  
+**Compose overlay:** `docker-compose.provider-resilience.yml`
 
 ## Test metadata (final closure)
 
@@ -17,7 +23,7 @@ compensation. Not a production-ready certification. Not exactly-once.
 | Dual-API Scenario G (OS process) | **pass** (earlier closure) |
 | Dual-API Scenario G (**Docker**) | **pass** — run id `docker_20260804T100817Z` |
 | Offline unit tests | **453 passed, 1 skipped** |
-| Phase 3.2B latest regression | **pass** — `20260804T095357Z` (same code baseline as `193c097`; not re-run this Docker-only round) |
+| Queue/worker latest regression | **pass** — `20260804T095357Z` (same code baseline as `193c097`; not re-run this Docker-only round) |
 | Live smoke | **skipped** |
 
 ---
@@ -28,8 +34,8 @@ compensation. Not a production-ready certification. Not exactly-once.
 |-------|-------|
 | Docker run id | `docker_20260804T100817Z` |
 | Test commit (image/build baseline at run start) | `193c097` (+ local harness fixes validated in-run) |
-| Compose files | `docker-compose.integration.yml` + `docker-compose.phase33a.yml` |
-| Runner | `scripts/run_phase33a_dual_api_docker.py` (`--mode docker` only; no OS-process fallback) |
+| Compose files | `docker-compose.integration.yml` + `docker-compose.provider-resilience.yml` |
+| Runner | `scripts/validate_provider_resilience_docker.py` (`--mode docker` only; no OS-process fallback) |
 | Mode | `docker` |
 | API A short container ID | `5f8518e619cd` |
 | API B short container ID | `cadce5e69547` |
@@ -52,7 +58,7 @@ compensation. Not a production-ready certification. Not exactly-once.
 | Lifespan shutdown | both APIs logged cleanup; `unclosed_client_warnings=0`; `shutdown_tracebacks=0` |
 | Unexpected container restarts | 0 / 0 |
 | postgres / redis / milvus error signals in API logs | 0 / 0 / 0 |
-| Artifact dir | `outputs/phase33a_provider_resilience/docker_20260804T100817Z/docker/` |
+| Artifact dir | `outputs/provider_resilience/docker_20260804T100817Z/docker/` |
 
 **Explicit semantics:** per-process bulkhead and process-local shared HTTP client
 **≠** cross-process global rate limiting. Combined observed inflight across
@@ -92,17 +98,17 @@ leave orphan chunks/vectors = 0. Provider retry ≠ Redis job retry.
 
 ---
 
-## 6. Phase 3.2B latest regression (referenced)
+## 6. Queue/worker latest regression (referenced)
 
 | Field | Value |
 |-------|-------|
 | Run id | `20260804T095357Z` |
 | Status | **pass** |
-| Note | Validated on HEAD `193c097` before this Docker evidence round. Docker harness did not change queueing/checkpoint/Milvus cleanup shared paths beyond compose overlay env for provider stub; Phase 3.2B was **not** re-executed this round. |
+| Note | Validated on HEAD `193c097` before this Docker evidence round. Docker harness did not change queueing/checkpoint/Milvus cleanup shared paths beyond compose overlay env for provider stub; queue/worker suite was **not** re-executed this round. |
 
 ---
 
-## 7. Deterministic Phase 3.3A suite
+## 7. Deterministic provider-resilience suite
 
 Scenarios A–G: **pass** (prior closure re-run retained).
 
@@ -121,4 +127,4 @@ Scenarios A–G: **pass** (prior closure re-run retained).
 - No cross-process Redis semaphore / shared circuit breaker (out of scope)
 - No large-scale real provider soak
 - Docker Scenario G uses deterministic stub + local fallback; not production traffic
-- Not exactly-once; not production-ready
+- Not exactly-once; not unrestricted production readiness

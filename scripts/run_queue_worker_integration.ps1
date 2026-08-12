@@ -1,4 +1,4 @@
-# Phase 3.2B multi-process integration entrypoint (Windows).
+# Queue/worker multi-process integration entrypoint (Windows).
 param(
     [switch]$Keep,
     [switch]$SkipLoad,
@@ -14,5 +14,5 @@ if ($Keep) { $argsList += "--keep" }
 if ($SkipLoad) { $argsList += "--skip-load" }
 if ($SkipInfra) { $argsList += "--skip-infra" }
 
-python scripts/run_phase32b_integration.py @argsList
+python scripts/run_queue_worker_integration.py @argsList
 exit $LASTEXITCODE

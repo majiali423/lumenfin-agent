@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""Phase 3.2B real multi-process infrastructure validation entrypoint."""
+﻿#!/usr/bin/env python3
+"""Queue/worker multi-process infrastructure validation entrypoint."""
 
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ for path in (ROOT, SRC, ROOT / "scripts"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from phase32b import docker_ops, hooks, milvus_util, redis_util, scenarios
-from phase32b.docker_ops import DockerUnavailable
-from phase32b.settings import OUTPUT_DIR, IntegrationSettings
+from queue_worker_integration import docker_ops, hooks, milvus_util, redis_util, scenarios
+from queue_worker_integration.docker_ops import DockerUnavailable
+from queue_worker_integration.settings import OUTPUT_DIR, IntegrationSettings
 
 
 def _versions() -> dict[str, str]:
@@ -65,7 +65,7 @@ def _write_logs(settings: IntegrationSettings, log_dir: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run Phase 3.2B multi-process integration suite.")
+    parser = argparse.ArgumentParser(description="Run queue/worker multi-process integration suite.")
     parser.add_argument("--keep", action="store_true", help="Keep containers/volumes after run.")
     parser.add_argument("--skip-load", action="store_true", help="Skip P1 limited load scenarios.")
     parser.add_argument(
@@ -264,7 +264,7 @@ def main() -> int:
         summary["blocked"] = str(exc)
         summary["unexpected_error_count"] += 1
         exit_code = 1
-        print(f"Phase 3.2B failed: {exc}", file=sys.stderr)
+        print(f"Queue/worker integration failed: {exc}", file=sys.stderr)
         try:
             _write_logs(settings, run_dir)
         except Exception:

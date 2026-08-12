@@ -26,7 +26,8 @@ LumenFin 在 **Retrieval 节点**内嵌混合检索，而不是单独拆一个�
 - `GET /api/v1/documents/{document_id}` — 查询索引状态
 - `analyze` 在 `async_on_upload` 下会对 `document_paths` 先 index 再 run
 
-详见历史路线图 `reports/history/RAG_PRODUCTION_PLAN.md`（已归档，非当前契约）。
+已删除的历史路线图不再作为当前契约；以本文件与
+[`architecture_decisions.md`](architecture_decisions.md) 为准。
 
 ## Milvus Server 模式（Phase 2）
 

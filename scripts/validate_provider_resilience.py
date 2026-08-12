@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 3.3A deterministic provider resilience suite (local fault stub)."""
+"""Deterministic provider resilience suite (local fault stub)."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ from lumenfin.provider_resilience import (
 )
 from lumenfin.rag.embeddings import DashScopeEmbeddingProvider, ResilientEmbeddingProvider
 
-OUTPUT_DIR = ROOT / "outputs" / "phase33a_provider_resilience"
-STUB_PORT = int(os.getenv("PHASE33A_STUB_PORT", "18090"))
+OUTPUT_DIR = ROOT / "outputs" / "provider_resilience"
+STUB_PORT = int(os.getenv("PROVIDER_RESILIENCE_STUB_PORT", os.getenv("PHASE33A_STUB_PORT", "18090")))
 STUB_BASE = f"http://127.0.0.1:{STUB_PORT}"
 
 

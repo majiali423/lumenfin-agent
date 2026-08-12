@@ -1,4 +1,4 @@
-# LumenFin Architecture Index
+﻿# LumenFin Architecture Index
 
 Generated for documentation organization. This index does **not** change runtime
 behavior.
@@ -7,16 +7,15 @@ behavior.
 
 | Doc | Purpose |
 |-----|---------|
-| [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md) | System overview, diagram, data flow |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System overview, diagram, data flow |
 | [ENGINEERING_EVOLUTION.md](ENGINEERING_EVOLUTION.md) | Phase 1–6 failure-driven history |
 | [FINAGENTBENCH_DESIGN.md](FINAGENTBENCH_DESIGN.md) | Reliability evaluation framework design |
 | [FINAL_RESULTS.md](FINAL_RESULTS.md) | Before → After packaging snapshot (banner may mark historical rows) |
 | [CONFIGURATION.md](CONFIGURATION.md) | Runtime/provider configuration |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Locked install + release gates |
-| [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Controlled deployment boundary |
+| [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Controlled deployment boundary + validated gate summary |
 | [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline and optional live demo runbook |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Current RC freeze evidence |
-| [../reports/current/PHASE6_FULL_VALIDATION_REPORT.md](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | Two-repo full validation |
 
 Local interview notes under `docs/portfolio/` are gitignored and are **not**
 part of the public release surface.
@@ -56,8 +55,8 @@ Reliability layers (current):
 | [MILVUS3_CUTOVER.md](MILVUS3_CUTOVER.md) | Milvus 3.0 cutover |
 | [QWEN3_RERANK.md](QWEN3_RERANK.md) | Qwen3 rerank rollout |
 | [TICKER_RESOLVE.md](TICKER_RESOLVE.md) | Ticker / company resolution |
-| [../reports/history/RAG_PRODUCTION_PLAN.md](../reports/history/RAG_PRODUCTION_PLAN.md) | Historical production RAG plan |
-| [../reports/history/TOOLS_HONESTY_FIXES.md](../reports/history/TOOLS_HONESTY_FIXES.md) | Historical tool honesty notes |
+| [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) | Multi-process queue/worker evidence |
+| [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md) | Provider fault-injection evidence |
 
 ## Safety & control plane
 
@@ -65,7 +64,6 @@ Reliability layers (current):
 |-----|---------|
 | [INPUT_GUARDRAIL.md](INPUT_GUARDRAIL.md) | Upload/query guardrails |
 | [HITL_CLARIFICATION.md](HITL_CLARIFICATION.md) | Clarification pause / resume |
-| [../reports/history/AGENT_NODE_OPTIMIZATIONS.md](../reports/history/AGENT_NODE_OPTIMIZATIONS.md) | Historical node cost notes |
 
 ## Ops
 
@@ -92,4 +90,4 @@ Primary repo: sibling `../finagentbench-demo/docs/`
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Current freeze |
 | [../Release_Checklist.md](../Release_Checklist.md) | Historical rc1 checklist (bannered) |
 | [../reports/current/](../reports/current/) | Current evidence only |
-| [../reports/history/](../reports/history/) | Superseded snapshots |
+| [../reports/README.md](../reports/README.md) | Pointer: recover old snapshots from Git |

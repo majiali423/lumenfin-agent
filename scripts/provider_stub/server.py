@@ -1,4 +1,4 @@
-"""Deterministic local fault provider for Phase 3.3A.
+﻿"""Deterministic local fault provider for provider resilience.
 
 Scenarios are selected via ``X-LumenFin-Scenario`` header (test-only).
 Production clients must not send this header by default.
@@ -234,7 +234,7 @@ def serve(host: str = "0.0.0.0", port: int = 18090) -> ThreadingHTTPServer:
 def main() -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Phase 3.3A deterministic provider stub")
+    parser = argparse.ArgumentParser(description="provider resilience deterministic provider stub")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=18090)
     args = parser.parse_args()

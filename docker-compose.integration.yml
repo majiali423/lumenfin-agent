@@ -1,8 +1,8 @@
-# Phase 3.2B real multi-process infrastructure validation.
+# Queue/worker multi-process infrastructure validation.
 # Uses dedicated test DB / queue / collection. Does not replace production compose.
 #
 #   docker compose -f docker-compose.integration.yml --env-file .env.integration.example up -d
-#   python scripts/run_phase32b_integration.py
+#   python scripts/run_queue_worker_integration.py
 
 name: lumenfin-it
 
@@ -163,7 +163,7 @@ services:
     volumes:
       - it_uploads:/app/uploads
       - it_outputs:/app/outputs
-      - ./outputs/phase32b_integration/hooks:/integration-hooks
+      - ./outputs/queue_worker_integration/hooks:/integration-hooks
 
   api-b:
     build: .
@@ -189,7 +189,7 @@ services:
     volumes:
       - it_uploads:/app/uploads
       - it_outputs:/app/outputs
-      - ./outputs/phase32b_integration/hooks:/integration-hooks
+      - ./outputs/queue_worker_integration/hooks:/integration-hooks
 
   index-worker-a:
     build: .
@@ -208,7 +208,7 @@ services:
     volumes:
       - it_uploads:/app/uploads
       - it_outputs:/app/outputs
-      - ./outputs/phase32b_integration/hooks:/integration-hooks
+      - ./outputs/queue_worker_integration/hooks:/integration-hooks
     restart: "no"
 
   index-worker-b:
@@ -227,7 +227,7 @@ services:
     volumes:
       - it_uploads:/app/uploads
       - it_outputs:/app/outputs
-      - ./outputs/phase32b_integration/hooks:/integration-hooks
+      - ./outputs/queue_worker_integration/hooks:/integration-hooks
     restart: "no"
 
 volumes:

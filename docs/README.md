@@ -1,18 +1,19 @@
-# LumenFin Documentation
+﻿# LumenFin Documentation
 
 ## Start here
 
 | Doc | Purpose |
 |-----|---------|
-| [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md) | Current system spine |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current system spine |
 | [CONFIGURATION.md](CONFIGURATION.md) | Environment variables and fail-closed defaults |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Install and validation commands |
 | [VALIDATION_COMMANDS.md](VALIDATION_COMMANDS.md) | Supported offline / live / mutation commands |
-| [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Portfolio RC boundary |
+| [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Portfolio RC boundary + validated gate summary |
 | [PRODUCTION_BACKUP_RESTORE.md](PRODUCTION_BACKUP_RESTORE.md) | Backup, verification, restore rehearsal, and rollback |
 | [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope and gaps |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Release freeze evidence |
-| [Phase 6 full validation](../reports/current/PHASE6_FULL_VALIDATION_REPORT.md) | Current two-repository, image, runtime, backup, and security gates |
+| [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) | Multi-process queue/worker evidence |
+| [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md) | Provider fault-injection evidence |
 | [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline portfolio demo and optional live A/B/C walkthrough |
 | [../LICENSE](../LICENSE) | MIT license for LumenFin-owned source |
 | [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) | Dependency, image, provider, and data terms |
@@ -49,7 +50,7 @@ release gate.
 ## Reports
 
 - Current: [`../reports/current/`](../reports/current/)
-- History: [`../reports/history/`](../reports/history/)
+- Index: [`../reports/README.md`](../reports/README.md)
 
-Historical reports are superseded evidence. They are not the current release
-contract.
+Older one-off reports were removed; recover from Git if needed
+([`../reports/README.md`](../reports/README.md)).

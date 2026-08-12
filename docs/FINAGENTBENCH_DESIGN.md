@@ -117,4 +117,4 @@ RC pack runner: `finagentbench-demo/scripts/run_rc_validation.py` (live cases + 
 ## Related
 
 - FinAgentBench `docs/architecture.md`, `docs/finrun_schema.md`
-- LumenFin [FINAL_ARCHITECTURE.md](FINAL_ARCHITECTURE.md), [FINAL_RESULTS.md](FINAL_RESULTS.md)
+- LumenFin [ARCHITECTURE.md](ARCHITECTURE.md), [FINAL_RESULTS.md](FINAL_RESULTS.md)

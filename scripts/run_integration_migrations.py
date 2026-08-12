@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""Apply PostgreSQL migrations for Phase 3.2B integration (no second framework)."""
+﻿#!/usr/bin/env python3
+"""Apply PostgreSQL migrations for queue/worker integration (no second framework)."""
 
 from __future__ import annotations
 

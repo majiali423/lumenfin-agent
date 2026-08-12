@@ -1,9 +1,9 @@
-# Phase 3.3A dual-API provider resilience overlay on top of integration compose.
+﻿# Provider-resilience dual-API overlay on top of integration compose.
 # Usage:
-#   docker compose -f docker-compose.integration.yml -f docker-compose.phase33a.yml up -d ...
-#   python scripts/run_phase33a_dual_api_docker.py
+#   docker compose -f docker-compose.integration.yml -f docker-compose.provider-resilience.yml up -d ...
+#   python scripts/validate_provider_resilience_docker.py
 #
-# Reuses the same postgres/redis/milvus/etcd/minio stack as Phase 3.2B.
+# Reuses the same postgres/redis/milvus/etcd/minio stack as queue/worker integration.
 # api-a / api-b talk to provider-stub via Docker DNS (not host localhost).
 
 services:

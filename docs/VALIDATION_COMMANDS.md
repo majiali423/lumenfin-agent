@@ -73,3 +73,22 @@ python scripts/repo_paths.py
 ```
 
 Discovers sibling repositories without hard-coded absolute paths.
+
+## 6. Docker integration harnesses (manual)
+
+Queue/worker multi-process:
+
+```powershell
+python scripts/run_queue_worker_integration.py
+```
+
+Provider resilience (deterministic stub + optional Docker dual-API):
+
+```powershell
+python scripts/validate_provider_resilience.py
+python scripts/validate_provider_resilience_docker.py
+```
+
+Requires Docker Compose resources; see
+[QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) and
+[PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md).

@@ -1,10 +1,10 @@
-# Release Checklist
+﻿# Release Checklist
 
 > **Historical `0.1.0rc1` checklist — not the current release gate.**
 >
 > Current published candidate: LumenFin **`0.1.0rc3` / `v0.1.0-rc.3`**  
 > Authority: [`docs/PORTFOLIO_RELEASE_REPORT.md`](docs/PORTFOLIO_RELEASE_REPORT.md)  
-> Full validation: [`reports/current/PHASE6_FULL_VALIDATION_REPORT.md`](reports/current/PHASE6_FULL_VALIDATION_REPORT.md)
+> Full validation: [`docs/PRODUCTION_LIMITATIONS.md`](docs/PRODUCTION_LIMITATIONS.md)
 >
 > The tables below are retained only as an audit snapshot of the earlier rc1
 > closure (license/push were still blocked then). Do **not** treat BLOCKED /

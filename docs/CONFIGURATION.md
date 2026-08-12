@@ -87,7 +87,7 @@ dev opt-in only; it is not a distributed strongly consistent checkpoint service.
 
 Milvus Lite is single-machine, single-writer infrastructure for local/dev runs.
 Do not share one Lite file among independent API/CLI/worker processes. Validated
-multi-process runs (Phase 3.2B / 3.3A) use **Milvus Server** over the Compose
+multi-process runs (queue/worker / provider-resilience) use **Milvus Server** over the Compose
 network with `MAS_MILVUS_URI=http://milvus:19530`; tenant filtering is pushed
 down to Milvus metadata (see
 [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md)).
