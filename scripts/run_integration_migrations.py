@@ -17,6 +17,7 @@ if str(SRC) not in sys.path:
 MIGRATIONS = [
     ROOT / "migrations" / "postgresql" / "001_add_workflow_checkpoint_revision.sql",
     ROOT / "migrations" / "postgresql" / "002_add_rag_index_lease.sql",
+    ROOT / "migrations" / "postgresql" / "003_add_tenant_ownership.sql",
 ]
 
 

@@ -1,6 +1,7 @@
 -- Additive tenant ownership columns for analysis jobs and workflow checkpoints.
--- Positioning: pre-production / RC schema migration applied manually via psql
--- (same pattern as 001/002). Not a zero-downtime online migration framework.
+-- Positioning: pre-production / RC schema migration applied automatically by
+-- scripts/run_integration_migrations.py (same path as 001/002). It may also be
+-- applied directly with psql. Not a zero-downtime online migration framework.
 --
 -- Legacy rows: existing tables gain tenant_id with DEFAULT 'default'. PostgreSQL
 -- fills prior rows with that default when the column is added. This matches the

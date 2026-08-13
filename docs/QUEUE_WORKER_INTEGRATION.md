@@ -39,7 +39,8 @@ production readiness.
 ## Migration result
 
 - Empty-DB bootstrap + SQL migrations: **pass**
-- Applied: `001_add_workflow_checkpoint_revision.sql`, `002_add_rag_index_lease.sql`
+- Current automatic migration set: `001_add_workflow_checkpoint_revision.sql`,
+  `002_add_rag_index_lease.sql`, `003_add_tenant_ownership.sql`
 - Repeat-safe / fail-fast checks exercised by migration gate scenario
 
 ## Scenario results

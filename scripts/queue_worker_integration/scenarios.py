@@ -15,7 +15,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from lumenfin.database import RagDocumentRepository
+from lumenfin.checkpoint_store import WorkflowCheckpointRepository
+from lumenfin.database import JobRepository, RagDocumentRepository
 from lumenfin.rag.indexer import DocumentIndexer, canonical_document_id, content_hash_bytes
 from lumenfin.rag.milvus_store import MilvusRAGStore
 from lumenfin.rag.embeddings import DeterministicEmbeddingProvider
@@ -67,6 +68,8 @@ def run_migration_gate(settings: IntegrationSettings, log_dir: Path) -> dict[str
         "fail_fast_without_002": False,
         "fail_fast_message_ok": False,
         "start_after_002": False,
+        "legacy_tenant_upgrade": False,
+        "tenant_read_write_after_003": False,
         "data_preserved": False,
         "errors": [],
     }
@@ -85,7 +88,7 @@ def run_migration_gate(settings: IntegrationSettings, log_dir: Path) -> dict[str
         first = mig.apply_sql_files(settings.database_url, mig.MIGRATIONS)
         second = mig.apply_sql_files(settings.database_url, mig.MIGRATIONS)
         result["empty_db_bootstrap"] = True
-        result["repeat_safe"] = len(first) == 2 and len(second) == 2
+        result["repeat_safe"] = len(first) == 3 and len(second) == 3
         (log_dir / "migration.json").write_text(
             json.dumps({"first": first, "second": second}, indent=2),
             encoding="utf-8",
@@ -137,11 +140,63 @@ def run_migration_gate(settings: IntegrationSettings, log_dir: Path) -> dict[str
         mig.apply_sql_files(settings.database_url, [mig.MIGRATIONS[1]])
         RagDocumentRepository(settings.database_url)
         result["start_after_002"] = True
-        result["data_preserved"] = (
+        lease_data_preserved = (
             dbutil.count_checkpoints(settings.database_url, "seed-thread") == 1
             and dbutil.count_documents(settings.database_url, tenant_id="tenant-seed") == 1
             and dbutil.count_chunks(settings.database_url, tenant_id="tenant-seed") == 1
         )
+
+        # Simulate an existing pre-003 database. Legacy rows must survive and
+        # receive the documented default ownership when the automatic migrator
+        # restores the tenant columns.
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
+                "INSERT INTO analysis_jobs "
+                "(job_id, tenant_id, thread_id, query, status, llm_backend, result_json, "
+                "artifacts_json, error_message, created_at, updated_at) "
+                "VALUES ('job-seed', 'default', 'job-seed-thread', 'seed', 'pending', NULL, "
+                "NULL, NULL, NULL, 't', 't') "
+                "ON CONFLICT (job_id) DO NOTHING"
+            )
+            conn.exec_driver_sql("ALTER TABLE analysis_jobs DROP COLUMN IF EXISTS tenant_id")
+            conn.exec_driver_sql("ALTER TABLE workflow_checkpoints DROP COLUMN IF EXISTS tenant_id")
+
+        mig.apply_sql_files(settings.database_url, mig.MIGRATIONS)
+        job_repo = JobRepository(settings.database_url)
+        checkpoint_repo = WorkflowCheckpointRepository(job_repo.engine)
+        legacy_job = job_repo.get_job("job-seed", tenant_id="default")
+        legacy_checkpoint = checkpoint_repo.get("seed-thread", tenant_id="default")
+        result["legacy_tenant_upgrade"] = (
+            legacy_job is not None
+            and legacy_job["tenant_id"] == "default"
+            and legacy_checkpoint is not None
+            and legacy_checkpoint["tenant_id"] == "default"
+        )
+
+        suffix = uuid4().hex[:8]
+        new_tenant = f"tenant-migration-{suffix}"
+        new_job_id = f"job-migration-{suffix}"
+        new_thread_id = f"thread-migration-{suffix}"
+        job_repo.create_job(
+            new_job_id,
+            new_thread_id,
+            "post-003 tenant write",
+            tenant_id=new_tenant,
+        )
+        checkpoint_repo.upsert(
+            thread_id=new_thread_id,
+            query="post-003 tenant write",
+            state={"workflow_status": "running"},
+            expected_revision=0,
+            tenant_id=new_tenant,
+        )
+        result["tenant_read_write_after_003"] = (
+            job_repo.get_job(new_job_id, tenant_id=new_tenant) is not None
+            and job_repo.get_job(new_job_id, tenant_id="default") is None
+            and checkpoint_repo.get(new_thread_id, tenant_id=new_tenant) is not None
+            and checkpoint_repo.get(new_thread_id, tenant_id="default") is None
+        )
+        result["data_preserved"] = lease_data_preserved and result["legacy_tenant_upgrade"]
         if all(
             [
                 result["empty_db_bootstrap"],
@@ -149,6 +204,8 @@ def run_migration_gate(settings: IntegrationSettings, log_dir: Path) -> dict[str
                 result["fail_fast_without_002"],
                 result["fail_fast_message_ok"],
                 result["start_after_002"],
+                result["legacy_tenant_upgrade"],
+                result["tenant_read_write_after_003"],
                 result["data_preserved"],
             ]
         ):
