@@ -125,7 +125,8 @@ provider-resilience Docker run id）；本入口不会启动 Docker 栈。完整
 
 ### 已验证 claim 长什么样
 
-已验证公式 Claim 的精简结构示例（ID 与绑定规则与 `src/lumenfin/claims.py`
+已验证公式 Claim 的精简结构示例（ID 与绑定规则与
+`src/lumenfin/claims/models.py`、`src/lumenfin/claims/binding.py`
 一致；完整示例见
 [docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)）：
 
@@ -155,7 +156,8 @@ provider-resilience Docker run id）；本入口不会启动 Docker 栈。完整
 ```
 
 `ebitda_margin` 是公式 Claim：必须同时绑定 `ebitda` 与 `revenue` 两条
-fundamentals 证据（见 `claims.py` 的 `FORMULA_INPUTS`），不能写成缺少 metric 的
+fundamentals 证据（见 `src/lumenfin/claims/models.py` 的 `FORMULA_INPUTS`），
+不能写成缺少 metric 的
 `ev_fund_{company}_{period}`。
 
 当没有 AST 可计算的 fundamentals 时，同一流水线会发出数据受限主张，而不是编造比率
@@ -318,7 +320,7 @@ PDF / SEC / Yahoo / market providers
 | Queues | Redis pending → processing → dead-letter；可在无需人工重投的情况下回收 |
 | Workers | **Analysis Worker**（`src/lumenfin/worker.py`）消费 analysis 队列；**Index Worker**（`scripts/run_rag_index_worker.py`）消费 index 队列，并带 lease + attempt fencing |
 | Providers | 单一重试所有者、deadline、Retry-After、jitter、降级兜底、per-process bulkhead |
-| Tenancy | RAG 数据面租户感知的逻辑隔离（[boundary](docs/MULTI_TENANCY_BOUNDARY.md)） |
+| Tenancy | API key 绑定服务端 principal；jobs、checkpoints 与 RAG 查询均按授权租户隔离（[boundary](docs/MULTI_TENANCY_BOUNDARY.md)） |
 
 ---
 
@@ -328,7 +330,8 @@ PDF / SEC / Yahoo / market providers
 
 | Gate | What it measures | Result |
 |------|------------------|--------|
-| **LumenFin unit regression** | Linux 最终镜像全量 Python 测试 | **495 passed, 2 skipped** |
+| **LumenFin RC 标签回归** | 冻结的 `v0.1.0-rc.3` Linux 镜像测试 | **495 passed, 2 skipped** |
+| **LumenFin 当前 main 回归** | 标签后的 Linux 镜像测试，2026-08-13 | **508 passed, 3 skipped** |
 | **FinAgentBench unit regression** | 全量 Python 测试 | **149 passed** |
 | **Infrastructure integration** | Queue/worker 多进程 Docker | **PASS**（`20260804T095357Z`） |
 | Worker-kill recovery | 被杀 worker 的任务是否需要人工重投？ | **否** — lease 过期 + attempt fencing 自动回收 |
@@ -343,10 +346,11 @@ PDF / SEC / Yahoo / market providers
 | **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback） |
 | **Compose hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
 
-单元回归计数冻结于 2026-08-12 全量验证，并随标签 `v0.1.0-rc.3` 发布。
-LumenFin 在 UID-10001 Linux 镜像内通过 `scripts/run_tests.py` 运行；
-FinAgentBench 使用 unittest discovery。直接调用 `pytest` 可能按 subtest
-产生不同计数，因此不能混用 runner 总数。
+**RC 标签**单元回归计数冻结于 2026-08-12 全量验证，并随
+`v0.1.0-rc.3` 发布；单列的当前 main 数据来自 2026-08-13 标签后的 Linux
+镜像 unittest discovery。RC 验证中的 LumenFin 在 UID-10001 Linux 镜像内通过
+`scripts/run_tests.py` 运行；FinAgentBench 使用 unittest discovery。直接调用
+`pytest` 可能按 subtest 产生不同计数，因此不能混用 runner 总数或快照边界。
 
 Benchmark 行仅供参考，是在更早的评测器 pin 下测得；**不是**已发布
 `v0.1.0-rc.3` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
@@ -411,9 +415,9 @@ flowchart LR
 - **Fail-closed，而不是看起来体面的默认值。** 缺少 fundamentals 时返回
   `incomplete_data` 与数据受限主张，而不是一个看似合理的比率；错误数字在这里比
   缺失数字更贵。
-- **先做逻辑租户隔离。** RAG 数据面已按租户隔离，但尚未绑定身份；下一步是
-  JWT/API-key 派生的租户声明与 checkpoint/job 作用域
-  （[boundary](docs/MULTI_TENANCY_BOUNDARY.md)）。
+- **凭据绑定的逻辑租户隔离。** API key 映射到服务端 principal；jobs、checkpoints
+  与 RAG 路径均校验授权租户。剩余缺口是外部 IdP/OIDC、RBAC、PostgreSQL RLS
+  与按租户物理隔离（[boundary](docs/MULTI_TENANCY_BOUNDARY.md)）。
 
 ---
 
@@ -427,7 +431,7 @@ flowchart LR
 - DeepSeek、DashScope embedding 与 Qwen3 rerank 的受控合成 live smoke 已通过；
   两仓库本地全量验证门禁均已通过
 - 已发布标签 `v0.1.0-rc.3`，`main` / tag 上 GitHub Actions 为绿；剩余缺口是
-  soak、身份绑定租户、公开镜像分发 — 不是“尚未打 tag”
+  soak、生产 IdP/RBAC/RLS、公开镜像分发 — 不是“尚未打 tag”
 - `main` 上的文档可能比不可变 RC tag 超前若干 commit
 - 不构成投资建议；仍需人工财务审阅
 - PyMuPDF / MinIO 的 AGPL（以及 Redis RSALv2/SSPL）限制公开镜像分发；

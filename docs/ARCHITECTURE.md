@@ -325,13 +325,15 @@ Evidence: [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md)
 
 ## 6. Multi-tenant boundary
 
-Current implementation: **RAG data-plane tenant-aware logical isolation**.
+Current implementation: **credential-bound logical tenant authorization**.
 
-Covered: tenant in document IDs, PostgreSQL filters, Redis payload, Milvus
-filters, keyword/hybrid retrieval, integration leakage = 0.
+Covered: API-key-to-principal mapping; request tenant mismatch rejection;
+tenant-scoped jobs, checkpoints, and RAG lookups; tenant in document IDs,
+PostgreSQL filters, Redis payload, Milvus filters, keyword/hybrid retrieval;
+integration leakage = 0.
 
-Not covered: identity-bound tenants, JWT/API-key claims, full checkpoint/job
-tenant scope, PostgreSQL RLS, per-tenant databases.
+Not covered: external IdP/OIDC, RBAC, PostgreSQL RLS, per-tenant databases or
+vector infrastructure.
 
 Details: [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md).
 

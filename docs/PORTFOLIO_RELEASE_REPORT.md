@@ -4,6 +4,13 @@ Release candidate freeze evidence for portfolio / controlled-demo use. Every
 number below comes from a recorded run in this repository; nothing here is
 projected.
 
+> **Immutable snapshot boundary:** this report describes tag
+> `v0.1.0-rc.3` at commit `e67ed5f0e5aa4d2585d063b99212c46f5002d1a3`.
+> Post-tag `main` added principal-bound tenant authorization and tenant-scoped
+> jobs/checkpoints; current scope is documented in
+> [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md). Historical statements
+> and counts below are intentionally retained as tag evidence.
+
 ## 1. Release candidate
 
 | Field | Value |
@@ -90,7 +97,7 @@ nested retry loops); process-local shared HTTP client; explicit `degraded`
 marker on fallback; per-process bulkhead (concurrency cap) per provider class;
 deterministic provider stub for reproducible fault injection.
 
-## 8. Multi-tenant isolation scope
+## 8. Multi-tenant isolation scope at the RC tag
 
 Scope: **RAG data-plane tenant-aware logical isolation**.
 
@@ -110,8 +117,8 @@ Kept separate on purpose — these gates answer different questions.
 
 | Gate | Question | Run id | Result |
 |------|----------|--------|--------|
-| Current LumenFin full regression | Does the final Linux image pass the complete suite? | Phase 6 current worktree | **495 passed, 2 skipped** |
-| Current FinAgentBench full regression | Does the evaluator pass its complete suite? | Phase 6 current worktree | **149 passed** |
+| RC-tag LumenFin full regression | Does the frozen Linux image pass the complete suite? | Phase 6 tag worktree | **495 passed, 2 skipped** |
+| RC-tag FinAgentBench full regression | Does the frozen evaluator pass its complete suite? | Phase 6 tag worktree | **149 passed** |
 | Infrastructure integration (queue/worker) | Do multi-process queue/worker/DB semantics hold under kill? | `20260804T095357Z` | **PASS** |
 | Provider fault validation (provider resilience) | Do deadlines/retries/bulkheads hold under injected faults across two API containers? | `docker_20260804T100817Z` | **PASS** |
 | Benchmark reliability (FinAgentBench) | Are exported runs judged reliable by an external gate? | informational pin `v0.1.0-rc.1` | completed-case mean **92.97**, mutation **4/4** (not a score for current pin `v0.1.0-rc.3`) |
@@ -166,7 +173,7 @@ Optional (not started by the demo): Docker recovery story
 `worker A killed → automatic reclaim → worker B attempt=2 → ready`
 ([queue/worker](QUEUE_WORKER_INTEGRATION.md)).
 
-## 12. Known limitations
+## 12. Known limitations at the RC tag
 
 - At-least-once queue delivery, **not** exactly-once
 - Per-process bulkheads, **not** a cross-process global rate limit
@@ -175,7 +182,7 @@ Optional (not started by the demo): Docker recovery story
   passed; tag `v0.1.0-rc.3` and remote CI are published/green. Remaining gaps
   are soak, IAM-bound tenancy, and public image redistribution
 - No large-scale soak / long-duration endurance run
-- Tenant identity is not bound to authentication (no IAM tenant binding)
+- At the tag freeze, tenant identity was not bound to authentication
 - No PostgreSQL Row-Level Security
 - PyMuPDF (AGPL) constrains redistribution of derived artifacts
 - Output is research support, **not investment advice**
@@ -204,7 +211,7 @@ Details: `THIRD_PARTY_NOTICES.md`.
 SEC and Yahoo data usage follows each provider's terms; `SEC_USER_AGENT` must
 be operator owned in any real deployment.
 
-## 15. Remaining roadmap (not in this release)
+## 15. Roadmap recorded at the tag freeze
 
 1. Bind `tenant_id` to authenticated identity (API keys / JWT claims)
 2. Tenant-scope checkpoints and analysis jobs; add PostgreSQL RLS

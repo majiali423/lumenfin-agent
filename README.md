@@ -132,7 +132,7 @@ stack is not started by this entrypoint. Walkthrough:
 ### What a verified claim looks like
 
 Illustrative abridged shape of a verified formula claim (IDs and binding rules
-match `src/lumenfin/claims.py`; full example:
+match `src/lumenfin/claims/models.py` and `src/lumenfin/claims/binding.py`; full example:
 [docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)):
 
 ```json
@@ -161,7 +161,8 @@ match `src/lumenfin/claims.py`; full example:
 ```
 
 `ebitda_margin` is a formula claim: it must bind **both** `ebitda` and
-`revenue` fundamentals evidence (`FORMULA_INPUTS` in `claims.py`), not a single
+`revenue` fundamentals evidence (`FORMULA_INPUTS` in
+`src/lumenfin/claims/models.py`), not a single
 `ev_fund_{company}_{period}` id.
 
 With no AST-computable fundamentals, the same pipeline emits a data-limitation
@@ -329,7 +330,7 @@ as proof of absolute world-truth.
 | Queues | Redis pending → processing → dead-letter; reclaim without manual redelivery |
 | Workers | **Analysis Worker** (`src/lumenfin/worker.py`) consumes the analysis queue; **Index Worker** (`scripts/run_rag_index_worker.py`) consumes the index queue with lease + attempt fencing |
 | Providers | Single retry owner, deadline, Retry-After, jitter, degraded fallback, per-process bulkhead |
-| Tenancy | RAG data-plane tenant-aware logical isolation ([boundary](docs/MULTI_TENANCY_BOUNDARY.md)) |
+| Tenancy | API-key principal binding; tenant-scoped jobs, checkpoints, and RAG lookups ([boundary](docs/MULTI_TENANCY_BOUNDARY.md)) |
 
 ---
 
@@ -339,7 +340,8 @@ Do **not** merge these into one “accuracy” number.
 
 | Gate | What it measures | Result |
 |------|------------------|--------|
-| **LumenFin unit regression** | Full Linux-image Python suite | **495 passed, 2 skipped** |
+| **LumenFin RC-tag regression** | Frozen `v0.1.0-rc.3` Linux-image suite | **495 passed, 2 skipped** |
+| **LumenFin current-main regression** | Post-tag Linux-image suite, 2026-08-13 | **508 passed, 3 skipped** |
 | **FinAgentBench unit regression** | Full Python suite | **149 passed** |
 | **Infrastructure integration** | Queue/worker multi-process Docker | **PASS** (`20260804T095357Z`) |
 | Worker-kill recovery | Does a killed worker's job need human redelivery? | **no** — lease expiry + attempt fencing reclaim it |
@@ -354,11 +356,12 @@ Do **not** merge these into one “accuracy” number.
 | **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback) |
 | **Compose hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
 
-Unit-regression counts were frozen during full validation on 2026-08-12 and
-shipped in tag `v0.1.0-rc.3`. LumenFin ran through `scripts/run_tests.py`
-inside the UID-10001 Linux image; FinAgentBench used unittest discovery.
-Invoking `pytest` directly can count subtests differently, so runner totals
-must not be mixed.
+The **RC-tag** unit-regression counts were frozen during full validation on
+2026-08-12 and shipped in `v0.1.0-rc.3`. The separate current-main row is the
+post-tag Linux-image unittest discovery run from 2026-08-13. The RC validation
+used `scripts/run_tests.py` inside the UID-10001 Linux image; FinAgentBench used
+unittest discovery. Invoking `pytest` directly can count subtests differently,
+so runner totals and snapshot boundaries must not be mixed.
 
 The benchmark row is informational and was produced with the earlier evaluator
 pin; it is **not** a score for the published `v0.1.0-rc.3` evaluator. What the
@@ -426,9 +429,10 @@ Full topology notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Fail-closed over graceful-looking defaults.** A missing-fundamentals run
   returns `incomplete_data` and a data-limitation claim rather than a plausible
   ratio, because a wrong number is more expensive than a missing one here.
-- **Logical tenant isolation first.** The RAG data plane is tenant-scoped, but
-  tenancy is not yet identity-bound; the next step is JWT/API-key-derived tenant
-  claims and checkpoint/job scoping ([boundary](docs/MULTI_TENANCY_BOUNDARY.md)).
+- **Credential-bound logical tenant isolation.** API keys map to server-side
+  principals; jobs, checkpoints, and RAG paths enforce the authorized tenant.
+  Remaining gaps are external IdP/OIDC, RBAC, PostgreSQL RLS, and physical
+  per-tenant infrastructure ([boundary](docs/MULTI_TENANCY_BOUNDARY.md)).
 
 ---
 
@@ -443,7 +447,7 @@ deterministic fault-injection conditions, not in sustained production traffic.
 - Controlled synthetic live smoke passed for DeepSeek, DashScope embedding,
   and Qwen3 rerank; both repositories' full local validation gates passed
 - Published tag `v0.1.0-rc.3` with green GitHub Actions on `main` / tag; remaining
-  gaps are soak, IAM-bound tenancy, and public image redistribution — not “untagged”
+  gaps are soak, production IdP/RBAC/RLS, and public image redistribution — not “untagged”
 - Docs on `main` may be one or more commits ahead of the immutable RC tag
 - Not investment advice; human financial review required
 - PyMuPDF / MinIO AGPL (and Redis RSALv2/SSPL) limit public image redistribution;
