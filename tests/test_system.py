@@ -48,8 +48,9 @@ class OfflineSystemTestCase(unittest.TestCase):
         for async_mode, method_name in cases:
             with self.subTest(async_mode=async_mode):
                 tmp_root = ROOT / "test_artifacts" / f"api-index-offload-{uuid4().hex[:8]}"
+                config = build_test_config(tmp_root)
                 app = create_app(
-                    build_test_config(tmp_root),
+                    config,
                     llm_client=LocalFallbackLLMClient(),
                     market_data_client=FakeMarketDataClient(),
                 )
@@ -59,6 +60,7 @@ class OfflineSystemTestCase(unittest.TestCase):
                 observed = {"lightweight_before_release": False}
                 loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
                 gate_holder: dict[str, asyncio.Event] = {}
+                controller_error: list[BaseException] = []
 
                 def fake_save(_service, files):
                     self.assertTrue(files)
@@ -66,12 +68,14 @@ class OfflineSystemTestCase(unittest.TestCase):
 
                 def blocked_index(_service, paths, **kwargs):
                     self.assertTrue(paths)
+                    # Effective tenant comes from anonymous principal (config.rag_tenant_id).
+                    self.assertEqual(kwargs.get("tenant_id"), config.rag_tenant_id)
                     index_entered.set()
                     self.assertTrue(release_index.wait(timeout=10))
                     return [
                         {
                             "document_id": "doc-offload",
-                            "tenant_id": kwargs.get("tenant_id") or "default",
+                            "tenant_id": kwargs.get("tenant_id") or config.rag_tenant_id,
                             "filename": "saved.txt",
                             "content_hash": "hash-offload",
                             "status": "pending" if async_mode else "ready",
@@ -82,11 +86,31 @@ class OfflineSystemTestCase(unittest.TestCase):
                         }
                     ]
 
-                def controller() -> None:
-                    self.assertTrue(index_entered.wait(timeout=10))
-                    loop_holder["loop"].call_soon_threadsafe(gate_holder["gate"].set)
-                    observed["lightweight_before_release"] = lightweight_done.wait(timeout=2)
+                def _unblock_waiters() -> None:
                     release_index.set()
+                    loop = loop_holder.get("loop")
+                    gate = gate_holder.get("gate")
+                    if loop is None or gate is None:
+                        return
+                    try:
+                        loop.call_soon_threadsafe(gate.set)
+                    except RuntimeError:
+                        # asyncio.run() already closed the loop after a clean finish.
+                        pass
+
+                def controller() -> None:
+                    try:
+                        if not index_entered.wait(timeout=10):
+                            raise AssertionError(
+                                "index path did not enter blocked_index within 10s "
+                                "(authz mismatch returns before the patched method)"
+                            )
+                        loop_holder["loop"].call_soon_threadsafe(gate_holder["gate"].set)
+                        observed["lightweight_before_release"] = lightweight_done.wait(timeout=2)
+                        release_index.set()
+                    except BaseException as exc:  # noqa: BLE001 - re-raise on main thread
+                        controller_error.append(exc)
+                        _unblock_waiters()
 
                 async def scenario() -> tuple[httpx.Response, httpx.Response]:
                     transport = httpx.ASGITransport(app=app)
@@ -95,7 +119,7 @@ class OfflineSystemTestCase(unittest.TestCase):
                         gate_holder["gate"] = asyncio.Event()
 
                         async def lightweight_request() -> httpx.Response:
-                            await gate_holder["gate"].wait()
+                            await asyncio.wait_for(gate_holder["gate"].wait(), timeout=15)
                             response = await client.get("/api/v1/config")
                             lightweight_done.set()
                             return response
@@ -104,21 +128,39 @@ class OfflineSystemTestCase(unittest.TestCase):
                         index_task = asyncio.create_task(
                             client.post(
                                 "/api/v1/documents/index",
-                                data={"tenant_id": "offload-tenant", "async_mode": str(async_mode).lower()},
+                                # Omit tenant_id so effective tenant = anonymous principal
+                                # (config.rag_tenant_id / test-tenant). Cross-tenant 403 is
+                                # covered by tests.test_tenant_authz.
+                                data={"async_mode": str(async_mode).lower()},
                                 files={"files": ("notes.txt", b"Apple FY2025 revenue.", "text/plain")},
                             )
                         )
-                        return await index_task, await lightweight_task
+                        try:
+                            return await asyncio.wait_for(
+                                asyncio.gather(index_task, lightweight_task),
+                                timeout=20,
+                            )
+                        except Exception:
+                            lightweight_task.cancel()
+                            index_task.cancel()
+                            _unblock_waiters()
+                            raise
 
                 controller_thread = Thread(target=controller, daemon=True)
                 controller_thread.start()
-                with (
-                    patch.object(LumenFinAnalysisService, "save_uploaded_files", fake_save),
-                    patch.object(LumenFinAnalysisService, method_name, blocked_index),
-                    patch.object(LumenFinAnalysisService, "enqueue_index_job", return_value=True),
-                ):
-                    index_response, lightweight_response = asyncio.run(scenario())
-                controller_thread.join(timeout=10)
+                try:
+                    with (
+                        patch.object(LumenFinAnalysisService, "save_uploaded_files", fake_save),
+                        patch.object(LumenFinAnalysisService, method_name, blocked_index),
+                        patch.object(LumenFinAnalysisService, "enqueue_index_job", return_value=True),
+                    ):
+                        index_response, lightweight_response = asyncio.run(scenario())
+                finally:
+                    _unblock_waiters()
+                    controller_thread.join(timeout=10)
+
+                if controller_error:
+                    raise controller_error[0]
 
                 self.assertTrue(observed["lightweight_before_release"])
                 self.assertEqual(lightweight_response.status_code, 200)
@@ -130,14 +172,16 @@ class OfflineSystemTestCase(unittest.TestCase):
                 "/api/v1/analyze-upload",
                 {"query": "Analyze Apple FY2025.", "thread_id": "save-upload", "export_artifacts": "false"},
             ),
-            ("/api/v1/documents/index", {"tenant_id": "save-tenant"}),
+            # Omit tenant_id: effective tenant = anonymous principal (test-tenant).
+            ("/api/v1/documents/index", {}),
         ]
 
         for route, form_data in cases:
             with self.subTest(route=route):
                 tmp_root = ROOT / "test_artifacts" / f"api-save-concurrency-{uuid4().hex[:8]}"
+                config = build_test_config(tmp_root)
                 app = create_app(
-                    build_test_config(tmp_root),
+                    config,
                     llm_client=LocalFallbackLLMClient(),
                     market_data_client=FakeMarketDataClient(),
                 )
@@ -147,6 +191,7 @@ class OfflineSystemTestCase(unittest.TestCase):
                 observed = {"lightweight_before_release": False}
                 loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
                 gate_holder: dict[str, asyncio.Event] = {}
+                controller_error: list[BaseException] = []
 
                 def blocked_save(_service, files):
                     self.assertTrue(files)
@@ -178,7 +223,7 @@ class OfflineSystemTestCase(unittest.TestCase):
                     return [
                         {
                             "document_id": "doc-save",
-                            "tenant_id": kwargs.get("tenant_id") or "save-tenant",
+                            "tenant_id": kwargs.get("tenant_id") or config.rag_tenant_id,
                             "filename": "saved.txt",
                             "content_hash": "hash-save",
                             "status": "ready",
@@ -189,11 +234,31 @@ class OfflineSystemTestCase(unittest.TestCase):
                         }
                     ]
 
-                def controller() -> None:
-                    self.assertTrue(save_entered.wait(timeout=10))
-                    loop_holder["loop"].call_soon_threadsafe(gate_holder["gate"].set)
-                    observed["lightweight_before_release"] = lightweight_done.wait(timeout=2)
+                def _unblock_waiters() -> None:
                     release_save.set()
+                    loop = loop_holder.get("loop")
+                    gate = gate_holder.get("gate")
+                    if loop is None or gate is None:
+                        return
+                    try:
+                        loop.call_soon_threadsafe(gate.set)
+                    except RuntimeError:
+                        # asyncio.run() already closed the loop after a clean finish.
+                        pass
+
+                def controller() -> None:
+                    try:
+                        if not save_entered.wait(timeout=10):
+                            raise AssertionError(
+                                "save path did not enter blocked_save within 10s "
+                                "(authz mismatch returns before the patched method)"
+                            )
+                        loop_holder["loop"].call_soon_threadsafe(gate_holder["gate"].set)
+                        observed["lightweight_before_release"] = lightweight_done.wait(timeout=2)
+                        release_save.set()
+                    except BaseException as exc:  # noqa: BLE001 - re-raise on main thread
+                        controller_error.append(exc)
+                        _unblock_waiters()
 
                 async def scenario() -> tuple[httpx.Response, httpx.Response]:
                     transport = httpx.ASGITransport(app=app)
@@ -202,7 +267,7 @@ class OfflineSystemTestCase(unittest.TestCase):
                         gate_holder["gate"] = asyncio.Event()
 
                         async def lightweight_request() -> httpx.Response:
-                            await gate_holder["gate"].wait()
+                            await asyncio.wait_for(gate_holder["gate"].wait(), timeout=15)
                             response = await client.get("/api/v1/config")
                             lightweight_done.set()
                             return response
@@ -215,17 +280,32 @@ class OfflineSystemTestCase(unittest.TestCase):
                                 files={"files": ("notes.txt", b"Apple revenue FY2025 was 100 billion.", "text/plain")},
                             )
                         )
-                        return await upload_task, await lightweight_task
+                        try:
+                            return await asyncio.wait_for(
+                                asyncio.gather(upload_task, lightweight_task),
+                                timeout=20,
+                            )
+                        except Exception:
+                            lightweight_task.cancel()
+                            upload_task.cancel()
+                            _unblock_waiters()
+                            raise
 
                 controller_thread = Thread(target=controller, daemon=True)
                 controller_thread.start()
-                with (
-                    patch.object(LumenFinAnalysisService, "save_uploaded_files", blocked_save),
-                    patch.object(LumenFinAnalysisService, "analyze", fake_analyze),
-                    patch.object(LumenFinAnalysisService, "index_document_paths", fake_index),
-                ):
-                    upload_response, lightweight_response = asyncio.run(scenario())
-                controller_thread.join(timeout=10)
+                try:
+                    with (
+                        patch.object(LumenFinAnalysisService, "save_uploaded_files", blocked_save),
+                        patch.object(LumenFinAnalysisService, "analyze", fake_analyze),
+                        patch.object(LumenFinAnalysisService, "index_document_paths", fake_index),
+                    ):
+                        upload_response, lightweight_response = asyncio.run(scenario())
+                finally:
+                    _unblock_waiters()
+                    controller_thread.join(timeout=10)
+
+                if controller_error:
+                    raise controller_error[0]
 
                 self.assertTrue(observed["lightweight_before_release"])
                 self.assertEqual(lightweight_response.status_code, 200)
