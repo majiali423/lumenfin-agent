@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.0rc4 — unreleased
+
+Post-tag closure candidate for tenant authorization, upgrade safety, and
+auditable Qwen3 evidence. This entry describes `main`; no `v0.1.0-rc.4` tag or
+release is claimed yet.
+
+### Fixed
+
+- Added PostgreSQL migration `003` to the automatic migrator and validated the
+  pre-003 schema upgrade path with preserved legacy ownership
+- Wired production API-key principal maps through Compose while retaining
+  fail-closed startup and legacy single-key compatibility
+- Removed raw API keys from malformed-principal startup errors
+
+### Evidence and documentation
+
+- Aligned tenant scope and claim-module paths across current documentation
+- Preserved the synthetic Qwen3 live gate as sanitized machine-readable
+  evidence with hash, privacy, metric, and telemetry checks
+- Kept immutable `v0.1.0-rc.3` evidence separate from post-tag `main` results
+
+### Validation to date
+
+- Current Linux-image offline suite: 512 passed, 3 skipped
+- PostgreSQL pre-003 upgrade gate: PASS
+- Production multi-principal Compose rendering: PASS
+
+Full production-stack validation and release publication remain pending.
+
 ## 0.1.0rc3 — 2026-08-12
 
 Controlled portfolio RC closure with Milvus 3, native BM25, optional Qwen3

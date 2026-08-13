@@ -14,7 +14,8 @@ what is verified.
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Release candidate **`0.1.0rc3`** / tag **`v0.1.0-rc.3`** · FinRun schema `1.0` ·
+Current candidate **`0.1.0rc4`** (not yet tagged); latest published tag
+**`v0.1.0-rc.3`** · FinRun schema `1.0` ·
 FinAgentBench evaluator pin **`v0.1.0-rc.3`** · controlled RC under documented
 limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
@@ -341,7 +342,7 @@ Do **not** merge these into one “accuracy” number.
 | Gate | What it measures | Result |
 |------|------------------|--------|
 | **LumenFin RC-tag regression** | Frozen `v0.1.0-rc.3` Linux-image suite | **495 passed, 2 skipped** |
-| **LumenFin current-main regression** | Post-tag Linux-image suite, 2026-08-13 | **511 passed, 3 skipped** |
+| **LumenFin current-main regression** | Post-tag Linux-image suite, 2026-08-13 | **512 passed, 3 skipped** |
 | **FinAgentBench unit regression** | Full Python suite | **149 passed** |
 | **Infrastructure integration** | Queue/worker multi-process Docker | **PASS** (`20260804T095357Z`) |
 | Worker-kill recovery | Does a killed worker's job need human redelivery? | **no** — lease expiry + attempt fencing reclaim it |

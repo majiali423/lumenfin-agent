@@ -1,7 +1,7 @@
 # Reproducibility
 
-Supported release environment: Python 3.12, LumenFin `0.1.0rc3` /
-published tag `v0.1.0-rc.3`.
+Supported candidate environment: Python 3.12, current LumenFin `0.1.0rc4`
+(not yet tagged). Latest published LumenFin tag: `v0.1.0-rc.3`.
 
 FinAgentBench versioning (do not conflate):
 
@@ -75,7 +75,7 @@ failures**. They must not be recorded as Agent-quality passes.
 
 ```bash
 cd lumenfin-agent
-docker build -t lumenfin-agent:0.1.0rc3 .
+docker build -t lumenfin-agent:0.1.0rc4 .
 ```
 
 When the default PyPI route is slow, select a trusted mirror for that build
@@ -84,7 +84,7 @@ without changing the project default:
 ```bash
 docker build \
   --build-arg PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
-  -t lumenfin-agent:0.1.0rc3 .
+  -t lumenfin-agent:0.1.0rc4 .
 ```
 
 Do not include credentials in `PIP_INDEX_URL`, because Docker build arguments

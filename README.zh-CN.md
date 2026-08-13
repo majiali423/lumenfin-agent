@@ -12,7 +12,8 @@
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-发布候选 **`0.1.0rc3`** / 标签 **`v0.1.0-rc.3`** · FinRun schema `1.0` ·
+当前候选 **`0.1.0rc4`**（尚未打标签）；最新已发布标签
+**`v0.1.0-rc.3`** · FinRun schema `1.0` ·
 FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · 受控 RC，边界见
 [局限说明](docs/PRODUCTION_LIMITATIONS.md)
 
@@ -331,7 +332,7 @@ PDF / SEC / Yahoo / market providers
 | Gate | What it measures | Result |
 |------|------------------|--------|
 | **LumenFin RC 标签回归** | 冻结的 `v0.1.0-rc.3` Linux 镜像测试 | **495 passed, 2 skipped** |
-| **LumenFin 当前 main 回归** | 标签后的 Linux 镜像测试，2026-08-13 | **511 passed, 3 skipped** |
+| **LumenFin 当前 main 回归** | 标签后的 Linux 镜像测试，2026-08-13 | **512 passed, 3 skipped** |
 | **FinAgentBench unit regression** | 全量 Python 测试 | **149 passed** |
 | **Infrastructure integration** | Queue/worker 多进程 Docker | **PASS**（`20260804T095357Z`） |
 | Worker-kill recovery | 被杀 worker 的任务是否需要人工重投？ | **否** — lease 过期 + attempt fencing 自动回收 |

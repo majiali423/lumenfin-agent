@@ -2,7 +2,8 @@
 
 > **Historical `0.1.0rc1` checklist — not the current release gate.**
 >
-> Current published candidate: LumenFin **`0.1.0rc3` / `v0.1.0-rc.3`**  
+> Current development candidate: LumenFin **`0.1.0rc4`** (not yet tagged)
+> Latest published candidate: LumenFin **`0.1.0rc3` / `v0.1.0-rc.3`**
 > Authority: [`docs/PORTFOLIO_RELEASE_REPORT.md`](docs/PORTFOLIO_RELEASE_REPORT.md)  
 > Full validation: [`docs/PRODUCTION_LIMITATIONS.md`](docs/PRODUCTION_LIMITATIONS.md)
 >
@@ -37,6 +38,7 @@ Target (historical): LumenFin + FinAgentBench `0.1.0rc1`
 
 | Item | Status |
 |------|--------|
+| Current LumenFin candidate | `0.1.0rc4` on `main`; validation/tag pending |
 | License | MIT (`LICENSE`) + `THIRD_PARTY_NOTICES.md` |
 | LumenFin tag | `v0.1.0-rc.3` published |
 | FinAgentBench package tag | `v0.1.0-rc.4` published |

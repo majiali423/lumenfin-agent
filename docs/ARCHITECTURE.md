@@ -1,7 +1,8 @@
 ﻿# LumenFin Final Architecture
 
-Trustworthy Financial Research Agent — architecture for **portfolio release
-candidate** `0.1.0rc3` (FinRun schema `1.0`, FinAgentBench pin **`v0.1.0-rc.3`**).
+Trustworthy Financial Research Agent — architecture for current **portfolio
+release candidate** `0.1.0rc4` (not yet tagged; FinRun schema `1.0`,
+FinAgentBench pin **`v0.1.0-rc.3`**).
 
 LumenFin is a portfolio release candidate validated under controlled
 multi-process and deterministic fault-injection conditions. These results
