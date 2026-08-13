@@ -170,7 +170,12 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
       SEC_USER_AGENT: ${SEC_USER_AGENT:?Set SEC_USER_AGENT}
-      MAS_API_KEY: ${MAS_API_KEY:?Set MAS_API_KEY}
+      # Authentication fails closed in app startup unless the legacy key or
+      # the multi-principal map provides at least one credential.
+      MAS_API_KEY: ${MAS_API_KEY:-}
+      MAS_API_KEY_CLIENT_ID: ${MAS_API_KEY_CLIENT_ID:-default-client}
+      MAS_API_KEY_TENANT_ID: ${MAS_API_KEY_TENANT_ID:-}
+      MAS_API_KEY_PRINCIPALS: ${MAS_API_KEY_PRINCIPALS:-}
     volumes:
       - ./outputs:/app/outputs
       - ./uploads:/app/uploads

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import traceback
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -46,6 +47,24 @@ class AuthPrincipalUnitTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             resolve_effective_tenant(principal, "tenant-b")
         self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_invalid_principal_entry_does_not_disclose_api_key(self) -> None:
+        secret = "super-secret-principal-key"
+
+        try:
+            build_principal_directory(
+                legacy_api_key=None,
+                legacy_client_id="default-client",
+                legacy_tenant_id="default",
+                principals_json=f'{{"{secret}":123}}',
+            )
+        except RuntimeError as exc:
+            rendered = "".join(traceback.format_exception(exc))
+            self.assertIn("MAS_API_KEY_PRINCIPALS entry #1", str(exc))
+            self.assertNotIn(secret, str(exc))
+            self.assertNotIn(secret, rendered)
+        else:
+            self.fail("invalid principal entry must fail closed")
 
     def test_service_job_lookup_requires_tenant_id(self) -> None:
         from lumenfin.service import LumenFinAnalysisService

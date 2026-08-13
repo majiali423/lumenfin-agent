@@ -352,7 +352,7 @@ def create_app(
             "port": app_config.port,
             "deepseek_model": app_config.llm.model,
             "deepseek_enabled": bool(app_config.llm.api_key),
-            "api_key_enabled": bool(app_config.api_key),
+            "api_key_enabled": bool(app_config.principal_directory()),
             "redis_enabled": bool(app_config.redis_url),
             "rag_enabled": app_config.rag_enabled,
             "rag_index_mode": app_config.rag_index_mode,

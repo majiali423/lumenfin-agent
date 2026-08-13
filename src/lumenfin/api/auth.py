@@ -31,7 +31,7 @@ def _parse_principals_json(raw: str | None) -> dict[str, AuthenticatedPrincipal]
     if not isinstance(payload, dict):
         raise RuntimeError("MAS_API_KEY_PRINCIPALS must be a JSON object")
     principals: dict[str, AuthenticatedPrincipal] = {}
-    for key, value in payload.items():
+    for entry_index, (key, value) in enumerate(payload.items(), start=1):
         api_key = str(key).strip()
         if not api_key:
             continue
@@ -43,7 +43,7 @@ def _parse_principals_json(raw: str | None) -> dict[str, AuthenticatedPrincipal]
             client_id = str(value.get("client_id") or f"client-{tenant_id}").strip() or f"client-{tenant_id}"
         else:
             raise RuntimeError(
-                f"MAS_API_KEY_PRINCIPALS entry for key {api_key!r} must be a string tenant_id "
+                f"MAS_API_KEY_PRINCIPALS entry #{entry_index} must be a string tenant_id "
                 "or an object with tenant_id/client_id"
             )
         principals[api_key] = AuthenticatedPrincipal(client_id=client_id, tenant_id=tenant_id)

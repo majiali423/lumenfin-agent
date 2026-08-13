@@ -29,7 +29,13 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertIn("APP_ENV: production", compose)
         self.assertIn("DATA_MODE: live", compose)
-        self.assertIn("MAS_API_KEY: ${MAS_API_KEY:?Set MAS_API_KEY}", compose)
+        self.assertIn("MAS_API_KEY: ${MAS_API_KEY:-}", compose)
+        self.assertIn(
+            "MAS_API_KEY_CLIENT_ID: ${MAS_API_KEY_CLIENT_ID:-default-client}",
+            compose,
+        )
+        self.assertIn("MAS_API_KEY_TENANT_ID: ${MAS_API_KEY_TENANT_ID:-}", compose)
+        self.assertIn("MAS_API_KEY_PRINCIPALS: ${MAS_API_KEY_PRINCIPALS:-}", compose)
         self.assertIn("POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}", compose)
         self.assertIn("migrator:", compose)
         self.assertIn("service_completed_successfully", compose)
@@ -182,6 +188,31 @@ class ProductionMindsetThinGuardsTestCase(unittest.TestCase):
                 llm_client=LocalFallbackLLMClient(),
                 market_data_client=FakeMarketDataClient(),
             )
+
+    def test_create_app_accepts_principal_map_without_legacy_key(self) -> None:
+        config = replace(
+            build_test_config(ROOT / "test_artifacts" / f"principal-auth-{uuid4().hex[:8]}"),
+            app_env="production",
+            api_key=None,
+            api_key_principals_json=(
+                '{"principal-key":{"client_id":"principal-client",'
+                '"tenant_id":"principal-tenant"}}'
+            ),
+            rag_enabled=False,
+        )
+
+        app = create_app(
+            config,
+            llm_client=LocalFallbackLLMClient(),
+            market_data_client=FakeMarketDataClient(),
+        )
+
+        response = TestClient(app).get(
+            "/api/v1/config",
+            headers={"X-API-Key": "principal-key"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["api_key_enabled"])
 
     def test_api_version_matches_installed_package(self) -> None:
         config = replace(
