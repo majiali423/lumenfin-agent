@@ -30,7 +30,8 @@ commit `90f9e94b7b7af7bc61ee35ee56cec1bdb56ccf55`.
   end-to-end gate: PASS
 - GitHub Actions on `main` and `v0.1.0-rc.4`: PASS
 
-The GitHub Release page remains pending; the immutable Git tag is published.
+The [GitHub Pre-release](https://github.com/majiali423/lumenfin-agent/releases/tag/v0.1.0-rc.4)
+and immutable Git tag are published.
 
 ## 0.1.0rc3 — 2026-08-12
 
