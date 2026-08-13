@@ -1,7 +1,7 @@
 # Reproducibility
 
-Supported candidate environment: Python 3.12, current LumenFin `0.1.0rc4`
-(not yet tagged). Latest published LumenFin tag: `v0.1.0-rc.3`.
+Supported candidate environment: Python 3.12, LumenFin `0.1.0rc4` / published
+tag `v0.1.0-rc.4`.
 
 FinAgentBench versioning (do not conflate):
 

@@ -14,8 +14,7 @@ what is verified.
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Current candidate **`0.1.0rc4`** (not yet tagged); latest published tag
-**`v0.1.0-rc.3`** · FinRun schema `1.0` ·
+Current published candidate **`0.1.0rc4`** / **`v0.1.0-rc.4`** · FinRun schema `1.0` ·
 FinAgentBench evaluator pin **`v0.1.0-rc.3`** · controlled RC under documented
 limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 

@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.1.0rc4 — unreleased
+## 0.1.0rc4 — 2026-08-13
 
-Post-tag closure candidate for tenant authorization, upgrade safety, and
-auditable Qwen3 evidence. This entry describes `main`; no `v0.1.0-rc.4` tag or
-release is claimed yet.
+Controlled release candidate for tenant authorization, upgrade safety, and
+auditable Qwen3 evidence. The annotated tag `v0.1.0-rc.4` is published at
+commit `90f9e94b7b7af7bc61ee35ee56cec1bdb56ccf55`.
 
 ### Fixed
 
@@ -26,8 +26,11 @@ release is claimed yet.
 - Current Linux-image offline suite: 512 passed, 3 skipped
 - PostgreSQL pre-003 upgrade gate: PASS
 - Production multi-principal Compose rendering: PASS
+- Production-stack migration, health, authentication, and synthetic RAG
+  end-to-end gate: PASS
+- GitHub Actions on `main` and `v0.1.0-rc.4`: PASS
 
-Full production-stack validation and release publication remain pending.
+The GitHub Release page remains pending; the immutable Git tag is published.
 
 ## 0.1.0rc3 — 2026-08-12
 
