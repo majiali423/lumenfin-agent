@@ -331,7 +331,7 @@ PDF / SEC / Yahoo / market providers
 | Gate | What it measures | Result |
 |------|------------------|--------|
 | **LumenFin RC 标签回归** | 冻结的 `v0.1.0-rc.3` Linux 镜像测试 | **495 passed, 2 skipped** |
-| **LumenFin 当前 main 回归** | 标签后的 Linux 镜像测试，2026-08-13 | **508 passed, 3 skipped** |
+| **LumenFin 当前 main 回归** | 标签后的 Linux 镜像测试，2026-08-13 | **511 passed, 3 skipped** |
 | **FinAgentBench unit regression** | 全量 Python 测试 | **149 passed** |
 | **Infrastructure integration** | Queue/worker 多进程 Docker | **PASS**（`20260804T095357Z`） |
 | Worker-kill recovery | 被杀 worker 的任务是否需要人工重投？ | **否** — lease 过期 + attempt fencing 自动回收 |

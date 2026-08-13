@@ -91,9 +91,12 @@ sent. The final result was:
 
 All 10 Qwen3 calls used one attempt, returned provider request IDs and token
 usage, and completed without fallback or provider error. Observed latency was
-188.33–897.17 ms and total token usage was 3,873. The temporary JSON artifact
-records only non-secret telemetry and does not persist full request IDs,
-endpoint details, credentials, queries, or candidate text.
+188.33–897.17 ms and total token usage was 3,873. The committed
+[machine-readable evidence](evidence/qwen3_rerank_live_gate_20260812.json)
+records per-case telemetry and aggregate scores without full request IDs,
+endpoint details, credentials, queries, or candidate text. Its execution
+commit was not captured by the original temporary artifact and is explicitly
+left unknown rather than reconstructed after the fact.
 
 ## Rollback
 

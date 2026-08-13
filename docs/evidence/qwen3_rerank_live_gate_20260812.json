@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "evidence_type": "qwen3_rerank_live_gate",
+  "run_boundary": {
+    "artifact_created_at_utc": "2026-08-12T07:33:43Z",
+    "artifact_finalized_at_utc": "2026-08-12T07:36:00Z",
+    "execution_commit": null,
+    "execution_commit_note": "The temporary source artifact did not capture the dirty-worktree commit. This field is intentionally not reconstructed after the fact.",
+    "implementation_commit": "2deb6753cbf627a73f00f1ee149a1b27f2ab0bf2",
+    "packaging_base_commit": "d930611c739cbb8f32d5e640704ef01954f8a82a",
+    "source_artifact_sha256": "6e9595435efdf64b884eac11cb4f8da78114d7d93069bf870478c44188c030bd",
+    "dataset_path": "data/eval_rag/rerank_cases.json",
+    "dataset_sha256": "5165748630b58c3f3ed85a744e1cc9519149a53025f2d38a294786f9e70fe29b",
+    "dataset_case_count": 10
+  },
+  "privacy_boundary": {
+    "synthetic_cases_only": true,
+    "queries_persisted": false,
+    "candidate_text_persisted": false,
+    "credentials_persisted": false,
+    "endpoint_persisted": false,
+    "full_request_ids_persisted": false
+  },
+  "provider": "qwen3",
+  "passed": true,
+  "fallbacks": 0,
+  "telemetry_complete": true,
+  "telemetry": [
+    {"case_id": "apple-revenue-period", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 897.17, "attempts": 1, "tokens": 378, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "msft-rd-intensity", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 207.46, "attempts": 1, "tokens": 414, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "nvidia-accelerator-constraint", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 217.46, "attempts": 1, "tokens": 432, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "tsmc-capex-period", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 240.06, "attempts": 1, "tokens": 393, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "apple-margin-scope", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 225.74, "attempts": 1, "tokens": 360, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "cross-lingual-risk", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 188.33, "attempts": 1, "tokens": 386, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "filing-item-precision", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 202.98, "attempts": 1, "tokens": 384, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "net-vs-operating-income", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 203.71, "attempts": 1, "tokens": 377, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "debt-maturity-year", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 273.56, "attempts": 1, "tokens": 363, "fallback": false, "error_type": "", "request_id_present": true},
+    {"case_id": "negative-evidence", "requested_provider": "dashscope", "actual_provider": "dashscope", "model": "qwen3-rerank", "latency_ms": 203.35, "attempts": 1, "tokens": 386, "fallback": false, "error_type": "", "request_id_present": true}
+  ],
+  "summaries": {
+    "candidate": {"cases": 10, "top1_accuracy": 0.0, "mean_mrr": 0.4167, "mean_ndcg_at_k": 0.6118},
+    "lexical": {"cases": 10, "top1_accuracy": 0.5, "mean_mrr": 0.6617, "mean_ndcg_at_k": 0.746},
+    "qwen3": {"cases": 10, "top1_accuracy": 1.0, "mean_mrr": 1.0, "mean_ndcg_at_k": 0.9711}
+  }
+}

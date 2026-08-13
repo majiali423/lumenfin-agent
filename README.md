@@ -341,7 +341,7 @@ Do **not** merge these into one “accuracy” number.
 | Gate | What it measures | Result |
 |------|------------------|--------|
 | **LumenFin RC-tag regression** | Frozen `v0.1.0-rc.3` Linux-image suite | **495 passed, 2 skipped** |
-| **LumenFin current-main regression** | Post-tag Linux-image suite, 2026-08-13 | **508 passed, 3 skipped** |
+| **LumenFin current-main regression** | Post-tag Linux-image suite, 2026-08-13 | **511 passed, 3 skipped** |
 | **FinAgentBench unit regression** | Full Python suite | **149 passed** |
 | **Infrastructure integration** | Queue/worker multi-process Docker | **PASS** (`20260804T095357Z`) |
 | Worker-kill recovery | Does a killed worker's job need human redelivery? | **no** — lease expiry + attempt fencing reclaim it |
