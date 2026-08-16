@@ -149,7 +149,7 @@ MAS_MILVUS_URI=data/milvus_lite_ci.db
 MAS_EMBEDDING_PROVIDER=dashscope
 MAS_EMBEDDING_DIMENSION=1024
 DASHSCOPE_API_KEY=sk-...
-DASHSCOPE_EMBEDDING_MODEL=text-embedding-v3
+DASHSCOPE_EMBEDDING_MODEL=text-embedding-v4
 DASHSCOPE_EMBEDDING_DIMENSION=1024
 # 换维度后请换新库，勿复用旧的 384 维 milvus_lite.db
 MAS_MILVUS_URI=data/milvus_lite_dashscope.db

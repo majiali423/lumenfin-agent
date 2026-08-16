@@ -25,11 +25,12 @@ def _diag_key(key: str) -> str:
 
 
 def main() -> int:
+    from lumenfin.rag.dashscope_defaults import resolved_dashscope_embedding_model
     from lumenfin.rag.embeddings import DashScopeEmbeddingProvider, build_embedding_provider
 
     provider_name = (os.getenv("MAS_EMBEDDING_PROVIDER") or "").strip().lower()
     key = (os.getenv("DASHSCOPE_API_KEY") or "").strip()
-    model = (os.getenv("DASHSCOPE_EMBEDDING_MODEL") or "text-embedding-v3").strip()
+    model = resolved_dashscope_embedding_model()
     dim = int(os.getenv("DASHSCOPE_EMBEDDING_DIMENSION") or os.getenv("MAS_EMBEDDING_DIMENSION") or "1024")
     base = (os.getenv("DASHSCOPE_BASE_URL") or "https://dashscope.aliyuncs.com/compatible-mode/v1").strip()
 

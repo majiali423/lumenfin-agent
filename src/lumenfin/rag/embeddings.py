@@ -18,7 +18,9 @@ from ..provider_resilience import (
     acquire_provider_slot,
     call_with_policy,
     get_shared_http_client,
+    redact_provider_message,
 )
+from .dashscope_defaults import resolved_dashscope_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -110,11 +112,7 @@ class DashScopeEmbeddingProvider:
                 f"choose one of {sorted(_DASHSCOPE_DIMS)}."
             )
         self._api_key = key
-        self._model = (
-            model
-            or os.getenv("DASHSCOPE_EMBEDDING_MODEL")
-            or "text-embedding-v3"
-        ).strip()
+        self._model = resolved_dashscope_embedding_model(model)
         self._dimension = dim
         self._base_url = (
             base_url
@@ -156,7 +154,13 @@ class DashScopeEmbeddingProvider:
             return client.post(url, headers=headers, json=payload, timeout=self._timeout)
 
         response = _post()
-        response.raise_for_status()
+        if response.is_error:
+            detail = redact_provider_message((response.text or "")[:400])
+            detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[REDACTED]", detail)
+            detail = re.sub(r"https?://[^\s\"']+", "[REDACTED_URL]", detail)
+            raise InvalidProviderResponseError(
+                f"DashScope embedding HTTP {response.status_code}: {detail}"
+            )
         try:
             data = response.json()
         except Exception as exc:  # noqa: BLE001
