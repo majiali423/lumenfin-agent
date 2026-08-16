@@ -71,3 +71,14 @@ the issuer, CIK, form, accession number, filing date, source URL and checksums.
 DeepSeek, Alibaba Cloud DashScope, SEC EDGAR, Yahoo Finance, and any configured
 market-data provider are external services. Their API, model, acceptable-use,
 rate-limit, and data-redistribution terms are not covered by the MIT license.
+
+## FinanceBench (optional local eval data)
+
+The open FinanceBench questions and filings used by
+`docs/FINANCEBENCH_EVAL.md` are **not** shipped in this repository. When an
+operator downloads them locally they remain under the upstream
+[CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/) terms
+(Patronus AI, Islam et al., *FinanceBench: A New Benchmark for Financial
+Question Answering*, 2023). Do not relicense that dataset or the PDFs under
+MIT, and do not commit the JSONL or PDFs. SEC EDGAR and issuer IR PDFs keep
+their own source terms.

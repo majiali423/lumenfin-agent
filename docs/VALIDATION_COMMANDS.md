@@ -92,3 +92,15 @@ python scripts/validate_provider_resilience_docker.py
 Requires Docker Compose resources; see
 [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) and
 [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md).
+
+## 7. FinanceBench retrieval eval (optional, not a release gate)
+
+Synthetic 4/5/10 RAG cases remain the offline RAG gates. FinanceBench is an
+external accuracy harness; see [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md).
+
+```bash
+python scripts/prepare_financebench_eval.py
+python scripts/run_financebench_retrieval_eval.py --mode bm25 --split test --limit 2 --index-scope selected --embedding-provider deterministic
+# Remote four-mode held-out run (explicit opt-in only):
+# python scripts/run_financebench_retrieval_eval.py --mode all --split test --allow-remote --embedding-provider dashscope --fetch-pdfs
+```

@@ -44,6 +44,7 @@ release gate.
 | [INPUT_GUARDRAIL.md](INPUT_GUARDRAIL.md) | Input and upload guards |
 | [MCP.md](MCP.md) | Optional MCP boundary |
 | [evaluation_strategy.md](evaluation_strategy.md) | Internal evaluation strategy |
+| [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench retrieval eval |
 | [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
 | [README_zh.md](README_zh.md) | Legacy Chinese stub — prefer root [../README.zh-CN.md](../README.zh-CN.md) |
 
