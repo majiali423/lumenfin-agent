@@ -89,3 +89,12 @@ agent 的错误经常发生在路径上，例如漏调用工具、跳过审查�
 3. 记录每个节点耗时和 token 成本。
 4. 对 PDF 抽取结果做字段级置信度评分。
 5. 把 evaluator 接入 API，前端展示运行质量分。
+
+## External financial RAG (FinanceBench)
+
+The 4/5/10 synthetic RAG/BM25/Qwen3 cases are **release gates**, not external
+accuracy. The separate FinanceBench harness in
+[FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) scores retrieval on the open 150
+questions (held-out 100, frozen config). Default is offline; DashScope/Qwen3
+require `--allow-remote`. Unrun scores stay `NOT_RUN` / `UNVERIFIED`. Do not
+tune on the test split. Phase 4 answer eval is unimplemented.
