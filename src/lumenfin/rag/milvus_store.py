@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import time
 from typing import Any
 
@@ -43,6 +44,70 @@ _REQUIRED_METADATA_FIELDS = frozenset(
     }
 )
 
+def _patch_windows_milvus_lite_manifest() -> None:
+    """Make Milvus Lite manifest commits work on Windows without patching os.rename.
+
+    ``milvus_lite.storage.manifest.os`` is the stdlib ``os`` module, so assigning
+    ``manifest.os.rename`` would globally replace ``os.rename``. Instead, wrap
+    ``Manifest.save`` and use ``os.replace`` only inside that method.
+    """
+    if os.name != "nt":
+        return
+    try:
+        import nt
+        from milvus_lite.storage.manifest import Manifest
+    except ImportError:
+        return
+    if os.rename is os.replace:
+        os.rename = nt.rename
+    if getattr(Manifest.save, "_lumenfin_windows_save", False):
+        return
+
+    original_save = Manifest.save
+
+    def save(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        import json
+        import shutil
+
+        os.makedirs(self._data_dir, exist_ok=True)
+        new_version = self._version + 1
+        payload = self._to_payload()
+        payload["version"] = new_version
+        target_path = os.path.join(self._data_dir, "manifest.json")
+        prev_path = os.path.join(self._data_dir, "manifest.json.prev")
+        tmp_path = os.path.join(self._data_dir, "manifest.json.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.path.exists(target_path):
+                try:
+                    shutil.copy2(target_path, prev_path)
+                except OSError:
+                    pass
+            os.replace(tmp_path, target_path)
+        except BaseException:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+        self._version = new_version
+        try:
+            dir_fd = os.open(self._data_dir, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+
+    save._lumenfin_windows_save = True  # type: ignore[attr-defined]
+    save._lumenfin_original_save = original_save  # type: ignore[attr-defined]
+    Manifest.save = save  # type: ignore[method-assign]
+
+
 class EmbeddingQueryError(RuntimeError):
     """Raised when query embedding fails (after retries)."""
 
@@ -71,6 +136,8 @@ class MilvusRAGStore:
         self.collection_name = collection_name
         self.bm25_enabled = bool(bm25_enabled)
         self.backend = milvus_backend_kind(uri)
+        if not is_milvus_server_uri(uri):
+            _patch_windows_milvus_lite_manifest()
         # Server URIs share one process-local client by default; Lite always owns its client.
         if is_milvus_server_uri(uri) and shared_client is not False:
             self.client = get_shared_milvus_client(uri)
@@ -118,6 +185,7 @@ class MilvusRAGStore:
     def _ensure_collection(self) -> None:
         if self.client.has_collection(self.collection_name):
             self._validate_collection_schema()
+            self._validate_collection_indexes()
             self._ensure_loaded()
             return
         if self.bm25_enabled:
@@ -129,6 +197,8 @@ class MilvusRAGStore:
                 auto_id=False,
                 enable_dynamic_field=True,
             )
+        self._validate_collection_schema()
+        self._validate_collection_indexes()
         self._ensure_loaded()
 
     def _create_bm25_collection(self) -> None:
@@ -175,6 +245,23 @@ class MilvusRAGStore:
             index_type="AUTOINDEX",
             metric_type="COSINE",
         )
+        bm25_indexes = self.client.prepare_index_params()
+        bm25_indexes.add_index(
+            field_name=BM25_SPARSE_FIELD,
+            index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25",
+            params={
+                "inverted_index_algo": "DAAT_MAXSCORE",
+                "bm25_k1": 1.2,
+                "bm25_b": 0.75,
+            },
+        )
+        if os.name == "nt":
+            # Windows Milvus Lite cannot atomically write two index manifests.
+            # Keep Linux/container create_collection dual-index behavior unchanged.
+            self._create_collection_verified(schema, indexes)
+            self._create_index_verified(bm25_indexes)
+            return
         indexes.add_index(
             field_name=BM25_SPARSE_FIELD,
             index_type="SPARSE_INVERTED_INDEX",
@@ -190,6 +277,50 @@ class MilvusRAGStore:
             schema=schema,
             index_params=indexes,
         )
+
+    def _create_collection_verified(self, schema: Any, indexes: Any) -> None:
+        try:
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                schema=schema,
+                index_params=indexes,
+            )
+            return
+        except Exception as exc:
+            if not self.client.has_collection(self.collection_name):
+                raise
+            try:
+                self._validate_collection_schema()
+            except Exception:
+                raise RuntimeError(
+                    f"Milvus collection '{self.collection_name}' create failed and schema "
+                    "could not be verified"
+                ) from exc
+            if not self._probe_vector_index() and "vector" not in {
+                name.lower() for name in self._index_field_names()
+            }:
+                raise RuntimeError(
+                    f"Milvus collection '{self.collection_name}' create failed and the dense "
+                    "index could not be verified"
+                ) from exc
+
+    def _create_index_verified(self, indexes: Any) -> None:
+        try:
+            self.client.create_index(self.collection_name, indexes)
+            return
+        except Exception as exc:
+            if self._bm25_index_confirmed():
+                return
+            raise RuntimeError(
+                f"Milvus BM25 index create failed and the sparse index could not be verified "
+                f"for '{self.collection_name}'"
+            ) from exc
+
+    def _bm25_index_confirmed(self) -> bool:
+        names = {item.lower() for item in self._index_field_names()}
+        if any("sparse" in item or "bm25" in item for item in names):
+            return True
+        return self._probe_bm25_index()
 
     def _validate_collection_schema(self) -> None:
         """Fail fast when an existing collection is incompatible with this store."""
@@ -241,6 +372,112 @@ class MilvusRAGStore:
                 )
             return
 
+    def _index_field_names(self) -> set[str]:
+        """Best-effort field names covered by existing indexes. Empty if unverifiable."""
+        names: set[str] = set()
+        client = self.client
+        raw: Any = None
+        if hasattr(client, "list_indexes"):
+            try:
+                raw = client.list_indexes(self.collection_name)
+            except TypeError:
+                try:
+                    raw = client.list_indexes(collection_name=self.collection_name)
+                except Exception:
+                    raw = None
+            except Exception:
+                raw = None
+        items = raw if isinstance(raw, list) else []
+        for item in items:
+            if isinstance(item, str):
+                names.add(item)
+                continue
+            if isinstance(item, dict):
+                for key in ("field_name", "field", "index_name", "name"):
+                    value = item.get(key)
+                    if value:
+                        names.add(str(value))
+        for field_name in ("vector", BM25_SPARSE_FIELD):
+            describer = getattr(client, "describe_index", None)
+            if describer is None:
+                continue
+            try:
+                info = describer(self.collection_name, field_name)
+            except TypeError:
+                try:
+                    info = describer(collection_name=self.collection_name, index_name=field_name)
+                except Exception:
+                    continue
+            except Exception:
+                continue
+            if info:
+                names.add(field_name)
+                if isinstance(info, dict):
+                    reported = info.get("field_name") or info.get("field")
+                    if reported:
+                        names.add(str(reported))
+        return {name for name in names if name}
+
+    def _probe_vector_index(self) -> bool:
+        try:
+            self.client.search(
+                collection_name=self.collection_name,
+                data=[[0.0] * int(self.embedder.dimension)],
+                limit=1,
+                anns_field="vector",
+            )
+            return True
+        except Exception:
+            return False
+
+    def _probe_bm25_index(self) -> bool:
+        try:
+            self.client.search(
+                collection_name=self.collection_name,
+                data=["lumenfin index probe"],
+                limit=1,
+                anns_field=BM25_SPARSE_FIELD,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _validate_collection_indexes(self) -> None:
+        """Fail closed when dense / BM25 indexes cannot be confirmed."""
+        if not self.bm25_enabled:
+            return
+        names = {item.lower() for item in self._index_field_names()}
+        dense_ok = any("vector" in item or "embedding" in item for item in names)
+        sparse_ok = any("sparse" in item or "bm25" in item for item in names)
+        if not dense_ok:
+            dense_ok = self._probe_vector_index()
+        if not sparse_ok:
+            sparse_ok = self._probe_bm25_index()
+        missing: list[str] = []
+        if not dense_ok:
+            missing.append("dense vector index")
+        if not sparse_ok:
+            missing.append("BM25 sparse index")
+        if missing:
+            raise RuntimeError(
+                f"Milvus collection '{self.collection_name}' is missing or unverifiable "
+                f"({', '.join(missing)}). Refusing to continue without a confirmed schema/index."
+            )
+
+    def _writes_are_searchable(self) -> bool:
+        try:
+            result = self.client.query(
+                collection_name=self.collection_name,
+                filter="id >= 0",
+                output_fields=["id"],
+                limit=1,
+            )
+            if isinstance(result, list) and len(result) > 0:
+                return True
+        except Exception:
+            pass
+        return self._probe_vector_index()
+
     def _ensure_loaded(self) -> None:
         if not self.client.has_collection(self.collection_name):
             return
@@ -254,8 +491,22 @@ class MilvusRAGStore:
 
     def _wait_until_writes_visible(self) -> None:
         """Do not report an index as ready before Milvus can search its writes."""
-        self.client.flush(collection_name=self.collection_name)
+        flush_error: Exception | None = None
+        try:
+            self.client.flush(collection_name=self.collection_name)
+        except Exception as exc:  # noqa: BLE001
+            flush_error = exc
         self._ensure_loaded()
+        if self._writes_are_searchable():
+            return
+        if flush_error is not None:
+            raise RuntimeError(
+                f"Milvus flush failed and writes are not searchable for "
+                f"'{self.collection_name}': {flush_error}"
+            ) from flush_error
+        raise RuntimeError(
+            f"Milvus collection '{self.collection_name}' is not searchable after flush"
+        )
 
     def reset_collection(self) -> None:
         if self.client.has_collection(self.collection_name):
