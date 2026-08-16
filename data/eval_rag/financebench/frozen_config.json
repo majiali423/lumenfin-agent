@@ -1,0 +1,29 @@
+{
+  "name": "financebench-confirmation-candidate-v1",
+  "experiment_role": "proposed_frozen_config",
+  "held_out_claim": "forbidden_until_confirmation_50_approved_and_run_once",
+  "index_scope": "company",
+  "split_for_confirmation": "confirmation",
+  "retrieval_mode": "hybrid-qwen3",
+  "chunk_size": 900,
+  "chunk_overlap": 120,
+  "embedding_provider": "dashscope",
+  "embedding_model": "text-embedding-v4",
+  "embedding_dimension": 1024,
+  "bm25_rrf_weight": 1.1,
+  "top_k": 10,
+  "rerank_candidates": 20,
+  "rerank_provider": "qwen3",
+  "rerank_model": "qwen3-rerank",
+  "rerank_instruct": "Given a financial due diligence query, retrieve passages that directly answer it. Prefer the correct company, reporting period, metric, scope, and filing context over merely topical passages.",
+  "pdf_parser": "lumenfin.documents.parse_pdf_document",
+  "query_rewriting": false,
+  "dataset_hash": "5e961c0aa84a5ed578bdc2cea4f2ef8e33aa6ffe9394fc6c2508b303bf10fdeb",
+  "notes": [
+    "Selected after post-hoc company-scope diagnostic on exposed test-100.",
+    "Company scope is the only changed experimental variable vs corpus baseline.",
+    "Do not retune after confirmation-50."
+  ],
+  "config_hash": "18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7",
+  "proposed_at": "2026-08-16T12:58:47Z"
+}

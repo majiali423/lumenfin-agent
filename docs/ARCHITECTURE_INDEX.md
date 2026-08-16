@@ -43,6 +43,7 @@ Reliability layers (current):
 |-----|---------|
 | [architecture_decisions.md](architecture_decisions.md) | Why LangGraph, planner, AST quant, fail-loud |
 | [evaluation_strategy.md](evaluation_strategy.md) | How LumenFin evaluates diligence quality |
+| [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench retrieval eval harness |
 | [MCP.md](MCP.md) | MCP tool layer boundary |
 | [../mcp_layer/README.md](../mcp_layer/README.md) | MCP servers/adapters |
 

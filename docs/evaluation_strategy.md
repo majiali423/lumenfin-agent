@@ -82,6 +82,19 @@ outputs/evaluation_report.md
 
 agent 的错误经常发生在路径上，例如漏调用工具、跳过审查、失败后没有降级。Evaluator 会读取每次运行的 state 和 audit log，从流程完整性、报告契约、证据覆盖、运行可靠性四个角度打分。这样 prompt、工具或模型替换后，可以用历史 runs 做回归测试。
 
+## External retrieval dataset (FinanceBench)
+
+Internal RAG scripts remain synthetic gates. External page-level retrieval
+evaluation is documented in [`FINANCEBENCH_EVAL.md`](FINANCEBENCH_EVAL.md).
+The 2026-08-16 corpus test-100 is an **exploratory baseline / exposed
+test-100**, not an unseen held-out. Company-scope on those same questions is
+a **recorded post-hoc paired diagnostic**: Hybrid Hit@5 moved +0.16; Dense
+Hit@5 did not move; Hybrid+Qwen3 Hit@5 did not move, Hit@10/MRR did. The
+unused 50 questions are confirmation-50 and remain `NOT_RUN` pending a
+frozen config hash. Those numbers are a page-level baseline, **not product
+accuracy** and **not** the 10-case Qwen3 hard-negative gate (Top-1/MRR
+1.0000). Phase 4 end-to-end answer metrics remain `NOT_RUN`.
+
 ## 后续增强方向
 
 1. 加 golden trace 数据集，作为每次改动后的回归基准。
@@ -89,3 +102,4 @@ agent 的错误经常发生在路径上，例如漏调用工具、跳过审查�
 3. 记录每个节点耗时和 token 成本。
 4. 对 PDF 抽取结果做字段级置信度评分。
 5. 把 evaluator 接入 API，前端展示运行质量分。
+6. FinanceBench 端到端回答评测（数值 / citation / 拒答），与检索阶段分开。

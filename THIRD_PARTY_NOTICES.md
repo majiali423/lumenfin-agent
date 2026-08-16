@@ -66,6 +66,15 @@ the issuer, CIK, form, accession number, filing date, source URL and checksums.
   sources. Public access does not automatically grant permission to relicense
   issuer-authored material under MIT.
 
+## FinanceBench
+
+The optional external retrieval evaluation uses the open 150-question sample
+from [patronus-ai/financebench](https://github.com/patronus-ai/financebench)
+(CC-BY-NC-4.0). This repository does not vendor the PDFs, full JSONL, or gold
+evidence pages. Operators must obtain the dataset under its own terms and keep
+it in a gitignored directory such as `data/external/financebench/`. LumenFin's
+MIT license does not relicense FinanceBench.
+
 ## External services and data
 
 DeepSeek, Alibaba Cloud DashScope, SEC EDGAR, Yahoo Finance, and any configured

@@ -34,6 +34,11 @@ data/**
 !data/eval_rag/
 !data/eval_rag/bm25_cases.json
 !data/eval_rag/rerank_cases.json
+!data/eval_rag/financebench/
+!data/eval_rag/financebench/README.md
+!data/eval_rag/financebench/schema_example.jsonl
+!data/eval_rag/financebench/split_manifest.example.json
+!data/eval_rag/financebench/frozen_config.json
 !data/.gitkeep
 
 .env

@@ -92,3 +92,67 @@ python scripts/validate_provider_resilience_docker.py
 Requires Docker Compose resources; see
 [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) and
 [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md).
+
+## 7. FinanceBench retrieval eval
+
+Requires a local FinanceBench checkout (JSONL + PDFs). Raw files stay
+gitignored. Remote embedding/rerank is blocked unless `--allow-remote` is set.
+
+Exposed test-100 four-mode ablation was **recorded** 2026-08-16 as an
+exploratory baseline (corpus scope, dirty worktree). Company-scope on the
+same 100 questions was then recorded as a **post-hoc paired diagnostic**
+(`outputs/financebench_eval_company/`). Neither is product accuracy.
+Confirmation-50 (`--split confirmation` / `--split dev`) is still unused.
+It is locked to `data/eval_rag/financebench/frozen_config.json`
+(`18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7`) and
+requires `--frozen-config` plus `--confirm-held-out` after approval.
+Details: [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md).
+
+Offline harness smoke (no confirmation-50, no remote providers). `--split
+confirmation` and `--split dev` are the same 50 unseen questions; do **not**
+run them with `--limit 2`. Use unit tests / synthetic fixtures, or the already
+exposed test split:
+
+```powershell
+python -m unittest `
+  tests.test_financebench_loader `
+  tests.test_financebench_split `
+  tests.test_financebench_qrels `
+  tests.test_financebench_metrics `
+  tests.test_financebench_retrieval_eval `
+  tests.test_financebench_frozen -v
+python scripts/run_financebench_retrieval_eval.py --dataset-dir <checkout> --split test --mode bm25 --limit 2
+```
+
+After approval only (do not run until approved; requires a clean worktree):
+
+```powershell
+python scripts/run_financebench_retrieval_eval.py `
+  --dataset-dir data\external\financebench-src `
+  --output-dir outputs\financebench_eval_confirmation `
+  --split confirmation --mode hybrid-qwen3 --index-scope company `
+  --embedding-provider dashscope --embedding-dimension 1024 --top-k 10 `
+  --allow-remote `
+  --frozen-config data\eval_rag\financebench\frozen_config.json `
+  --confirm-held-out
+```
+
+Recorded corpus exploratory-baseline command (do not retune from it):
+
+```powershell
+python scripts/run_financebench_retrieval_eval.py `
+  --dataset-dir data\external\financebench-src `
+  --mode all --split test --allow-remote `
+  --embedding-provider dashscope --index-scope corpus --keep-index
+```
+
+Recorded company-scope post-hoc command (do not retune from it):
+
+```powershell
+python scripts/run_financebench_retrieval_eval.py `
+  --dataset-dir data\external\financebench-src `
+  --output-dir outputs\financebench_eval_company `
+  --mode all --split test --allow-remote `
+  --embedding-provider dashscope --embedding-dimension 1024 `
+  --index-scope company --keep-index --top-k 10
+```

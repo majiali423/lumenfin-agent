@@ -1,0 +1,17 @@
+{
+  "version": "v1",
+  "salt": "lumenfin-financebench-split-v1",
+  "n_dev": 50,
+  "n_test": 100,
+  "rule": "sha256(salt|financebench_id) lexicographic; first n_dev -> dev, rest -> test",
+  "order_independent": true,
+  "cases": [
+    {
+      "financebench_id": "financebench_id_00000",
+      "case_id": "fb-financebench_id_00000",
+      "split": "dev",
+      "company": "ExampleCo",
+      "question_type": "metrics-generated"
+    }
+  ]
+}
