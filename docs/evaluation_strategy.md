@@ -105,3 +105,6 @@ end-to-end QA, and **not** the 10-case Qwen3 hard-negative gate (Top-1/MRR
 4. 对 PDF 抽取结果做字段级置信度评分。
 5. 把 evaluator 接入 API，前端展示运行质量分。
 6. FinanceBench 端到端回答评测（数值 / citation / 拒答），与检索阶段分开。
+7. 新的未见 holdout 上做 reranker / 页面多样性 / section-parent retrieval
+   （[FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md)）。禁止在
+   test-100 或 confirmation-50 上再调参；生产默认仍为 A。

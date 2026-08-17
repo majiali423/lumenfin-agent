@@ -594,7 +594,8 @@ Recorded conclusions (do not retune from them):
 - test-100 is exposed and confirmation-50 is consumed. Further work needs a
   new unseen dataset or a new internal holdout, focused on reranker ranking,
   page diversity, and section/parent retrieval — not a larger candidate pool
-  on this split.
+  on this split. Protocol:
+  [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md).
 
 Do not rerun the scoring directory. Do not delete it and start over.
 

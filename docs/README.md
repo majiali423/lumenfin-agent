@@ -45,6 +45,7 @@ release gate.
 | [MCP.md](MCP.md) | Optional MCP boundary |
 | [evaluation_strategy.md](evaluation_strategy.md) | Internal evaluation strategy |
 | [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench RAG retrieval eval (test-100 exploratory; confirmation-50 consumed; candidate-pool A/B/C sealed as next-gen candidate only; not product accuracy) |
+| [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | Next eval-only phase: reranker / page diversity / section-parent retrieval on new unseen data; production stays A |
 | [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
 | [README_zh.md](README_zh.md) | Legacy Chinese stub — prefer root [../README.zh-CN.md](../README.zh-CN.md) |
 
