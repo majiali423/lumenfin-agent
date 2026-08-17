@@ -1,0 +1,202 @@
+{
+  "schema_version": "financebench_candidate_pool_ablation.v1",
+  "name": "financebench-candidate-pool-ablation-test100-recorded",
+  "status": "RECORDED",
+  "experiment_role": "exposed_test_100_post_hoc_ablation",
+  "held_out": false,
+  "exposed_test_post_hoc": true,
+  "product_accuracy_claim": false,
+  "end_to_end_accuracy_claim": false,
+  "production_change_authorized": false,
+  "retuning_on_test100_forbidden": true,
+  "confirmation50_consumed": true,
+  "lumenfin_commit": "4bbac4e6c7695b75a051ce6a51c6d40a1309153d",
+  "tag": "financebench-candidate-pool-ablation-v1",
+  "config_hash": "d0370c073be46fc42c2c6dded458182e3332e644666388b7111265d9b40e7bbd",
+  "dataset_hash": "5e961c0aa84a5ed578bdc2cea4f2ef8e33aa6ffe9394fc6c2508b303bf10fdeb",
+  "executed_at": "2026-08-17T16:19:09Z",
+  "split": "test",
+  "cases": 100,
+  "primary_comparison_valid": true,
+  "comparison_status": "qwen3_primary",
+  "all_arms_qwen3_ok_cases": 100,
+  "production_arm": "A",
+  "next_generation_candidate": {
+    "arm": "C",
+    "status": "diagnostic_best_not_production_authorized",
+    "channel_k": 50,
+    "rrf_k": 30,
+    "rerank_k": 30,
+    "final_k": 10
+  },
+  "decision": {
+    "keep_production_A": true,
+    "adopt_B": false,
+    "authorize_C_in_production": false,
+    "reason": "B does not beat A. C is the diagnostic best on this exposed test-100 (Hit@5 0.48→0.53; 5/25 rank-11–30 rescues) but Hit@10/MRR/nDCG gains are not stable, cost rises, and test-100 plus confirmation-50 are consumed."
+  },
+  "arms": {
+    "A": {
+      "channel_k": 20,
+      "rrf_k": 20,
+      "rerank_k": 20,
+      "final_k": 10,
+      "hit_at_1": 0.22,
+      "hit_at_5": 0.48,
+      "hit_at_10": 0.65,
+      "mrr": 0.3391,
+      "ndcg_at_10": 0.3939,
+      "qwen3_ok_cases": 100,
+      "fallback_cases": 0,
+      "provider_error_cases": 0,
+      "p50_rerank_latency_ms": 308.86,
+      "p95_rerank_latency_ms": 374.0,
+      "mean_rerank_usage": 3654.42,
+      "mean_rerank_chars": 8437.03,
+      "failure_class_counts": {
+        "hit_at_10": 65,
+        "gold_not_in_rerank_pool": 32,
+        "gold_in_pool_not_in_final_top10": 2,
+        "ingestion_failure": 1
+      }
+    },
+    "B": {
+      "channel_k": 50,
+      "rrf_k": 20,
+      "rerank_k": 20,
+      "final_k": 10,
+      "hit_at_1": 0.21,
+      "hit_at_5": 0.47,
+      "hit_at_10": 0.63,
+      "mrr": 0.3228,
+      "ndcg_at_10": 0.3739,
+      "qwen3_ok_cases": 100,
+      "fallback_cases": 0,
+      "provider_error_cases": 0,
+      "p50_rerank_latency_ms": 302.77,
+      "p95_rerank_latency_ms": 388.57,
+      "mean_rerank_usage": 3321.72,
+      "mean_rerank_chars": 7179.11,
+      "failure_class_counts": {
+        "hit_at_10": 63,
+        "gold_not_in_rerank_pool": 30,
+        "gold_in_pool_not_in_final_top10": 6,
+        "ingestion_failure": 1
+      }
+    },
+    "C": {
+      "channel_k": 50,
+      "rrf_k": 30,
+      "rerank_k": 30,
+      "final_k": 10,
+      "hit_at_1": 0.23,
+      "hit_at_5": 0.53,
+      "hit_at_10": 0.67,
+      "mrr": 0.3511,
+      "ndcg_at_10": 0.405,
+      "qwen3_ok_cases": 100,
+      "fallback_cases": 0,
+      "provider_error_cases": 0,
+      "p50_rerank_latency_ms": 358.15,
+      "p95_rerank_latency_ms": 416.74,
+      "mean_rerank_usage": 5176.72,
+      "mean_rerank_chars": 11100.25,
+      "failure_class_counts": {
+        "hit_at_10": 67,
+        "gold_not_in_rerank_pool": 21,
+        "gold_in_pool_not_in_final_top10": 11,
+        "ingestion_failure": 1
+      }
+    }
+  },
+  "paired": {
+    "B_vs_A": {
+      "delta_hit_at_5": -0.01,
+      "delta_hit_at_5_ci95": [-0.06, 0.04],
+      "delta_hit_at_10": -0.02,
+      "delta_hit_at_10_ci95": [-0.08, 0.04],
+      "delta_mrr": -0.0163,
+      "delta_mrr_ci95": [-0.0491, 0.0104],
+      "delta_ndcg_at_10": -0.02,
+      "delta_ndcg_at_10_ci95": [-0.0564, 0.0105],
+      "mcnemar_hit_at_5_p": 1.0,
+      "mcnemar_hit_at_10_p": 0.753906,
+      "significant_overall_vs_A": false
+    },
+    "C_vs_A": {
+      "delta_hit_at_5": 0.05,
+      "delta_hit_at_5_ci95": [0.01, 0.1],
+      "delta_hit_at_10": 0.02,
+      "delta_hit_at_10_ci95": [-0.05, 0.09],
+      "delta_mrr": 0.012,
+      "delta_mrr_ci95": [-0.02, 0.0487],
+      "delta_ndcg_at_10": 0.0112,
+      "delta_ndcg_at_10_ci95": [-0.0202, 0.0461],
+      "mcnemar_hit_at_5_p": 0.125,
+      "mcnemar_hit_at_10_p": 0.790527,
+      "significant_overall_vs_A": false
+    },
+    "C_vs_B": {
+      "delta_hit_at_5": 0.06,
+      "delta_hit_at_5_ci95": [0.0, 0.13],
+      "delta_hit_at_10": 0.04,
+      "delta_hit_at_10_ci95": [-0.03, 0.11],
+      "delta_mrr": 0.0283,
+      "delta_mrr_ci95": [-0.0095, 0.0741],
+      "delta_ndcg_at_10": 0.0311,
+      "delta_ndcg_at_10_ci95": [-0.0077, 0.0732],
+      "mcnemar_hit_at_5_p": 0.109375,
+      "mcnemar_hit_at_10_p": 0.42395
+    }
+  },
+  "rank_11_30": {
+    "source_status": "candidate_depth_v2",
+    "focus_cases": 25,
+    "per_case_sha256": "06d455a842d4eb3296a1a32c3305545f909675247bcda15508a20d28d14c4429",
+    "focus_case_ids_sha256": "f4597a41f538f8ec1f0da1a2e7b145435c821a16c3fc8c9f9392dddd84bbb548",
+    "a_miss_b_hit": 0,
+    "a_miss_c_hit": 5,
+    "c_still_miss": 10,
+    "c_miss_gold_not_in_rerank_pool": 6,
+    "c_miss_gold_in_pool_not_final_top10": 4
+  },
+  "cost_vs_A": {
+    "C_mean_rerank_usage_increase_pct": 41.7,
+    "C_p50_rerank_latency_increase_pct": 16.0,
+    "latency_scope": "qwen3_rerank_only_not_e2e"
+  },
+  "query_embedding_calls_total": 100,
+  "query_embedding_calls_this_invocation": 100,
+  "qwen3_calls_total": 300,
+  "qwen3_calls_this_invocation": 300,
+  "chunk_reembed_calls": 0,
+  "billing_semantics": "at_least_once",
+  "exactly_once": false,
+  "source_index": {
+    "commit": "5877be8555bd72f411225b809ed75454607618bd",
+    "chunker": "pre_overlap_fix",
+    "session_id": "financebench-eval",
+    "tenant_id": "financebench-eval",
+    "row_count": 52518,
+    "schema_sha256": "f29f8c3a6368b184caeda0bf6a0383e063a54d9f8283324416e08aeae5a046cf",
+    "collection_manifest_sha256": "54b2455bbbb7bc4736215859893fa6a4a19032e16febdaf64115b5211183a1f0",
+    "not_current_chunker": true
+  },
+  "artifact_dir": "outputs/financebench_candidate_pool_ablation_test100",
+  "preflight_dir": "outputs/financebench_candidate_pool_ablation_test100_preflight",
+  "artifact_sha256": {
+    "environment.json": "2814a93f48fa048bb255c687abe121839a1ac3957bc2aeeba8a08d8df363ca6f",
+    "manifest.json": "2ea44b40d16728d9b4197188e669bc97728984e35d168c45c4f380b0aa15f3f7",
+    "checkpoint.json": "2ea44b40d16728d9b4197188e669bc97728984e35d168c45c4f380b0aa15f3f7",
+    "summary.json": "319ac122e0a15e7c894c0a1c667c987d6aead8b5da3369ea8f56a8926e578914",
+    "paired.json": "57689b4e9b2d0f3131b1ad4dc1b657687401174d67176d5c6b0692ff00519491",
+    "results.md": "6801c641081c0db81e8b09227974207d1e26787870985182a17031c83c4f78ba",
+    "per_case.jsonl": "68995d799b4e167ee138698b02d42e6300e24869186ec06d31cd45b57afd504e",
+    "failures.jsonl": "c75f2dc4a34eda7fdfd408c2861dc18b8e7ede2df267c2eb6865fe02a65be35d"
+  },
+  "preflight_sha256": {
+    "preflight.json": "b062b1de0f5b35eb4981bc7f81cd530249fd21efe38540f6179680d7246e6b93"
+  },
+  "next_workstream": "reranker ranking, page diversity, and section/parent retrieval on a new unseen dataset or a new internal holdout. Do not enlarge the candidate pool on test-100.",
+  "disclaimer": "Exposed test-100 post-hoc candidate-pool / Qwen3 ablation. Not held-out, not product accuracy, and not a confirmation-50 result. Arm C is a next-generation candidate only. Production retriever defaults stay at arm A. Do not retune on test-100. Do not rerun this scoring directory."
+}

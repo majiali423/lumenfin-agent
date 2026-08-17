@@ -40,6 +40,7 @@ data/**
 !data/eval_rag/financebench/split_manifest.example.json
 !data/eval_rag/financebench/frozen_config.json
 !data/eval_rag/financebench/confirmation_result.json
+!data/eval_rag/financebench/candidate_pool_ablation_result.json
 !data/.gitkeep
 
 .env

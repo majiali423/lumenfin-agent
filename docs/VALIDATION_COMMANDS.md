@@ -110,6 +110,12 @@ and **not** end-to-end QA. Do not rerun or retune. Aggregate:
 `data/eval_rag/financebench/confirmation_result.json`. Details:
 [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md).
 
+Candidate-pool / Qwen3 A/B/C on exposed test-100 is **RECORDED**
+(2026-08-17, tag `financebench-candidate-pool-ablation-v1`). It is post-hoc,
+not held-out, and **not** a production change. Keep arm A in production.
+Do not retune on test-100 and do not rerun the scoring directory. Aggregate:
+`data/eval_rag/financebench/candidate_pool_ablation_result.json`.
+
 Offline harness smoke (no confirmation-50 rerun, no remote providers).
 `--split confirmation` and `--split dev` are the consumed confirmation set;
 do **not** run them, including with `--limit 2`. Use unit tests / synthetic
@@ -123,7 +129,8 @@ python -m unittest `
   tests.test_financebench_metrics `
   tests.test_financebench_retrieval_eval `
   tests.test_financebench_frozen `
-  tests.test_financebench_confirmation_result -v
+  tests.test_financebench_confirmation_result `
+  tests.test_financebench_candidate_pool_ablation_result -v
 python scripts/run_financebench_retrieval_eval.py --dataset-dir <checkout> --split test --mode bm25 --limit 2
 ```
 

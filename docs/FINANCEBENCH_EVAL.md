@@ -455,6 +455,7 @@ prompt version recorded.
 | Company-scope post-hoc diagnostic on test-100 | **recorded** 2026-08-16; post-hoc; dirty tree |
 | Frozen config used for confirmation | `data/eval_rag/financebench/frozen_config.json`; hash `18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7`; tag `financebench-confirmation-v1` |
 | Confirmation-50 (formerly dev-50) | **RECORDED** 2026-08-16; one-shot unseen at execution; now consumed/exposed; Hit@5 0.50, Hit@10 0.62, MRR 0.2955, nDCG@10 0.3461; **not** product accuracy; retune forbidden |
+| Candidate-pool / Qwen3 A/B/C on exposed test-100 | **RECORDED** 2026-08-17; post-hoc diagnostic; config hash `d0370c073be46fc42c2c6dded458182e3332e644666388b7111265d9b40e7bbd`; C is next-generation candidate only; production stays A; retune on test-100 forbidden |
 | Phase 4 end-to-end answer metrics | `NOT_RUN` |
 
 Do not copy synthetic gate scores **or** these FinanceBench page-level rows
@@ -563,6 +564,39 @@ must use `outputs/financebench_candidate_depth_test100_v2_preflight2/`.
 This is a post-hoc diagnostic on the already-exposed test-100. It is not
 held-out, not product accuracy, and not a new FinanceBench score. Production
 retriever defaults stay unchanged.
+
+**Status: `RECORDED`.** Aggregate (git-tracked, no raw questions/qrels/per-case):
+`data/eval_rag/financebench/candidate_pool_ablation_result.json`.
+Raw outputs and the copied Milvus index remain gitignored under
+`outputs/financebench_candidate_pool_ablation_test100/` and
+`outputs/financebench_candidate_pool_ablation_test100_preflight/`.
+
+Flags in the sealed aggregate:
+
+- `exposed_test_post_hoc=true`
+- `production_change_authorized=false`
+- `retuning_on_test100_forbidden=true`
+
+Recorded conclusions (do not retune from them):
+
+- B is not worth adopting: deeper 50+50 retrieval with rerank still 20 does
+  not beat A.
+- C is the diagnostic best on this exposed set (Hit@5 0.48→0.53; 5/25
+  rank-11–30 rescues) but Hit@10 / MRR / nDCG gains are not a stable overall
+  win versus A.
+- C costs more: about +42% mean Qwen3 tokens and about +16% P50 rerank
+  latency versus A (`rerank_latency_ms` is Qwen3-only, not e2e).
+- C moves more gold into the rerank pool, then leaves 11 questions in-pool
+  but out of final Top-10. The bottleneck is shifting from recall to reranker
+  ranking.
+- Arm C is a **next-generation candidate configuration**, not an authorized
+  production default. Keep production A. Do not change `frozen_config.json`.
+- test-100 is exposed and confirmation-50 is consumed. Further work needs a
+  new unseen dataset or a new internal holdout, focused on reranker ranking,
+  page diversity, and section/parent retrieval — not a larger candidate pool
+  on this split.
+
+Do not rerun the scoring directory. Do not delete it and start over.
 
 Locked real-CLI directories:
 
