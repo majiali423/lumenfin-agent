@@ -535,6 +535,15 @@ python scripts/run_financebench_retrieval_eval.py `
 
 Do not retune from that result. Further system changes need a new dataset.
 
+Confirmation-50 was recorded under the previous narrative chunker, which did
+**not** implement sliding-window overlap (`overlap_chars` stripped a prefix
+instead of sharing a suffix/prefix). A later chunker fix changes indexed
+text. Post-fix retrieval numbers are a **new system**, not a re-run of the
+frozen confirmation. Do not rewrite `frozen_config.json` or treat those
+scores as the same freeze. The harness can still run (`--split confirmation`
+remains protected; test-100 remains diagnostic only). Confirmation-50 is no
+longer unseen.
+
 ## License
 
 FinanceBench is CC-BY-NC-4.0. LumenFin does not relicense or vend the PDFs.

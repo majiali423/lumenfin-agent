@@ -71,8 +71,13 @@ def _split_paragraphs(text: str) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip()]
 
 
-def _merge_small_chunks(parts: list[str], max_chars: int) -> list[str]:
-    merged: list[str] = []
+def _merge_small_chunks(
+    parts: list[str],
+    max_chars: int,
+    overlap_chars: int = 0,
+) -> list[str]:
+    overlap = _clamp_overlap(max_chars, overlap_chars)
+    packed: list[str] = []
     buffer = ""
     for part in parts:
         candidate = f"{buffer}\n\n{part}".strip() if buffer else part
@@ -80,16 +85,69 @@ def _merge_small_chunks(parts: list[str], max_chars: int) -> list[str]:
             buffer = candidate
             continue
         if buffer:
-            merged.append(buffer)
+            packed.append(buffer)
         if len(part) <= max_chars:
             buffer = part
         else:
-            for start in range(0, len(part), max_chars):
-                merged.append(part[start : start + max_chars])
+            packed.append(part)
             buffer = ""
     if buffer:
-        merged.append(buffer)
-    return merged
+        packed.append(buffer)
+    return _with_bounded_overlap(packed, max_chars, overlap)
+
+
+def _clamp_overlap(max_chars: int, overlap_chars: int) -> int:
+    if max_chars <= 1 or overlap_chars <= 0:
+        return 0
+    return min(int(overlap_chars), max_chars - 1)
+
+
+def _sliding_windows(text: str, max_chars: int, overlap_chars: int) -> list[str]:
+    if not text:
+        return []
+    overlap = _clamp_overlap(max_chars, overlap_chars)
+    if len(text) <= max_chars:
+        return [text]
+    step = max(1, max_chars - overlap)
+    windows: list[str] = []
+    start = 0
+    while start < len(text):
+        windows.append(text[start : start + max_chars])
+        if start + max_chars >= len(text):
+            break
+        start += step
+    return windows
+
+
+def _with_bounded_overlap(windows: list[str], max_chars: int, overlap_chars: int) -> list[str]:
+    """Share suffix/prefix across packed windows without exceeding ``max_chars``.
+
+    Oversize paragraphs are split with a bounded sliding window. Adjacent packed
+    paragraphs that do not already share a tail keep a paragraph separator and
+    are then windowed so every emitted chunk is ``<= max_chars``. Sliding
+    windows that already start with the previous tail are left unchanged so
+    overlap is not applied twice.
+    """
+    overlap = _clamp_overlap(max_chars, overlap_chars)
+    overlapped: list[str] = []
+    for window in windows:
+        if not overlapped:
+            overlapped.extend(_sliding_windows(window, max_chars, overlap))
+            continue
+        if overlap <= 0:
+            overlapped.extend(_sliding_windows(window, max_chars, overlap))
+            continue
+        previous = overlapped[-1]
+        tail = previous[-overlap:] if len(previous) >= overlap else previous
+        if tail and window.startswith(tail):
+            overlapped.extend(_sliding_windows(window, max_chars, overlap))
+            continue
+        stream = f"{tail}\n\n{window}" if tail else window
+        for piece in _sliding_windows(stream, max_chars, overlap):
+            if piece == previous:
+                continue
+            overlapped.append(piece)
+    return overlapped
 
 
 def _normalize_company_token(token: str) -> str | None:
@@ -431,6 +489,12 @@ def chunk_document(
     for Apple does not reuse the same Microsoft row text (and vice versa).
     Issuer companies (primary entity) are preferred for chunk tags; body peer
     mentions alone do not expand live-lookup scope.
+
+    Narrative pages use bounded character overlap: consecutive windows share a
+    suffix/prefix of up to ``overlap_chars``, and every narrative chunk stays
+    ``<= max_chunk_chars``. ``overlap_chars >= max_chunk_chars`` is clamped to
+    ``max_chunk_chars - 1``. Table rows and compact financial fact chunks are
+    not overlapped, so company-isolated rows stay isolated.
     """
     pages: list[str] = document.get("pages") or []
     if not pages and document.get("text"):
@@ -453,7 +517,11 @@ def chunk_document(
         if table_parts:
             paragraphs = table_parts
         else:
-            merged = _merge_small_chunks(_split_paragraphs(page_text), max_chunk_chars)
+            merged = _merge_small_chunks(
+                _split_paragraphs(page_text),
+                max_chunk_chars,
+                overlap_chars,
+            )
             paragraphs = []
             for paragraph in merged:
                 tagged = _companies_in_text(paragraph, tag_pool) or list(issuers) or tag_pool
@@ -465,13 +533,6 @@ def chunk_document(
                 paragraph, chunk_companies = item
             else:
                 paragraph, chunk_companies = item, tag_pool
-            if (
-                not table_parts
-                and overlap_chars
-                and chunk_index > 0
-                and len(paragraph) > overlap_chars
-            ):
-                paragraph = paragraph[max(0, overlap_chars // 2) :]
             chunk_id = f"{document_id}:p{page_number}:c{chunk_index}"
             chunks.append(
                 {
