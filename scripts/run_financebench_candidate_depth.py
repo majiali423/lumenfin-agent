@@ -28,6 +28,7 @@ from lumenfin.eval.financebench.index_inspect import IndexIncompatibleError
 from lumenfin.eval.financebench.index_session import (
     IndexSessionError,
     LOCKED_OUTPUT_DIRNAME,
+    LOCKED_PREFLIGHT_OUTPUT_DIRNAME,
     SOURCE_INDEX_SESSION_ID,
 )
 from lumenfin.eval.financebench.retrieval import RemoteEvalBlocked
@@ -63,7 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-dir",
-        default=str(ROOT / "outputs" / LOCKED_OUTPUT_DIRNAME),
+        default=None,
+        help=(
+            "Output directory. Defaults to "
+            f"outputs/{LOCKED_PREFLIGHT_OUTPUT_DIRNAME}/ for --preflight-only, "
+            f"otherwise outputs/{LOCKED_OUTPUT_DIRNAME}/."
+        ),
     )
     return parser
 
@@ -73,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     bootstrap_dotenv(root=ROOT, announce=False, strict_conflicts=True)
     parser = build_parser()
     args = parser.parse_args(argv)
+    output_dir = args.output_dir
+    if not output_dir:
+        if args.preflight_only:
+            output_dir = str(ROOT / "outputs" / LOCKED_PREFLIGHT_OUTPUT_DIRNAME)
+        else:
+            output_dir = str(ROOT / "outputs" / LOCKED_OUTPUT_DIRNAME)
     try:
         validate_candidate_depth_request(
             split=args.split,
@@ -84,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             embedding_model=LOCKED_EMBEDDING_MODEL,
             session_id=SOURCE_INDEX_SESSION_ID,
             preflight_only=bool(args.preflight_only),
-            output_dir=args.output_dir,
+            output_dir=output_dir,
             repo_root=ROOT,
         )
         if not args.preflight_only:
@@ -93,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"DASHSCOPE_API_KEY source={report.source}", flush=True)
         results = run_candidate_depth_diagnostic(
             dataset_dir=args.dataset_dir,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
             repo_root=ROOT,
             split=args.split,
             confirm_exposed_diagnostic=bool(args.confirm_exposed_diagnostic),
@@ -116,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if results.get("status") == "PREFLIGHT_OK":
         print("[candidate-depth] PREFLIGHT_OK", flush=True)
-        print(f"Wrote {Path(args.output_dir) / 'preflight.json'}", flush=True)
+        print(f"Wrote {Path(output_dir) / 'preflight.json'}", flush=True)
         return 0
 
     summary = results.get("summary") or {}
@@ -128,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         f"role={results.get('experiment_role')}",
         flush=True,
     )
-    print(f"Wrote {Path(args.output_dir) / 'summary.json'}", flush=True)
+    print(f"Wrote {Path(output_dir) / 'summary.json'}", flush=True)
     return 0
 
 

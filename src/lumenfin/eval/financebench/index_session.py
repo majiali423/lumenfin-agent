@@ -16,10 +16,13 @@ from .index_inspect import (
     SOURCE_INDEX_SESSION_ID,
     SOURCE_INDEX_TENANT_ID,
 )
+
 FORBIDDEN_QUERY_SESSION_ID = "financebench-candidate-depth"
 PREVIOUS_ATTEMPT_STATUS = "INVALID_SESSION_FILTER"
 FIRST_ATTEMPT_OUTPUT_DIRNAME = "financebench_candidate_depth_test100"
 LOCKED_OUTPUT_DIRNAME = "financebench_candidate_depth_test100_v2"
+FAILED_PREFLIGHT_OUTPUT_DIRNAME = "financebench_candidate_depth_test100_v2_preflight"
+LOCKED_PREFLIGHT_OUTPUT_DIRNAME = "financebench_candidate_depth_test100_v2_preflight2"
 EMPTY_RETRIEVAL_FAIL_FAST = 3
 DEFAULT_CANARY_COMPANIES = ("3M", "Apple", "Microsoft")
 _SAMPLE_OUTPUT_FIELDS = (
@@ -93,6 +96,43 @@ def _query_rows(
     return list(rows or [])
 
 
+def _load_copied_collection(client: Any, collection_name: str) -> None:
+    try:
+        loader = getattr(client, "load_collection", None)
+        if not callable(loader):
+            raise IndexSessionError(
+                f"copied index client cannot load collection {collection_name}"
+            )
+        loader(collection_name)
+    except IndexSessionError:
+        raise
+    except Exception as exc:
+        raise IndexSessionError(
+            f"failed to load copied collection {collection_name}: {exc}"
+        ) from exc
+
+
+def _best_effort_release(client: Any, collection_name: str) -> bool:
+    releaser = getattr(client, "release_collection", None)
+    if not callable(releaser):
+        return False
+    try:
+        releaser(collection_name)
+        return True
+    except Exception:
+        return False
+
+
+def _best_effort_close(client: Any) -> None:
+    closer = getattr(client, "close", None)
+    if not callable(closer):
+        return
+    try:
+        closer()
+    except Exception:
+        return
+
+
 def verify_copied_index_scope(
     *,
     uri: str,
@@ -103,9 +143,17 @@ def verify_copied_index_scope(
     canary_companies: tuple[str, ...] = DEFAULT_CANARY_COMPANIES,
     client: Any | None = None,
 ) -> dict[str, Any]:
-    """Read-only Milvus query canary. Does not embed queries or mutate the index."""
+    """Canary against the copied Milvus index.
+
+    Loads the copied collection before query/search/get. Does not embed
+    queries. Operates only on the copied index and does not modify the
+    source index. Load/release change copied-collection runtime state.
+    """
     owns_client = False
     work = client
+    loaded = False
+    released = False
+    result: dict[str, Any] | None = None
     if work is None:
         from pymilvus import MilvusClient
 
@@ -115,6 +163,8 @@ def verify_copied_index_scope(
         names = [str(item) for item in (work.list_collections() or [])]
         if collection_name not in names:
             raise IndexSessionError(f"copied index is missing collection {collection_name}")
+        _load_copied_collection(work, collection_name)
+        loaded = True
         row_count = _live_row_count(work, collection_name)
         if row_count <= 0:
             raise IndexSessionError("copied index live row count is 0")
@@ -171,7 +221,7 @@ def verify_copied_index_scope(
                 "company metadata canary returned no rows for "
                 + ", ".join(canary_companies)
             )
-        return {
+        result = {
             "uri": uri,
             "collection_name": collection_name,
             "row_count": row_count,
@@ -179,11 +229,18 @@ def verify_copied_index_scope(
             "tenant_id": expected_tenant_id,
             "canary_company": canary_company,
             "opened_milvus_client": True,
-            "modified_index": False,
+            "modified_source_index": False,
+            "operated_on_copied_index_only": True,
+            "collection_loaded": True,
+            "collection_released_after_check": False,
             "query_embedding_calls": 0,
         }
+        return result
     finally:
+        if loaded:
+            released = _best_effort_release(work, collection_name)
+        if result is not None:
+            result["collection_loaded"] = True
+            result["collection_released_after_check"] = released
         if owns_client:
-            closer = getattr(work, "close", None)
-            if callable(closer):
-                closer()
+            _best_effort_close(work)

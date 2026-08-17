@@ -51,7 +51,11 @@ from lumenfin.eval.financebench.index_inspect import (
     require_compatible_index,
 )
 from lumenfin.eval.financebench.index_session import (
+    FAILED_PREFLIGHT_OUTPUT_DIRNAME,
     FORBIDDEN_QUERY_SESSION_ID,
+    IndexSessionError,
+    LOCKED_OUTPUT_DIRNAME,
+    LOCKED_PREFLIGHT_OUTPUT_DIRNAME,
     PREVIOUS_ATTEMPT_STATUS,
     resolve_query_session_id,
     verify_copied_index_scope,
@@ -259,6 +263,14 @@ class DepthStore:
             raise AssertionError(f"expected top_k={DIAGNOSTIC_CANDIDATE_K}, got {kwargs.get('top_k')}")
 
 
+class FakeReleasedCollectionError(RuntimeError):
+    def __init__(self, collection_name: str = "financebench_eval") -> None:
+        super().__init__(
+            f"Collection '{collection_name}' is in state 'released'; "
+            "call load() before search/get/query"
+        )
+
+
 class FakeIndexClient:
     def __init__(
         self,
@@ -269,6 +281,9 @@ class FakeIndexClient:
         tenant_hits: bool = True,
         company_hits: bool = True,
         collections: list[str] | None = None,
+        load_ok: bool = True,
+        release_ok: bool = True,
+        require_load: bool = True,
     ) -> None:
         self.row_count = row_count
         self.sample = sample or [
@@ -284,15 +299,46 @@ class FakeIndexClient:
         self.tenant_hits = tenant_hits
         self.company_hits = company_hits
         self.collections = collections or ["financebench_eval"]
+        self.load_ok = load_ok
+        self.release_ok = release_ok
+        self.require_load = require_load
+        self.loaded = False
         self.queries: list[str] = []
+        self.calls: list[str] = []
+        self.load_calls = 0
+        self.release_calls = 0
+        self.close_calls = 0
+
+    def _require_loaded(self, collection_name: str) -> None:
+        if self.require_load and not self.loaded:
+            raise FakeReleasedCollectionError(collection_name)
 
     def list_collections(self) -> list[str]:
+        self.calls.append("list")
         return list(self.collections)
 
-    def get_collection_stats(self, _name: str) -> dict[str, int]:
+    def load_collection(self, collection_name: str) -> None:
+        self.calls.append("load")
+        self.load_calls += 1
+        if not self.load_ok:
+            raise RuntimeError(f"simulated load failure for {collection_name}")
+        self.loaded = True
+
+    def release_collection(self, collection_name: str) -> None:
+        self.calls.append("release")
+        self.release_calls += 1
+        if not self.release_ok:
+            raise RuntimeError(f"simulated release failure for {collection_name}")
+        self.loaded = False
+
+    def get_collection_stats(self, name: str) -> dict[str, int]:
+        self.calls.append("stats")
+        self._require_loaded(name)
         return {"row_count": self.row_count}
 
     def query(self, collection_name, filter="", output_fields=None, limit=1):
+        self.calls.append("query")
+        self._require_loaded(str(collection_name))
         self.queries.append(str(filter or ""))
         expr = str(filter or "")
         if expr.strip() in {"", "id >= 0"}:
@@ -305,8 +351,21 @@ class FakeIndexClient:
             return list(self.sample) if self.session_hits else []
         return list(self.sample)
 
+    def insert(self, *args, **kwargs):
+        raise AssertionError("copied-index canary must not insert into the index")
+
+    def upsert(self, *args, **kwargs):
+        raise AssertionError("copied-index canary must not upsert the index")
+
+    def delete(self, *args, **kwargs):
+        raise AssertionError("copied-index canary must not delete index rows")
+
+    def drop_collection(self, *args, **kwargs):
+        raise AssertionError("copied-index canary must not drop collections")
+
     def close(self) -> None:
-        return None
+        self.calls.append("close")
+        self.close_calls += 1
 
 
 class FinanceBenchCandidateDepthTests(unittest.TestCase):
@@ -1032,7 +1091,7 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             eval_db = _write_compatible_index(repo)
-            out = repo / "outputs" / "financebench_candidate_depth_test100_v2"
+            out = repo / "outputs" / LOCKED_PREFLIGHT_OUTPUT_DIRNAME
             with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
                 with patch(
                     "lumenfin.eval.financebench.retrieval._qwen3_reranker",
@@ -1060,6 +1119,12 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
             self.assertFalse((out / "summary.json").is_file())
             self.assertFalse((out / "per_case.jsonl").is_file())
             self.assertEqual(report["source_index"]["session_id"], SOURCE_INDEX_SESSION_ID)
+            scope = report["scope_check"]
+            self.assertTrue(scope["collection_loaded"])
+            self.assertTrue(scope["collection_released_after_check"])
+            self.assertEqual(scope["query_embedding_calls"], 0)
+            self.assertTrue(scope["operated_on_copied_index_only"])
+            self.assertFalse(scope["modified_source_index"])
 
     def test_empty_prefix_fail_fast_does_not_record_scores(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1144,6 +1209,11 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
         run.assert_called_once()
         self.assertTrue(run.call_args.kwargs.get("preflight_only"))
         self.assertEqual(run.call_args.kwargs.get("session_id"), SOURCE_INDEX_SESSION_ID)
+        self.assertTrue(
+            str(run.call_args.kwargs.get("output_dir")).replace("\\", "/").endswith(
+                f"outputs/{LOCKED_PREFLIGHT_OUTPUT_DIRNAME}"
+            )
+        )
 
     def test_live_verify_detects_wrong_sample_session(self) -> None:
         client = FakeIndexClient(
@@ -1163,6 +1233,163 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
                 expected_session_id=SOURCE_INDEX_SESSION_ID,
                 expected_tenant_id=SOURCE_INDEX_TENANT_ID,
                 client=client,
+            )
+
+    def test_verify_loads_collection_before_query(self) -> None:
+        client = FakeIndexClient()
+        report = verify_copied_index_scope(
+            uri="copied://eval.db",
+            expected_session_id=SOURCE_INDEX_SESSION_ID,
+            expected_tenant_id=SOURCE_INDEX_TENANT_ID,
+            client=client,
+        )
+        self.assertGreater(client.load_calls, 0)
+        self.assertIn("load", client.calls)
+        self.assertLess(client.calls.index("load"), client.calls.index("stats"))
+        self.assertLess(client.calls.index("load"), client.calls.index("query"))
+        self.assertTrue(report["collection_loaded"])
+        self.assertTrue(report["collection_released_after_check"])
+        self.assertEqual(report["query_embedding_calls"], 0)
+        self.assertEqual(report["canary_company"], "3M")
+        self.assertEqual(client.close_calls, 0)
+
+    def test_unloaded_fake_client_raises_released(self) -> None:
+        client = FakeIndexClient()
+        with self.assertRaisesRegex(FakeReleasedCollectionError, "released"):
+            client.query("financebench_eval", filter="id >= 0")
+        self.assertEqual(client.load_calls, 0)
+
+    def test_load_failure_stops_before_query_and_remote(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            eval_db = _write_compatible_index(repo)
+            store = DepthStore([], [])
+            client = FakeIndexClient(load_ok=False)
+            with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
+                with patch(
+                    "lumenfin.eval.financebench.retrieval._qwen3_reranker",
+                    side_effect=AssertionError("Qwen3 must not run"),
+                ):
+                    with self.assertRaisesRegex(CandidateDepthError, "failed to load"):
+                        run_candidate_depth_diagnostic(
+                            dataset_dir=repo,
+                            output_dir=repo / "outputs" / LOCKED_OUTPUT_DIRNAME,
+                            repo_root=repo,
+                            split="test",
+                            confirm_exposed_diagnostic=True,
+                            allow_remote=True,
+                            embedding_provider="dashscope",
+                            skip_index_copy=True,
+                            store=store,
+                            index_inspection=self._compat_inspection(eval_db),
+                            index_query_client=client,
+                            require_clean_worktree=False,
+                        )
+            self.assertEqual(client.load_calls, 1)
+            self.assertEqual(client.queries, [])
+            self.assertNotIn("query", client.calls)
+            self.assertNotIn("stats", client.calls)
+            self.assertEqual(store.bm25_calls, 0)
+            self.assertEqual(store.vector_calls, 0)
+            self.assertEqual(client.close_calls, 0)
+
+    def test_load_success_runs_canaries(self) -> None:
+        client = FakeIndexClient()
+        report = verify_copied_index_scope(
+            uri="copied://eval.db",
+            expected_session_id=SOURCE_INDEX_SESSION_ID,
+            expected_tenant_id=SOURCE_INDEX_TENANT_ID,
+            client=client,
+        )
+        self.assertEqual(report["row_count"], EXPECTED_CHUNKS)
+        self.assertEqual(report["session_id"], SOURCE_INDEX_SESSION_ID)
+        self.assertEqual(report["tenant_id"], SOURCE_INDEX_TENANT_ID)
+        self.assertEqual(report["canary_company"], "3M")
+        self.assertTrue(any("session_id" in item for item in client.queries))
+        self.assertTrue(any("tenant_id" in item for item in client.queries))
+        self.assertTrue(any("companies" in item or " like " in item for item in client.queries))
+
+    def test_release_runs_in_finally(self) -> None:
+        client = FakeIndexClient()
+        verify_copied_index_scope(
+            uri="copied://eval.db",
+            expected_session_id=SOURCE_INDEX_SESSION_ID,
+            expected_tenant_id=SOURCE_INDEX_TENANT_ID,
+            client=client,
+        )
+        self.assertEqual(client.release_calls, 1)
+        self.assertEqual(client.calls[-1], "release")
+        self.assertFalse(client.loaded)
+
+    def test_release_failure_does_not_override_primary_error(self) -> None:
+        client = FakeIndexClient(
+            release_ok=False,
+            sample=[
+                {
+                    "session_id": FORBIDDEN_QUERY_SESSION_ID,
+                    "tenant_id": SOURCE_INDEX_TENANT_ID,
+                    "companies": "3M",
+                    "primary_company": "3M",
+                    "document_id": "3M_2022_10K",
+                }
+            ],
+        )
+        with self.assertRaises(IndexSessionError) as caught:
+            verify_copied_index_scope(
+                uri="copied://eval.db",
+                expected_session_id=SOURCE_INDEX_SESSION_ID,
+                expected_tenant_id=SOURCE_INDEX_TENANT_ID,
+                client=client,
+            )
+        self.assertIn("session_id", str(caught.exception))
+        self.assertNotIn("release", str(caught.exception))
+        self.assertEqual(client.release_calls, 1)
+        self.assertEqual(client.close_calls, 0)
+
+    def test_injected_client_is_not_closed(self) -> None:
+        client = FakeIndexClient()
+        verify_copied_index_scope(
+            uri="copied://eval.db",
+            client=client,
+        )
+        self.assertEqual(client.close_calls, 0)
+
+    def test_source_index_is_not_opened_when_client_injected(self) -> None:
+        client = FakeIndexClient()
+        with patch(
+            "pymilvus.MilvusClient",
+            side_effect=AssertionError("source index must not be opened"),
+        ):
+            report = verify_copied_index_scope(
+                uri="outputs/financebench_eval_company/index-7c25ac4b/eval.db",
+                client=client,
+            )
+        self.assertTrue(report["operated_on_copied_index_only"])
+        self.assertFalse(report["modified_source_index"])
+        self.assertEqual(report["query_embedding_calls"], 0)
+
+    def test_failed_preflight_dir_is_rejected(self) -> None:
+        with self.assertRaisesRegex(CandidateDepthError, "failed preflight"):
+            validate_candidate_depth_request(
+                split="test",
+                confirm_exposed_diagnostic=True,
+                allow_remote=False,
+                embedding_provider="dashscope",
+                preflight_only=True,
+                output_dir=ROOT / "outputs" / FAILED_PREFLIGHT_OUTPUT_DIRNAME,
+                repo_root=ROOT,
+            )
+
+    def test_preflight_refuses_scoring_output_dir(self) -> None:
+        with self.assertRaisesRegex(CandidateDepthError, "scoring directory"):
+            validate_candidate_depth_request(
+                split="test",
+                confirm_exposed_diagnostic=True,
+                allow_remote=False,
+                embedding_provider="dashscope",
+                preflight_only=True,
+                output_dir=ROOT / "outputs" / LOCKED_OUTPUT_DIRNAME,
+                repo_root=ROOT,
             )
 
     def test_production_retriever_is_not_used_for_candidate_lists(self) -> None:

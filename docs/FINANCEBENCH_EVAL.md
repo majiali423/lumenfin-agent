@@ -552,6 +552,12 @@ filter mismatch, not a retrieval-quality result. Do not copy them into
 benchmark tables. A later valid run must use a new directory
 (`outputs/financebench_candidate_depth_test100_v2/`).
 
+Candidate-depth preflight attempt 1
+(`outputs/financebench_candidate_depth_test100_v2_preflight/`) is **invalid**:
+copied collection was released before query. Do not treat that directory as
+`PREFLIGHT_OK` and do not write retrieval scores from it. A later preflight
+must use `outputs/financebench_candidate_depth_test100_v2_preflight2/`.
+
 ## License
 
 FinanceBench is CC-BY-NC-4.0. LumenFin does not relicense or vend the PDFs.

@@ -35,9 +35,11 @@ from .index_inspect import (
 from .index_session import (
     DEFAULT_CANARY_COMPANIES,
     EMPTY_RETRIEVAL_FAIL_FAST,
+    FAILED_PREFLIGHT_OUTPUT_DIRNAME,
     FIRST_ATTEMPT_OUTPUT_DIRNAME,
     FORBIDDEN_QUERY_SESSION_ID,
     LOCKED_OUTPUT_DIRNAME,
+    LOCKED_PREFLIGHT_OUTPUT_DIRNAME,
     PREVIOUS_ATTEMPT_STATUS,
     SOURCE_INDEX_SESSION_ID,
     IndexSessionError,
@@ -112,10 +114,28 @@ def _directory_has_entries(path: Path) -> bool:
     return True
 
 
-def is_first_attempt_output_path(path: Path, *, repo_root: Path) -> bool:
+def _is_named_output_path(path: Path, *, repo_root: Path, dirname: str) -> bool:
     resolved = Path(path).expanduser().resolve()
-    first = (Path(repo_root) / "outputs" / FIRST_ATTEMPT_OUTPUT_DIRNAME).resolve()
-    return resolved == first or first in resolved.parents
+    target = (Path(repo_root) / "outputs" / dirname).resolve()
+    return resolved == target or target in resolved.parents
+
+
+def is_first_attempt_output_path(path: Path, *, repo_root: Path) -> bool:
+    return _is_named_output_path(
+        path, repo_root=repo_root, dirname=FIRST_ATTEMPT_OUTPUT_DIRNAME
+    )
+
+
+def is_failed_preflight_output_path(path: Path, *, repo_root: Path) -> bool:
+    return _is_named_output_path(
+        path, repo_root=repo_root, dirname=FAILED_PREFLIGHT_OUTPUT_DIRNAME
+    )
+
+
+def is_scoring_output_path(path: Path, *, repo_root: Path) -> bool:
+    return _is_named_output_path(
+        path, repo_root=repo_root, dirname=LOCKED_OUTPUT_DIRNAME
+    )
 
 
 def both_channels_empty(lists: dict[str, list[dict[str, Any]]]) -> bool:
@@ -219,6 +239,16 @@ def validate_candidate_depth_request(
         raise CandidateDepthError(
             f"refusing to reuse invalid attempt-1 directory {output_dir}; "
             f"use outputs/{LOCKED_OUTPUT_DIRNAME}/"
+        )
+    if is_failed_preflight_output_path(Path(output_dir), repo_root=Path(repo_root)):
+        raise CandidateDepthError(
+            f"refusing to reuse failed preflight directory {output_dir}; "
+            f"use outputs/{LOCKED_PREFLIGHT_OUTPUT_DIRNAME}/"
+        )
+    if preflight_only and is_scoring_output_path(Path(output_dir), repo_root=Path(repo_root)):
+        raise CandidateDepthError(
+            f"refusing to write preflight into the scoring directory {output_dir}; "
+            f"use outputs/{LOCKED_PREFLIGHT_OUTPUT_DIRNAME}/"
         )
 
 
@@ -889,8 +919,10 @@ def _write_preflight_report(
             "worktree_dirty": bool(code_snapshot.get("worktree_dirty")),
         },
         "disclaimer": (
-            "Preflight only. Not a FinanceBench score. Attempt 1 invalid: "
-            "source-index session mismatch."
+            "Preflight only. Operates on the copied index only and does not "
+            "modify the source index. Not a FinanceBench score. Attempt 1 "
+            "invalid: source-index session mismatch. Preflight attempt 1 "
+            "invalid: copied collection was released before query."
         ),
     }
     write_json(out / "preflight.json", report)
