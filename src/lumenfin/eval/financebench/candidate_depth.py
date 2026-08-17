@@ -32,6 +32,19 @@ from .index_inspect import (
     is_historical_output_path,
     require_compatible_index,
 )
+from .index_session import (
+    DEFAULT_CANARY_COMPANIES,
+    EMPTY_RETRIEVAL_FAIL_FAST,
+    FIRST_ATTEMPT_OUTPUT_DIRNAME,
+    FORBIDDEN_QUERY_SESSION_ID,
+    LOCKED_OUTPUT_DIRNAME,
+    PREVIOUS_ATTEMPT_STATUS,
+    SOURCE_INDEX_SESSION_ID,
+    IndexSessionError,
+    resolve_query_session_id,
+    resolve_source_scope,
+    verify_copied_index_scope,
+)
 from .loader import load_financebench_dataset, normalize_doc_name
 from .metrics import hit_at_k, mean, mean_reciprocal_rank
 from .qrels import gold_pages_for, retrieved_page_keys
@@ -81,6 +94,14 @@ class CandidateDepthError(ValueError):
     """Raised when the diagnostic CLI/request is invalid."""
 
 
+class InvalidEmptyRetrievalError(CandidateDepthError):
+    """Raised when the first questions return empty BM25 and Dense lists."""
+
+    def __init__(self, message: str, *, query_embedding_calls: int = 0) -> None:
+        super().__init__(message)
+        self.query_embedding_calls = int(query_embedding_calls)
+
+
 def _directory_has_entries(path: Path) -> bool:
     if not path.is_dir():
         return False
@@ -89,6 +110,16 @@ def _directory_has_entries(path: Path) -> bool:
     except StopIteration:
         return False
     return True
+
+
+def is_first_attempt_output_path(path: Path, *, repo_root: Path) -> bool:
+    resolved = Path(path).expanduser().resolve()
+    first = (Path(repo_root) / "outputs" / FIRST_ATTEMPT_OUTPUT_DIRNAME).resolve()
+    return resolved == first or first in resolved.parents
+
+
+def both_channels_empty(lists: dict[str, list[dict[str, Any]]]) -> bool:
+    return not list(lists.get("bm25") or []) and not list(lists.get("dense") or [])
 
 
 def require_fresh_output_dir(output_dir: str | Path) -> None:
@@ -131,6 +162,8 @@ def validate_candidate_depth_request(
     bm25_rrf_weight: float = LOCKED_BM25_RRF_WEIGHT,
     dense_rrf_weight: float = LOCKED_DENSE_RRF_WEIGHT,
     embedding_model: str = LOCKED_EMBEDDING_MODEL,
+    session_id: str = SOURCE_INDEX_SESSION_ID,
+    preflight_only: bool = False,
 ) -> None:
     raw = str(split or "").strip().lower()
     if raw in {"dev", "confirmation"}:
@@ -162,14 +195,30 @@ def validate_candidate_depth_request(
         raise CandidateDepthError(
             f"unsupported embedding_provider {embedding_provider!r}; real runs use dashscope"
         )
-    require_allow_remote(
-        mode="dense",
-        embedding_provider=embedding_provider,
-        allow_remote=allow_remote,
-    )
+    requested_session = str(session_id or "").strip()
+    if requested_session == FORBIDDEN_QUERY_SESSION_ID:
+        raise CandidateDepthError(
+            "refusing query session_id 'financebench-candidate-depth'; "
+            f"historical index was written with {SOURCE_INDEX_SESSION_ID}"
+        )
+    if requested_session and requested_session != SOURCE_INDEX_SESSION_ID:
+        raise CandidateDepthError(
+            f"candidate-depth diagnostic is locked to session_id={SOURCE_INDEX_SESSION_ID}"
+        )
+    if not preflight_only:
+        require_allow_remote(
+            mode="dense",
+            embedding_provider=embedding_provider,
+            allow_remote=allow_remote,
+        )
     if is_historical_output_path(Path(output_dir), repo_root=Path(repo_root)):
         raise CandidateDepthError(
             f"refusing to write into historical FinanceBench directory {output_dir}"
+        )
+    if is_first_attempt_output_path(Path(output_dir), repo_root=Path(repo_root)):
+        raise CandidateDepthError(
+            f"refusing to reuse invalid attempt-1 directory {output_dir}; "
+            f"use outputs/{LOCKED_OUTPUT_DIRNAME}/"
         )
 
 
@@ -787,6 +836,106 @@ def _zero_chunk_names(index_report: dict[str, Any]) -> set[str]:
     return {normalize_doc_name(str(name)) for name in index_report.get("zero_chunk_documents") or []}
 
 
+def _source_index_fields(
+    selected: dict[str, Any],
+    *,
+    session_id: str,
+    tenant_id: str,
+) -> dict[str, Any]:
+    return {
+        "commit": selected.get("source_index_commit") or SOURCE_INDEX_COMMIT,
+        "worktree_dirty": selected.get("source_index_worktree_dirty", SOURCE_INDEX_WORKTREE_DIRTY),
+        "chunker": selected.get("source_index_chunker") or SOURCE_INDEX_CHUNKER,
+        "session_id": session_id,
+        "tenant_id": tenant_id,
+        "schema_sha256": selected.get("source_schema_sha256") or "",
+        "collection_manifest_sha256": selected.get("source_collection_manifest_sha256") or "",
+        "not_current_chunker": True,
+        "previous_attempt_status": PREVIOUS_ATTEMPT_STATUS,
+    }
+
+
+def _write_preflight_report(
+    out: Path,
+    *,
+    selected: dict[str, Any],
+    copied_uri: str,
+    query_session_id: str,
+    tenant_id: str,
+    scope_check: dict[str, Any],
+    code_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    out.mkdir(parents=True, exist_ok=True)
+    report = {
+        "schema_version": DIAGNOSTIC_SCHEMA,
+        "status": "PREFLIGHT_OK",
+        "split": LOCKED_SPLIT,
+        "held_out": False,
+        "product_accuracy_claim": False,
+        "qwen3_calls": 0,
+        "chunk_reembed_calls": 0,
+        "query_embedding_calls": 0,
+        "query_embedding_calls_expected": 0,
+        "cases": 0,
+        "index_uri_original": selected.get("uri"),
+        "index_uri_copy": copied_uri,
+        "query_session_id": query_session_id,
+        "source_index": _source_index_fields(
+            selected, session_id=query_session_id, tenant_id=tenant_id
+        ),
+        "scope_check": scope_check,
+        "diagnostic_code": {
+            "commit": code_snapshot.get("lumenfin_commit"),
+            "worktree_dirty": bool(code_snapshot.get("worktree_dirty")),
+        },
+        "disclaimer": (
+            "Preflight only. Not a FinanceBench score. Attempt 1 invalid: "
+            "source-index session mismatch."
+        ),
+    }
+    write_json(out / "preflight.json", report)
+    return report
+
+
+def _write_invalid_empty_report(
+    out: Path,
+    *,
+    selected: dict[str, Any],
+    query_session_id: str,
+    tenant_id: str,
+    query_embedding_calls: int,
+    cases_seen: int,
+    code_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    out.mkdir(parents=True, exist_ok=True)
+    report = {
+        "schema_version": DIAGNOSTIC_SCHEMA,
+        "status": "INVALID_EMPTY_RETRIEVAL",
+        "split": LOCKED_SPLIT,
+        "held_out": False,
+        "product_accuracy_claim": False,
+        "qwen3_calls": 0,
+        "chunk_reembed_calls": 0,
+        "query_embedding_calls": query_embedding_calls,
+        "cases_seen": cases_seen,
+        "fail_fast_after": EMPTY_RETRIEVAL_FAIL_FAST,
+        "query_session_id": query_session_id,
+        "source_index": _source_index_fields(
+            selected, session_id=query_session_id, tenant_id=tenant_id
+        ),
+        "diagnostic_code": {
+            "commit": code_snapshot.get("lumenfin_commit"),
+            "worktree_dirty": bool(code_snapshot.get("worktree_dirty")),
+        },
+        "disclaimer": (
+            "Invalid empty retrieval. Not a FinanceBench score. "
+            "Attempt 1 invalid: source-index session mismatch."
+        ),
+    }
+    write_json(out / "invalid.json", report)
+    return report
+
+
 def run_candidate_depth_diagnostic(
     *,
     dataset_dir: str | Path,
@@ -806,10 +955,13 @@ def run_candidate_depth_diagnostic(
     index_inspection: dict[str, Any] | None = None,
     skip_index_copy: bool = False,
     expected_questions: int | None = 150,
-    session_id: str = "financebench-candidate-depth",
+    session_id: str = SOURCE_INDEX_SESSION_ID,
     parse_pdfs: bool = False,
     require_clean_worktree: bool = True,
     worktree_dirty: bool | None = None,
+    preflight_only: bool = False,
+    index_query_client: Any | None = None,
+    canary_companies: tuple[str, ...] = DEFAULT_CANARY_COMPANIES,
 ) -> dict[str, Any]:
     if parse_pdfs:
         raise CandidateDepthError("candidate-depth diagnostic refuses PDF parsing")
@@ -824,6 +976,8 @@ def run_candidate_depth_diagnostic(
         bm25_rrf_weight=bm25_rrf_weight,
         dense_rrf_weight=dense_rrf_weight,
         embedding_model=embedding_model,
+        session_id=session_id,
+        preflight_only=preflight_only,
         output_dir=output_dir,
         repo_root=repo_root,
     )
@@ -835,6 +989,47 @@ def run_candidate_depth_diagnostic(
     )
     inspection = index_inspection or inspect_financebench_indexes(repo_root)
     selected = require_compatible_index(inspection)
+    source_session_id, source_tenant_id = resolve_source_scope(selected)
+    query_session_id = resolve_query_session_id(session_id, source_session_id)
+    out = Path(output_dir)
+    copied_uri = ""
+    if store is None:
+        if skip_index_copy:
+            raise CandidateDepthError("refusing to open the original Milvus Lite index without a copy")
+        out.mkdir(parents=True, exist_ok=True)
+        copied_uri = str(copy_index_for_query(selected["uri"], out / "_index_work"))
+    verify_uri = copied_uri or str(selected.get("uri") or "")
+    if store is None or index_query_client is not None:
+        try:
+            scope_check = verify_copied_index_scope(
+                uri=verify_uri,
+                collection_name=str(selected.get("collection_name") or "financebench_eval"),
+                expected_session_id=query_session_id,
+                expected_tenant_id=source_tenant_id,
+                expected_row_count=int(selected.get("chunks") or EXPECTED_CHUNKS),
+                canary_companies=canary_companies,
+                client=index_query_client,
+            )
+        except IndexSessionError as exc:
+            raise CandidateDepthError(str(exc)) from exc
+    else:
+        scope_check = {
+            "skipped": True,
+            "session_id": query_session_id,
+            "tenant_id": source_tenant_id,
+            "query_embedding_calls": 0,
+        }
+    if preflight_only:
+        return _write_preflight_report(
+            out,
+            selected=selected,
+            copied_uri=copied_uri,
+            query_session_id=query_session_id,
+            tenant_id=source_tenant_id,
+            scope_check=scope_check,
+            code_snapshot=code_snapshot,
+        )
+
     questions, documents, paths = load_financebench_dataset(
         dataset_dir,
         expected_questions=expected_questions,
@@ -845,16 +1040,11 @@ def run_candidate_depth_diagnostic(
         raise IndexIncompatibleError("dataset hash does not match the compatible index sidecar")
     assignment = assign_splits(questions)
     selected_questions = questions_for_split(questions, assignment, split)
-    out = Path(output_dir)
     work_store = store
-    copied_uri = ""
+    opened_remote_store = False
     if work_store is None:
-        if skip_index_copy:
-            raise CandidateDepthError("refusing to open the original Milvus Lite index without a copy")
         from .retrieval import build_eval_store
 
-        out.mkdir(parents=True, exist_ok=True)
-        copied_uri = str(copy_index_for_query(selected["uri"], out / "_index_work"))
         work_store = build_eval_store(
             uri=copied_uri,
             embedding_provider=embedding_provider,
@@ -864,22 +1054,44 @@ def run_candidate_depth_diagnostic(
             mode="dense",
             embedding_model=str(selected.get("embedding_model") or embedding_model),
         )
+        opened_remote_store = embedding_provider.strip().lower() in REMOTE_EMBEDDING_PROVIDERS
     zero_chunk = _zero_chunk_names(selected)
     rows: list[dict[str, Any]] = []
     query_embed_calls = 0
+    prefix_all_empty = True
     try:
-        for question in selected_questions:
+        for index, question in enumerate(selected_questions, start=1):
             lists = retrieve_candidate_lists(
                 store=work_store,
                 query=question.question,
                 company=question.company,
-                session_id=session_id,
+                session_id=query_session_id,
                 candidate_k=candidate_k,
                 index_scope=index_scope,
                 bm25_rrf_weight=bm25_rrf_weight,
             )
-            if embedding_provider.strip().lower() in REMOTE_EMBEDDING_PROVIDERS:
+            if opened_remote_store:
                 query_embed_calls += 1
+            if prefix_all_empty and index <= EMPTY_RETRIEVAL_FAIL_FAST:
+                if both_channels_empty(lists):
+                    if index >= EMPTY_RETRIEVAL_FAIL_FAST:
+                        _write_invalid_empty_report(
+                            out,
+                            selected=selected,
+                            query_session_id=query_session_id,
+                            tenant_id=source_tenant_id,
+                            query_embedding_calls=query_embed_calls,
+                            cases_seen=index,
+                            code_snapshot=code_snapshot,
+                        )
+                        raise InvalidEmptyRetrievalError(
+                            "first "
+                            f"{EMPTY_RETRIEVAL_FAIL_FAST} questions returned empty BM25 and Dense "
+                            "candidates; refusing to record scores",
+                            query_embedding_calls=query_embed_calls,
+                        )
+                else:
+                    prefix_all_empty = False
             rows.append(
                 score_case(
                     question,
@@ -898,6 +1110,9 @@ def run_candidate_depth_diagnostic(
     recommendations = recommend_from_aggregate(summary)
     governance = experiment_governance(split, index_scope)
     out.mkdir(parents=True, exist_ok=True)
+    source_fields = _source_index_fields(
+        selected, session_id=query_session_id, tenant_id=source_tenant_id
+    )
     env = environment_payload(
         repo_root=Path(repo_root),
         dataset_hash=dataset_hash,
@@ -931,14 +1146,19 @@ def run_candidate_depth_diagnostic(
             "product_accuracy_claim": False,
             "held_out_status": "exposed_test",
             "experiment_role": "post_hoc_candidate_depth_diagnostic",
-            "source_index_commit": selected.get("source_index_commit") or SOURCE_INDEX_COMMIT,
-            "source_index_worktree_dirty": selected.get("source_index_worktree_dirty", SOURCE_INDEX_WORKTREE_DIRTY),
-            "source_index_chunker": selected.get("source_index_chunker") or SOURCE_INDEX_CHUNKER,
-            "source_schema_sha256": selected.get("source_schema_sha256") or "",
-            "source_collection_manifest_sha256": selected.get("source_collection_manifest_sha256") or "",
+            "source_index_commit": source_fields["commit"],
+            "source_index_worktree_dirty": source_fields["worktree_dirty"],
+            "source_index_chunker": source_fields["chunker"],
+            "source_index_session_id": source_fields["session_id"],
+            "source_index_tenant_id": source_fields["tenant_id"],
+            "source_schema_sha256": source_fields["schema_sha256"],
+            "source_collection_manifest_sha256": source_fields["collection_manifest_sha256"],
             "diagnostic_code_commit": code_snapshot.get("lumenfin_commit"),
             "diagnostic_code_worktree_dirty": bool(code_snapshot.get("worktree_dirty")),
             "index_not_current_chunker": True,
+            "previous_attempt_status": PREVIOUS_ATTEMPT_STATUS,
+            "query_session_id": query_session_id,
+            "scope_check": scope_check,
         },
     )
     report = {
@@ -960,17 +1180,10 @@ def run_candidate_depth_diagnostic(
         "index": selected,
         "index_inspection": {
             "compatible": inspection.get("compatible"),
-            "opened_milvus_client": False,
+            "opened_milvus_client": bool(scope_check.get("opened_milvus_client")),
             "modified_original_index": False,
         },
-        "source_index": {
-            "commit": selected.get("source_index_commit") or SOURCE_INDEX_COMMIT,
-            "worktree_dirty": selected.get("source_index_worktree_dirty", SOURCE_INDEX_WORKTREE_DIRTY),
-            "chunker": selected.get("source_index_chunker") or SOURCE_INDEX_CHUNKER,
-            "schema_sha256": selected.get("source_schema_sha256") or "",
-            "collection_manifest_sha256": selected.get("source_collection_manifest_sha256") or "",
-            "not_current_chunker": True,
-        },
+        "source_index": source_fields,
         "diagnostic_code": {
             "commit": code_snapshot.get("lumenfin_commit"),
             "worktree_dirty": bool(code_snapshot.get("worktree_dirty")),
@@ -982,7 +1195,8 @@ def run_candidate_depth_diagnostic(
             "Exposed test-100 post-hoc candidate-depth diagnostic. Not held-out, "
             "not product accuracy, not a new FinanceBench score, and not a "
             "confirmation-50 result. The reused Milvus index was built by the "
-            "pre-overlap-fix chunker and is not an index of the current chunker."
+            "pre-overlap-fix chunker and is not an index of the current chunker. "
+            "Attempt 1 invalid: source-index session mismatch."
         ),
     }
     write_json(out / "environment.json", env)

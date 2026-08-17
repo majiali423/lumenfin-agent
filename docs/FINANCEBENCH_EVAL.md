@@ -544,6 +544,14 @@ scores as the same freeze. The harness can still run (`--split confirmation`
 remains protected; test-100 remains diagnostic only). Confirmation-50 is no
 longer unseen.
 
+Candidate-depth attempt 1 (`outputs/financebench_candidate_depth_test100/`) is
+**invalid**: the historical company index was written with
+`session_id=financebench-eval`, but the diagnostic queried
+`session_id=financebench-candidate-depth`. Those all-zero rows are a session
+filter mismatch, not a retrieval-quality result. Do not copy them into
+benchmark tables. A later valid run must use a new directory
+(`outputs/financebench_candidate_depth_test100_v2/`).
+
 ## License
 
 FinanceBench is CC-BY-NC-4.0. LumenFin does not relicense or vend the PDFs.

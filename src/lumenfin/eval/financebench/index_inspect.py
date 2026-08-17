@@ -30,6 +30,8 @@ EXPECTED_COLLECTION = "financebench_eval"
 SOURCE_INDEX_COMMIT = "5877be8555bd72f411225b809ed75454607618bd"
 SOURCE_INDEX_WORKTREE_DIRTY = True
 SOURCE_INDEX_CHUNKER = "pre_overlap_fix"
+SOURCE_INDEX_SESSION_ID = "financebench-eval"
+SOURCE_INDEX_TENANT_ID = "financebench-eval"
 REQUIRED_SCHEMA_FIELDS = frozenset(
     {
         "document_id",
@@ -242,6 +244,8 @@ def inspect_lite_index(eval_db: Path, *, sidecar: dict[str, Any] | None = None) 
         "source_index_commit": SOURCE_INDEX_COMMIT,
         "source_index_worktree_dirty": SOURCE_INDEX_WORKTREE_DIRTY,
         "source_index_chunker": SOURCE_INDEX_CHUNKER,
+        "source_index_session_id": str(environment.get("session_id") or SOURCE_INDEX_SESSION_ID),
+        "source_index_tenant_id": str(environment.get("tenant_id") or SOURCE_INDEX_TENANT_ID),
         "source_schema_sha256": sha256_file(schema_path) if schema_path and schema_path.is_file() else "",
         "source_collection_manifest_sha256": (
             sha256_file(manifest_path) if manifest_path and manifest_path.is_file() else ""

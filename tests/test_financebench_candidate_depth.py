@@ -20,6 +20,7 @@ from tests.financebench_fixtures import make_financebench_tree
 from lumenfin.eval.financebench.candidate_depth import (
     CandidateDepthError,
     DIAGNOSTIC_CANDIDATE_K,
+    InvalidEmptyRetrievalError,
     assert_per_case_redacted,
     best_channel_rank,
     channel_recall_label,
@@ -42,10 +43,18 @@ from lumenfin.eval.financebench.index_inspect import (
     EXPECTED_DOCUMENTS,
     SOURCE_INDEX_CHUNKER,
     SOURCE_INDEX_COMMIT,
+    SOURCE_INDEX_SESSION_ID,
+    SOURCE_INDEX_TENANT_ID,
     IndexIncompatibleError,
     inspect_financebench_indexes,
     inspect_lite_index,
     require_compatible_index,
+)
+from lumenfin.eval.financebench.index_session import (
+    FORBIDDEN_QUERY_SESSION_ID,
+    PREVIOUS_ATTEMPT_STATUS,
+    resolve_query_session_id,
+    verify_copied_index_scope,
 )
 from lumenfin.eval.financebench.loader import load_financebench_dataset
 from lumenfin.eval.financebench.reporting import sha256_file
@@ -224,6 +233,7 @@ class DepthStore:
         self.bm25_calls = 0
         self.vector_calls = 0
         self.indexed = 0
+        self.sessions: list[str] = []
 
     def close(self) -> None:
         return None
@@ -235,16 +245,68 @@ class DepthStore:
     def bm25_search(self, query, **kwargs):
         self.bm25_calls += 1
         self.assert_top_k(kwargs)
+        self.sessions.append(str(kwargs.get("session_id") or ""))
         return list(self.bm25_hits)
 
     def vector_search(self, query, **kwargs):
         self.vector_calls += 1
         self.assert_top_k(kwargs)
+        self.sessions.append(str(kwargs.get("session_id") or ""))
         return list(self.dense_hits)
 
     def assert_top_k(self, kwargs: dict) -> None:
         if int(kwargs.get("top_k") or 0) != DIAGNOSTIC_CANDIDATE_K:
             raise AssertionError(f"expected top_k={DIAGNOSTIC_CANDIDATE_K}, got {kwargs.get('top_k')}")
+
+
+class FakeIndexClient:
+    def __init__(
+        self,
+        *,
+        row_count: int = EXPECTED_CHUNKS,
+        sample: list[dict] | None = None,
+        session_hits: bool = True,
+        tenant_hits: bool = True,
+        company_hits: bool = True,
+        collections: list[str] | None = None,
+    ) -> None:
+        self.row_count = row_count
+        self.sample = sample or [
+            {
+                "session_id": "financebench-eval",
+                "tenant_id": "financebench-eval",
+                "companies": "3M",
+                "primary_company": "3M",
+                "document_id": "3M_2022_10K",
+            }
+        ]
+        self.session_hits = session_hits
+        self.tenant_hits = tenant_hits
+        self.company_hits = company_hits
+        self.collections = collections or ["financebench_eval"]
+        self.queries: list[str] = []
+
+    def list_collections(self) -> list[str]:
+        return list(self.collections)
+
+    def get_collection_stats(self, _name: str) -> dict[str, int]:
+        return {"row_count": self.row_count}
+
+    def query(self, collection_name, filter="", output_fields=None, limit=1):
+        self.queries.append(str(filter or ""))
+        expr = str(filter or "")
+        if expr.strip() in {"", "id >= 0"}:
+            return list(self.sample)
+        if "companies" in expr or " like " in expr:
+            return list(self.sample) if self.company_hits else []
+        if "tenant_id" in expr:
+            return list(self.sample) if self.tenant_hits else []
+        if "session_id" in expr:
+            return list(self.sample) if self.session_hits else []
+        return list(self.sample)
+
+    def close(self) -> None:
+        return None
 
 
 class FinanceBenchCandidateDepthTests(unittest.TestCase):
@@ -339,7 +401,7 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
                         with self.assertRaises(IndexIncompatibleError):
                             run_candidate_depth_diagnostic(
                                 dataset_dir=repo,
-                                output_dir=repo / "outputs" / "financebench_candidate_depth_test100",
+                                output_dir=repo / "outputs" / "financebench_candidate_depth_test100_v2",
                                 repo_root=repo,
                                 split="test",
                                 confirm_exposed_diagnostic=True,
@@ -464,7 +526,7 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
                 bm25_hits=[_page_hit(gold_doc, gold_page)],
                 dense_hits=[_page_hit(gold_doc, gold_page + 3)],
             )
-            out = repo / "outputs" / "financebench_candidate_depth_test100"
+            out = repo / "outputs" / "financebench_candidate_depth_test100_v2"
             inspection = {
                 "compatible": True,
                 "compatible_index": {
@@ -475,9 +537,12 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
                     "embedding_model": "text-embedding-v4",
                     "zero_chunk_documents": [],
                     "index_scope": "company",
+                    "chunks": EXPECTED_CHUNKS,
                     "source_index_commit": SOURCE_INDEX_COMMIT,
                     "source_index_worktree_dirty": True,
                     "source_index_chunker": SOURCE_INDEX_CHUNKER,
+                    "source_index_session_id": SOURCE_INDEX_SESSION_ID,
+                    "source_index_tenant_id": SOURCE_INDEX_TENANT_ID,
                     "source_schema_sha256": sha256_file(
                         eval_db / "collections" / "financebench_eval" / "schema.json"
                     ),
@@ -539,6 +604,10 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
             self.assertEqual(report["source_index"]["commit"], SOURCE_INDEX_COMMIT)
             self.assertTrue(report["source_index"]["worktree_dirty"])
             self.assertEqual(report["source_index"]["chunker"], SOURCE_INDEX_CHUNKER)
+            self.assertEqual(report["source_index"]["session_id"], SOURCE_INDEX_SESSION_ID)
+            self.assertEqual(report["source_index"]["tenant_id"], SOURCE_INDEX_TENANT_ID)
+            self.assertEqual(report["source_index"]["previous_attempt_status"], PREVIOUS_ATTEMPT_STATUS)
+            self.assertEqual(set(store.sessions), {SOURCE_INDEX_SESSION_ID})
             self.assertTrue(report["source_index"]["not_current_chunker"])
             self.assertEqual(
                 report["source_index"]["schema_sha256"],
@@ -587,6 +656,8 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
             self.assertEqual(report["source_index_commit"], SOURCE_INDEX_COMMIT)
             self.assertTrue(report["source_index_worktree_dirty"])
             self.assertEqual(report["source_index_chunker"], SOURCE_INDEX_CHUNKER)
+            self.assertEqual(report["source_index_session_id"], SOURCE_INDEX_SESSION_ID)
+            self.assertEqual(report["source_index_tenant_id"], SOURCE_INDEX_TENANT_ID)
             self.assertTrue(report["index_not_current_chunker"])
             self.assertTrue(report["source_schema_sha256"])
             self.assertTrue(report["source_collection_manifest_sha256"])
@@ -640,7 +711,7 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
 
     def test_existing_output_dir_is_refused_and_not_deleted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "outputs" / "financebench_candidate_depth_test100"
+            out = Path(tmp) / "outputs" / "financebench_candidate_depth_test100_v2"
             out.mkdir(parents=True)
             sentinel = out / "keep_me.txt"
             sentinel.write_text("alive", encoding="utf-8")
@@ -811,7 +882,7 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
 
     def test_dirty_worktree_is_rejected_before_remote(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "outputs" / "financebench_candidate_depth_test100"
+            out = Path(tmp) / "outputs" / "financebench_candidate_depth_test100_v2"
             with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
                 with patch(
                     "lumenfin.eval.financebench.candidate_depth.copy_index_for_query",
@@ -842,6 +913,268 @@ class FinanceBenchCandidateDepthTests(unittest.TestCase):
             (empty / "file.txt").write_text("x", encoding="utf-8")
             with self.assertRaises(CandidateDepthError):
                 require_fresh_output_dir(empty)
+
+    def test_query_session_mismatch_is_detected(self) -> None:
+        with self.assertRaisesRegex(Exception, "financebench-candidate-depth"):
+            resolve_query_session_id(FORBIDDEN_QUERY_SESSION_ID, SOURCE_INDEX_SESSION_ID)
+        with self.assertRaises(CandidateDepthError):
+            validate_candidate_depth_request(
+                split="test",
+                confirm_exposed_diagnostic=True,
+                allow_remote=True,
+                embedding_provider="dashscope",
+                session_id=FORBIDDEN_QUERY_SESSION_ID,
+                output_dir=ROOT / "outputs" / "financebench_candidate_depth_test100_v2",
+                repo_root=ROOT,
+            )
+
+    def test_first_attempt_output_dir_is_rejected(self) -> None:
+        with self.assertRaises(CandidateDepthError):
+            validate_candidate_depth_request(
+                split="test",
+                confirm_exposed_diagnostic=True,
+                allow_remote=True,
+                embedding_provider="dashscope",
+                output_dir=ROOT / "outputs" / "financebench_candidate_depth_test100",
+                repo_root=ROOT,
+            )
+
+    def _compat_inspection(self, eval_db: Path, dataset_hash: str = EXPECTED_DATASET_HASH) -> dict:
+        return {
+            "compatible": True,
+            "compatible_index": {
+                "compatible": True,
+                "uri": str(eval_db),
+                "dataset_hash": dataset_hash,
+                "collection_name": "financebench_eval",
+                "chunks": EXPECTED_CHUNKS,
+                "embedding_model": "text-embedding-v4",
+                "index_scope": "company",
+                "source_index_session_id": SOURCE_INDEX_SESSION_ID,
+                "source_index_tenant_id": SOURCE_INDEX_TENANT_ID,
+                "source_index_chunker": SOURCE_INDEX_CHUNKER,
+                "source_index_commit": SOURCE_INDEX_COMMIT,
+                "zero_chunk_documents": [],
+            },
+        }
+
+    def test_row_count_zero_fails_before_remote(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            eval_db = _write_compatible_index(repo)
+            store = DepthStore([], [])
+            with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
+                with self.assertRaises(CandidateDepthError):
+                    run_candidate_depth_diagnostic(
+                        dataset_dir=repo,
+                        output_dir=repo / "outputs" / "financebench_candidate_depth_test100_v2",
+                        repo_root=repo,
+                        split="test",
+                        confirm_exposed_diagnostic=True,
+                        allow_remote=True,
+                        embedding_provider="dashscope",
+                        skip_index_copy=True,
+                        store=store,
+                        index_inspection=self._compat_inspection(eval_db),
+                        index_query_client=FakeIndexClient(row_count=0),
+                        require_clean_worktree=False,
+                    )
+            self.assertEqual(store.bm25_calls, 0)
+            self.assertEqual(store.vector_calls, 0)
+
+    def test_session_filter_miss_fails_before_remote(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            eval_db = _write_compatible_index(repo)
+            store = DepthStore([], [])
+            with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
+                with self.assertRaises(CandidateDepthError):
+                    run_candidate_depth_diagnostic(
+                        dataset_dir=repo,
+                        output_dir=repo / "outputs" / "financebench_candidate_depth_test100_v2",
+                        repo_root=repo,
+                        split="test",
+                        confirm_exposed_diagnostic=True,
+                        allow_remote=True,
+                        embedding_provider="dashscope",
+                        skip_index_copy=True,
+                        store=store,
+                        index_inspection=self._compat_inspection(eval_db),
+                        index_query_client=FakeIndexClient(session_hits=False),
+                        require_clean_worktree=False,
+                    )
+            self.assertEqual(store.bm25_calls, 0)
+
+    def test_company_canary_miss_fails_before_remote(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            eval_db = _write_compatible_index(repo)
+            store = DepthStore([], [])
+            with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
+                with self.assertRaises(CandidateDepthError):
+                    run_candidate_depth_diagnostic(
+                        dataset_dir=repo,
+                        output_dir=repo / "outputs" / "financebench_candidate_depth_test100_v2",
+                        repo_root=repo,
+                        split="test",
+                        confirm_exposed_diagnostic=True,
+                        allow_remote=True,
+                        embedding_provider="dashscope",
+                        skip_index_copy=True,
+                        store=store,
+                        index_inspection=self._compat_inspection(eval_db),
+                        index_query_client=FakeIndexClient(company_hits=False),
+                        require_clean_worktree=False,
+                    )
+            self.assertEqual(store.bm25_calls, 0)
+
+    def test_preflight_does_not_embed_or_score(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            eval_db = _write_compatible_index(repo)
+            out = repo / "outputs" / "financebench_candidate_depth_test100_v2"
+            with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
+                with patch(
+                    "lumenfin.eval.financebench.retrieval._qwen3_reranker",
+                    side_effect=AssertionError("Qwen3 must not run"),
+                ):
+                    report = run_candidate_depth_diagnostic(
+                        dataset_dir=repo,
+                        output_dir=out,
+                        repo_root=repo,
+                        split="test",
+                        confirm_exposed_diagnostic=True,
+                        allow_remote=False,
+                        embedding_provider="dashscope",
+                        skip_index_copy=True,
+                        store=DepthStore([], []),
+                        index_inspection=self._compat_inspection(eval_db),
+                        index_query_client=FakeIndexClient(),
+                        require_clean_worktree=False,
+                        preflight_only=True,
+                    )
+            self.assertEqual(report["status"], "PREFLIGHT_OK")
+            self.assertEqual(report["query_embedding_calls"], 0)
+            self.assertEqual(report["cases"], 0)
+            self.assertTrue((out / "preflight.json").is_file())
+            self.assertFalse((out / "summary.json").is_file())
+            self.assertFalse((out / "per_case.jsonl").is_file())
+            self.assertEqual(report["source_index"]["session_id"], SOURCE_INDEX_SESSION_ID)
+
+    def test_empty_prefix_fail_fast_does_not_record_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            src = make_financebench_tree(repo / "src")
+            questions, _documents, paths = load_financebench_dataset(
+                src, expected_questions=4, require_pdfs=False
+            )
+            dataset_hash = sha256_file(paths.questions_path)
+            eval_db = _write_compatible_index(repo, dataset_hash=dataset_hash)
+            store = DepthStore([], [])
+            out = repo / "outputs" / "financebench_candidate_depth_test100_v2"
+            with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
+                with self.assertRaises(InvalidEmptyRetrievalError) as caught:
+                    run_candidate_depth_diagnostic(
+                        dataset_dir=src,
+                        output_dir=out,
+                        repo_root=repo,
+                        split="test",
+                        confirm_exposed_diagnostic=True,
+                        allow_remote=False,
+                        embedding_provider="deterministic",
+                        expected_questions=4,
+                        store=store,
+                        index_inspection=self._compat_inspection(eval_db, dataset_hash),
+                        skip_index_copy=True,
+                        require_clean_worktree=False,
+                    )
+            self.assertEqual(caught.exception.query_embedding_calls, 0)
+            self.assertEqual(store.bm25_calls, 3)
+            self.assertEqual(set(store.sessions), {SOURCE_INDEX_SESSION_ID})
+            payload = json.loads((out / "invalid.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["status"], "INVALID_EMPTY_RETRIEVAL")
+            self.assertFalse((out / "summary.json").is_file())
+            self.assertFalse((out / "results.md").is_file())
+
+    def test_v2_run_does_not_touch_first_attempt_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            first = repo / "outputs" / "financebench_candidate_depth_test100"
+            first.mkdir(parents=True)
+            sentinel = first / "summary.json"
+            sentinel.write_text("DO_NOT_TOUCH", encoding="utf-8")
+            src = make_financebench_tree(repo / "src")
+            questions, _documents, paths = load_financebench_dataset(
+                src, expected_questions=4, require_pdfs=False
+            )
+            dataset_hash = sha256_file(paths.questions_path)
+            eval_db = _write_compatible_index(repo, dataset_hash=dataset_hash)
+            gold_doc = questions[0].doc_name
+            gold_page = questions[0].evidence[0].evidence_page_num_one
+            store = DepthStore(
+                bm25_hits=[_page_hit(gold_doc, gold_page)],
+                dense_hits=[_page_hit(gold_doc, gold_page)],
+            )
+            out = repo / "outputs" / "financebench_candidate_depth_test100_v2"
+            run_candidate_depth_diagnostic(
+                dataset_dir=src,
+                output_dir=out,
+                repo_root=repo,
+                split="test",
+                confirm_exposed_diagnostic=True,
+                allow_remote=False,
+                embedding_provider="deterministic",
+                expected_questions=4,
+                store=store,
+                index_inspection=self._compat_inspection(eval_db, dataset_hash),
+                skip_index_copy=True,
+                require_clean_worktree=False,
+            )
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "DO_NOT_TOUCH")
+            self.assertTrue((out / "summary.json").is_file())
+            self.assertNotEqual((out / "summary.json").read_text(encoding="utf-8"), "DO_NOT_TOUCH")
+
+    def test_cli_preflight_does_not_require_allow_remote(self) -> None:
+        cli = _load_cli()
+        with patch.object(DashScopeEmbeddingProvider, "embed", side_effect=_count_remote):
+            with patch.object(cli, "run_candidate_depth_diagnostic") as run:
+                run.return_value = {"status": "PREFLIGHT_OK"}
+                code = cli.main(["--confirm-exposed-diagnostic", "--preflight-only"])
+        self.assertEqual(code, 0)
+        run.assert_called_once()
+        self.assertTrue(run.call_args.kwargs.get("preflight_only"))
+        self.assertEqual(run.call_args.kwargs.get("session_id"), SOURCE_INDEX_SESSION_ID)
+
+    def test_live_verify_detects_wrong_sample_session(self) -> None:
+        client = FakeIndexClient(
+            sample=[
+                {
+                    "session_id": FORBIDDEN_QUERY_SESSION_ID,
+                    "tenant_id": SOURCE_INDEX_TENANT_ID,
+                    "companies": "3M",
+                    "primary_company": "3M",
+                    "document_id": "3M_2022_10K",
+                }
+            ]
+        )
+        with self.assertRaisesRegex(Exception, "session_id"):
+            verify_copied_index_scope(
+                uri="unused",
+                expected_session_id=SOURCE_INDEX_SESSION_ID,
+                expected_tenant_id=SOURCE_INDEX_TENANT_ID,
+                client=client,
+            )
+
+    def test_production_retriever_is_not_used_for_candidate_lists(self) -> None:
+        import inspect
+
+        from lumenfin.eval.financebench import candidate_depth
+        from lumenfin.rag.hybrid_retriever import HybridEvidenceRetriever
+
+        source = inspect.getsource(candidate_depth.retrieve_candidate_lists)
+        self.assertNotIn("HybridEvidenceRetriever", source)
+        self.assertIn("session_id=session_id", source)
+        self.assertTrue(callable(HybridEvidenceRetriever))
 
     def test_remote_probe_count_stays_zero(self) -> None:
         self.assertEqual(REMOTE_PROBE_COUNT, 0)
