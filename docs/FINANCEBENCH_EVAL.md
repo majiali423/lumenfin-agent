@@ -558,6 +558,63 @@ copied collection was released before query. Do not treat that directory as
 `PREFLIGHT_OK` and do not write retrieval scores from it. A later preflight
 must use `outputs/financebench_candidate_depth_test100_v2_preflight2/`.
 
+## Candidate-pool / Qwen3 A/B/C ablation (eval-only)
+
+This is a post-hoc diagnostic on the already-exposed test-100. It is not
+held-out, not product accuracy, and not a new FinanceBench score. Production
+retriever defaults stay unchanged.
+
+Locked real-CLI directories:
+
+- scoring: `outputs/financebench_candidate_pool_ablation_test100/`
+- preflight: `outputs/financebench_candidate_pool_ablation_test100_preflight/`
+
+`--output-dir` on the real CLI must equal one of those two paths exactly;
+a subdirectory such as `.../test100/another-run/` is rejected. Non-empty
+output directories are refused; the tool does not delete or overwrite them.
+
+Arms share one BM25 Top-50 + Dense Top-50 retrieval per question, then rerank
+in memory:
+
+- A: channels 20, RRF 20, Qwen3 20 → final 10
+- B: channels 50, RRF 20, Qwen3 20 → final 10
+- C: channels 50, RRF 30, Qwen3 30 → final 10
+
+`rerank_latency_ms` is Qwen3 rerank time only. It is not end-to-end query
+latency, cannot be used to claim how much production total latency C adds, and
+the shared Top-50 retrieval is not production Top-20 retrieval latency.
+`channel_retrieval_latency_ms` is that shared retrieval, recorded once per
+question.
+
+Resume reuses `_index_work/eval.db` instead of copying again. Completed-case
+identity includes the candidate-depth v2 focus hashes. After a crash between
+`per_case.jsonl`, `checkpoint.json`, and `manifest.json` writes, resume treats
+complete `per_case.jsonl` rows as source of truth and rewrites the other two
+when those three completed-ID sets are pairwise nested. Any pair that is not
+nested is refused. Corrupt completed-ID fields fail closed; they are not
+treated as an empty recoverable set.
+
+Call totals count persisted complete cases only (1 embedding and 3 Qwen3
+reranks per complete case). A crash after a remote call and before persist can
+create extra provider calls that this program cannot observe. Totals are not a
+provider invoice and are not exactly-once billed calls.
+
+If the candidate-depth v2 `per_case.jsonl` exists, it must contain exactly the
+current test-split case IDs. For the 100-question test split the focus set must
+be 25 rank 11–30 cases. Those file and ID hashes are part of the config hash
+and resume identity, so a changed focus file cannot reuse the same experiment.
+
+If any arm has Qwen3 fallback or provider error, `primary_comparison_valid` is
+false. All-case paired deltas stay in the artifacts as degraded/descriptive
+results; they are not a valid Qwen3 ablation conclusion. Qwen3-only paired
+sensitivity uses cases where both compared arms have `qwen3_ok=true`. Failed
+cases are not dropped.
+
+Reranker construction is locked to the config-hash snapshot, including
+`base_url_sha256` of the normalized `DASHSCOPE_RERANK_BASE_URL`. The raw URL,
+API keys, Authorization headers, and provider error bodies are not written to
+artifacts.
+
 ## License
 
 FinanceBench is CC-BY-NC-4.0. LumenFin does not relicense or vend the PDFs.
