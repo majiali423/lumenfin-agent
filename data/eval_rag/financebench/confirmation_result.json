@@ -1,0 +1,113 @@
+{
+  "schema_version": "financebench_eval.v1",
+  "name": "financebench-confirmation-50-recorded",
+  "status": "RECORDED",
+  "lumenfin_commit": "379a8b053256fd43260ecf031cdf675af7c3be4b",
+  "tag": "financebench-confirmation-v1",
+  "frozen_config_hash": "18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7",
+  "frozen_config_verified": true,
+  "dataset_hash": "5e961c0aa84a5ed578bdc2cea4f2ef8e33aa6ffe9394fc6c2508b303bf10fdeb",
+  "split_manifest_hash": "b58dbba807c67e78cd61c3f5cc80de153f58222654e72e09068e2544b09095fd",
+  "executed_at": "2026-08-16T18:49:44Z",
+  "split": "confirmation",
+  "canonical_split": "dev",
+  "held_out_at_execution": true,
+  "now_consumed": true,
+  "cases": 50,
+  "document_count": 84,
+  "chunks_created": 52518,
+  "pages_parsed": 11598,
+  "real_pdf_count": 78,
+  "fallback_pdf_count": 6,
+  "config": {
+    "index_scope": "company",
+    "mode": "hybrid-qwen3",
+    "chunk_size": 900,
+    "chunk_overlap": 120,
+    "embedding_provider": "dashscope",
+    "embedding_model": "text-embedding-v4",
+    "embedding_dimension": 1024,
+    "bm25_rrf_weight": 1.1,
+    "top_k": 10,
+    "rerank_candidates": 20,
+    "rerank_provider": "qwen3",
+    "rerank_model": "qwen3-rerank",
+    "query_rewriting": false
+  },
+  "page": {
+    "hit_at_1": 0.14,
+    "hit_at_5": 0.5,
+    "hit_at_5_ci95": {
+      "low": 0.36,
+      "high": 0.64,
+      "n_bootstrap": 1000,
+      "seed": 20260816
+    },
+    "hit_at_10": 0.62,
+    "mrr": 0.2955,
+    "mrr_ci95": {
+      "low": 0.1978,
+      "high": 0.3897,
+      "n_bootstrap": 1000,
+      "seed": 20260816
+    },
+    "ndcg_at_10": 0.3461,
+    "ndcg_at_10_ci95": {
+      "low": 0.244,
+      "high": 0.4417,
+      "n_bootstrap": 1000,
+      "seed": 20260816
+    }
+  },
+  "page_chunk": {
+    "hit_at_5": 0.48,
+    "hit_at_10": 0.62,
+    "hit_at_20": 0.62,
+    "recall_at_5": 0.1067,
+    "recall_at_10": 0.1544,
+    "recall_at_20": 0.1544,
+    "mrr": 0.2905,
+    "ndcg_at_10": 0.1546
+  },
+  "span_chunk": {
+    "hit_at_5": 0.1,
+    "hit_at_10": 0.14,
+    "hit_at_20": 0.14,
+    "recall_at_5": 0.09,
+    "recall_at_10": 0.14,
+    "recall_at_20": 0.14,
+    "mrr": 0.0635,
+    "ndcg_at_10": 0.0826
+  },
+  "failures": {
+    "hit_at_5": "25/50",
+    "hit_at_10": "31/50",
+    "top10_missed": "19/50",
+    "miss_all": 16,
+    "wrong_document": 2,
+    "ingestion_failure": 1,
+    "never_retrieved_across_modes": "NOT_APPLICABLE"
+  },
+  "provider_error_count": 0,
+  "rerank_fallback_rate": 0.0,
+  "rerank_calls": 50,
+  "embedding_calls": 134,
+  "degraded_retrieval_count": 0,
+  "indexing_ms": 3237751.57,
+  "query_p50_ms": 1018.73,
+  "query_p95_ms": 1559.94,
+  "artifact_dir": "outputs/financebench_eval_confirmation",
+  "artifact_sha256": {
+    "environment.json": "6b4d1dfd606e09469817d32b30962924fbcb1704a3c76177bc8661ee8b9d0452",
+    "manifest.json": "8806dc58f7188b68c8d7a16a690913646a91d975ea69f60e5ba20606e8caf9e3",
+    "results.json": "7be2a81c4d6db169dea8d703268a2423f36e37d8d8a3af147f341e509676d39f",
+    "results.md": "f2f573b548449a918170764520a62f85815861d35715f29f999d5f6aa4fff4cb",
+    "per_case.jsonl": "c75ba8016ab745c35e260e131155d6a44215f50d9b4c30c461b62a328ddeaf54",
+    "failures.jsonl": "d09f1c91beff8926aeae1fd0535a87f336eb49dccd333a3862fd59f75d2269df"
+  },
+  "product_accuracy_claim": false,
+  "end_to_end_accuracy_claim": false,
+  "confirmation_consumed": true,
+  "retuning_forbidden": true,
+  "disclaimer": "Frozen-config page-level retrieval on a one-shot unseen confirmation-50. Not product accuracy and not end-to-end QA accuracy. The split is now consumed/exposed. Do not rerun or retune from this result."
+}

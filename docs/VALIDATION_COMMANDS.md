@@ -102,16 +102,18 @@ Exposed test-100 four-mode ablation was **recorded** 2026-08-16 as an
 exploratory baseline (corpus scope, dirty worktree). Company-scope on the
 same 100 questions was then recorded as a **post-hoc paired diagnostic**
 (`outputs/financebench_eval_company/`). Neither is product accuracy.
-Confirmation-50 (`--split confirmation` / `--split dev`) is still unused.
-It is locked to `data/eval_rag/financebench/frozen_config.json`
-(`18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7`) and
-requires `--frozen-config` plus `--confirm-held-out` after approval.
-Details: [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md).
+Confirmation-50 (`--split confirmation` / `--split dev`) is **RECORDED**
+(2026-08-16, tag `financebench-confirmation-v1`). At execution it was a
+one-shot unseen set; it is now consumed/exposed. Page-level Hit@5 0.50,
+Hit@10 0.62, MRR 0.2955, nDCG@10 0.3461. These are **not** product accuracy
+and **not** end-to-end QA. Do not rerun or retune. Aggregate:
+`data/eval_rag/financebench/confirmation_result.json`. Details:
+[FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md).
 
-Offline harness smoke (no confirmation-50, no remote providers). `--split
-confirmation` and `--split dev` are the same 50 unseen questions; do **not**
-run them with `--limit 2`. Use unit tests / synthetic fixtures, or the already
-exposed test split:
+Offline harness smoke (no confirmation-50 rerun, no remote providers).
+`--split confirmation` and `--split dev` are the consumed confirmation set;
+do **not** run them, including with `--limit 2`. Use unit tests / synthetic
+fixtures, or the already exposed test split:
 
 ```powershell
 python -m unittest `
@@ -120,11 +122,12 @@ python -m unittest `
   tests.test_financebench_qrels `
   tests.test_financebench_metrics `
   tests.test_financebench_retrieval_eval `
-  tests.test_financebench_frozen -v
+  tests.test_financebench_frozen `
+  tests.test_financebench_confirmation_result -v
 python scripts/run_financebench_retrieval_eval.py --dataset-dir <checkout> --split test --mode bm25 --limit 2
 ```
 
-After approval only (do not run until approved; requires a clean worktree):
+Recorded confirmation-50 command (already executed; do not run again):
 
 ```powershell
 python scripts/run_financebench_retrieval_eval.py `

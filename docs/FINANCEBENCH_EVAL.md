@@ -6,10 +6,11 @@ not a production API path, and not a license to change retrieval thresholds.
 The 2026-08-16 test-100 four-mode corpus run is an **exploratory baseline /
 exposed test-100**. It has been scored, read, and used for failure analysis.
 It is **not** an unseen held-out. Later company-scope runs on the same 100
-questions are **post-hoc paired diagnostics** only. The unused 50 questions
-are **confirmation-50**; they may be scored once after a frozen config and
-must not be used to retune. Those page-level numbers are **not product
-accuracy** and **not end-to-end QA**. Phase 4 answer metrics remain `NOT_RUN`.
+questions are **post-hoc paired diagnostics** only. Confirmation-50 was a
+one-shot unseen set at execution time and is now **consumed / exposed**.
+Recorded page-level numbers (Hit@5 0.50, Hit@10 0.62, MRR 0.2955, nDCG@10
+0.3461) are **not product accuracy** and **not end-to-end QA**. Do not rerun
+or retune from them. Phase 4 answer metrics remain `NOT_RUN`.
 
 ## Why this exists
 
@@ -104,11 +105,12 @@ real-PDF vs fallback cohorts are sensitivity analysis only.
 `sha256("lumenfin-financebench-split-v1|{financebench_id}")` lexicographic sort,
 independent of JSONL order:
 
-- development / **confirmation-50**: first 50 ids
+- development / **confirmation-50**: first 50 ids (recorded 2026-08-16; now consumed/exposed)
 - exposed test-100: remaining 100
 
-Test-100 is frozen and **exposed**. `--tune` is rejected on every split,
-including confirmation. Do not fit thresholds on confirmation-50.
+Test-100 is frozen and **exposed**. Confirmation-50 is **recorded and
+consumed**. `--tune` is rejected on every split, including confirmation. Do
+not fit thresholds on confirmation-50.
 
 ## Dataset layout
 
@@ -145,8 +147,8 @@ python scripts/prepare_financebench_eval.py `
 ## Retrieval commands
 
 Offline default (no DashScope / Qwen3). Do **not** use `--split dev` or
-`--split confirmation` for smoke: both are confirmation-50. Use the unit-test
-fixtures, or `--split test` (already exposed):
+`--split confirmation` for smoke: both are the consumed confirmation-50.
+Use the unit-test fixtures, or `--split test` (already exposed):
 
 ```powershell
 python -m unittest tests.test_financebench_retrieval_eval tests.test_financebench_loader -v
@@ -451,8 +453,8 @@ prompt version recorded.
 | FinanceBench 150 load + 50/100 split on real JSONL | **recorded** (HF materialization; GitHub 404; 6 fallback PDFs) |
 | Exposed test-100 corpus four-mode | **recorded** 2026-08-16; exploratory baseline; dirty tree |
 | Company-scope post-hoc diagnostic on test-100 | **recorded** 2026-08-16; post-hoc; dirty tree |
-| Proposed frozen config | `data/eval_rag/financebench/frozen_config.json`; hash `18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7`; awaiting approval |
-| Confirmation-50 (formerly dev-50) | `NOT_RUN`; one shot after approval; tune forbidden |
+| Frozen config used for confirmation | `data/eval_rag/financebench/frozen_config.json`; hash `18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7`; tag `financebench-confirmation-v1` |
+| Confirmation-50 (formerly dev-50) | **RECORDED** 2026-08-16; one-shot unseen at execution; now consumed/exposed; Hit@5 0.50, Hit@10 0.62, MRR 0.2955, nDCG@10 0.3461; **not** product accuracy; retune forbidden |
 | Phase 4 end-to-end answer metrics | `NOT_RUN` |
 
 Do not copy synthetic gate scores **or** these FinanceBench page-level rows
@@ -460,7 +462,14 @@ into README as product accuracy.
 
 ## Confirmation-50
 
-Machine-readable lock: `data/eval_rag/financebench/frozen_config.json`.
+**Status: `RECORDED` / consumed.** Machine-readable lock:
+`data/eval_rag/financebench/frozen_config.json`. Aggregate (git-tracked, no
+raw questions/qrels/per-case):
+`data/eval_rag/financebench/confirmation_result.json`. Raw artifacts remain
+local and gitignored under `outputs/financebench_eval_confirmation/`.
+
+At execution this split was a one-shot unseen confirmation set. It is now
+consumed/exposed. Do **not** run it again. Do **not** retune from it.
 
 Canonical hash: UTF-8 `json.dumps(..., sort_keys=True, ensure_ascii=False,
 separators=(',', ':'))` SHA-256. `config_hash` and timestamp keys
@@ -471,6 +480,8 @@ mint a replacement hash.
 
 ```text
 config_hash: 18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7
+tag: financebench-confirmation-v1
+commit: 379a8b053256fd43260ecf031cdf675af7c3be4b
 index_scope: company
 mode: hybrid-qwen3
 chunk: 900 / 120
@@ -480,15 +491,32 @@ top_k: 10
 rerank_candidates: 20
 rerank: qwen3-rerank
 query_rewriting: off
+executed_at: 2026-08-16T18:49:44Z
+cases: 50
+page Hit@1: 0.14
+page Hit@5: 0.50 (95% CI 0.36-0.64)
+page Hit@10: 0.62
+page MRR: 0.2955 (95% CI 0.1978-0.3897)
+page nDCG@10: 0.3461 (95% CI 0.244-0.4417)
+Hit@5 count: 25/50
+Hit@10 count: 31/50
+top10_missed: 19/50
+miss_all: 16
+wrong_document: 2
+ingestion_failure: 1
+never_retrieved_across_modes: NOT_APPLICABLE
 ```
 
-`--split confirmation` and `--split dev` are the same protected split. They
-require `--frozen-config` and `--confirm-held-out`, a clean worktree, and
-exact runtime match of embedding/rerank model and instruct (including env
-overrides). `--limit` and `--mode all` are rejected. Validation fails before
-PDF parse, indexing, or remote calls.
+These are frozen-config **page-level retrieval** numbers on a one-shot unseen
+confirmation-50. They are **not product accuracy** and **not end-to-end QA
+accuracy**. Hit@10 bootstrap CI was not stored in the original
+`results.json` summary; persisting it is a later maintenance item.
 
-Wait for approval. Then run **once** (do not execute this until approved):
+`--split confirmation` and `--split dev` remain the same protected split.
+They still require `--frozen-config` and `--confirm-held-out`. Do not rerun
+the recorded command. `--limit` and `--mode all` stay rejected.
+
+Historical command (already executed; do not run again):
 
 ```powershell
 python scripts/run_financebench_retrieval_eval.py `

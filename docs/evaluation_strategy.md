@@ -89,11 +89,13 @@ evaluation is documented in [`FINANCEBENCH_EVAL.md`](FINANCEBENCH_EVAL.md).
 The 2026-08-16 corpus test-100 is an **exploratory baseline / exposed
 test-100**, not an unseen held-out. Company-scope on those same questions is
 a **recorded post-hoc paired diagnostic**: Hybrid Hit@5 moved +0.16; Dense
-Hit@5 did not move; Hybrid+Qwen3 Hit@5 did not move, Hit@10/MRR did. The
-unused 50 questions are confirmation-50 and remain `NOT_RUN` pending a
-frozen config hash. Those numbers are a page-level baseline, **not product
-accuracy** and **not** the 10-case Qwen3 hard-negative gate (Top-1/MRR
-1.0000). Phase 4 end-to-end answer metrics remain `NOT_RUN`.
+Hit@5 did not move; Hybrid+Qwen3 Hit@5 did not move, Hit@10/MRR did.
+Confirmation-50 is **RECORDED** (Hit@5 0.50, Hit@10 0.62, MRR 0.2955,
+nDCG@10 0.3461): one-shot unseen at execution, now consumed/exposed. Those
+numbers are page-level retrieval, **not product accuracy**, **not**
+end-to-end QA, and **not** the 10-case Qwen3 hard-negative gate (Top-1/MRR
+1.0000). Do not rerun or retune. Phase 4 end-to-end answer metrics remain
+`NOT_RUN`.
 
 ## 后续增强方向
 
