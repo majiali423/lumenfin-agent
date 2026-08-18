@@ -103,9 +103,8 @@ Eval-only ideas:
 
 - Unique-page cap in the final 10 (keep best chunk per page).
 - MMR / same-page penalty after Qwen3.
-- Report `unique_pages_top10` on every run (this metric is currently
-  unavailable because section metadata is missing; page uniqueness *can* be
-  computed today from `page`).
+- Report `unique_pages_top10` on every run. Page uniqueness can be computed
+  today from `page`; it does not require section metadata.
 
 This workstream does not require a new chunker.
 
