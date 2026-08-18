@@ -159,7 +159,17 @@ FinanceBench again**:
    schema example only).
 4. Harness flag: refuse FinanceBench `test` / `confirmation` for this phase.
 
-Stop after the slice unless a holdout file is frozen.
+Implementation status: the validate-only scaffold now lives under
+`src/lumenfin/eval/holdout/`, with
+`scripts/run_holdout_ranking_eval.py` and a tracked schema example under
+`data/eval_rag/holdout/`. It refuses FinanceBench `test`, `dev`,
+`confirmation`, and `all`, path escape, and all remote calls. `A_prod` and
+`R_page` pool construction plus page-level metrics are available for
+synthetic/offline tests only.
+
+The schema example is not a real evaluation set and must never produce a
+score. Stop after this slice unless independently authored questions and
+human-confirmed qrels have been frozen before inspecting retrieval ranks.
 
 ## Out of scope
 

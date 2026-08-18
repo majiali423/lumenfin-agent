@@ -41,6 +41,8 @@ data/**
 !data/eval_rag/financebench/frozen_config.json
 !data/eval_rag/financebench/confirmation_result.json
 !data/eval_rag/financebench/candidate_pool_ablation_result.json
+!data/eval_rag/holdout/
+!data/eval_rag/holdout/schema_example.jsonl
 !data/.gitkeep
 
 .env
