@@ -43,6 +43,7 @@ data/**
 !data/eval_rag/financebench/candidate_pool_ablation_result.json
 !data/eval_rag/holdout/
 !data/eval_rag/holdout/schema_example.jsonl
+!data/eval_rag/holdout/ledger_public_manifest.json
 !data/.gitkeep
 
 .env

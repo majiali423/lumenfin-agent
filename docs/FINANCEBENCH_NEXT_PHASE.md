@@ -93,6 +93,13 @@ influence a change, mark it consumed and treat later runs as regression tests.
 FinRank may be added later as a separate passage-reranking stress test; its
 CC BY-NC 4.0 license must not be treated as commercial-use permission.
 
+A local snapshot of the official LEDGER `eval/test` config is pinned at source
+revision `b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619`. The tracked identity-only
+manifest is `data/eval_rag/holdout/ledger_public_manifest.json`: 10,000
+questions across 111 companies, split into `public_dev` (7,616 questions,
+85 companies) and unconsumed `public_holdout` (2,384 questions, 26 companies).
+Raw parquet and report text remain gitignored. Scoring is still disabled.
+
 ## Workstreams (priority)
 
 Work them in this order. Each is a separate locked arm on the **new** set.

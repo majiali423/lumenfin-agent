@@ -28,6 +28,9 @@ from lumenfin.eval.holdout import (
 REVISION = "a" * 40
 ARTIFACT_SHA256 = "b" * 64
 SPLIT_SALT = "lumenfin-ledger-public-v1"
+PUBLISHED_MANIFEST = (
+    ROOT / "data" / "eval_rag" / "holdout" / "ledger_public_manifest.json"
+)
 
 
 def _load_cli():
@@ -257,6 +260,35 @@ class LedgerParquetAndCliTests(unittest.TestCase):
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertFalse(payload["scoring_enabled"])
             self.assertEqual(payload["remote_calls"], 0)
+
+
+class LedgerPublishedManifestTests(unittest.TestCase):
+    def test_manifest_locks_public_company_disjoint_snapshot(self) -> None:
+        payload = json.loads(PUBLISHED_MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(
+            payload["dataset"]["source_revision"],
+            "b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619",
+        )
+        self.assertEqual(
+            payload["dataset"]["source_artifact_sha256"],
+            "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad",
+        )
+        self.assertEqual(payload["rows"], 10000)
+        self.assertEqual(payload["splits"][PUBLIC_DEV]["queries"], 7616)
+        self.assertEqual(payload["splits"][PUBLIC_DEV]["companies"], 85)
+        self.assertEqual(payload["splits"][PUBLIC_HOLDOUT]["queries"], 2384)
+        self.assertEqual(payload["splits"][PUBLIC_HOLDOUT]["companies"], 26)
+        self.assertFalse(payload["scoring_enabled"])
+        self.assertEqual(payload["remote_calls"], 0)
+
+    def test_manifest_contains_identity_only(self) -> None:
+        payload = json.loads(PUBLISHED_MANIFEST.read_text(encoding="utf-8"))
+        serialized = json.dumps(payload)
+        self.assertEqual(payload["foundation_model_training_exposure"], "unknown")
+        self.assertFalse(payload["product_accuracy_claim"])
+        self.assertNotIn("query_text", serialized)
+        self.assertNotIn("mmd_text", serialized)
+        self.assertNotIn("page_000", serialized)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,45 @@
+{
+  "schema_version": "lumenfin_public_benchmark_manifest.v1",
+  "dataset": {
+    "dataset_id": "artefactory/ledger-long-context-KPI-QA",
+    "source_config": "eval",
+    "source_split": "test",
+    "source_revision": "b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619",
+    "source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad"
+  },
+  "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
+  "data_license": "CC-BY-4.0",
+  "code_license": "MIT",
+  "public_benchmark": true,
+  "held_out_scope": "public_holdout_split_only",
+  "foundation_model_training_exposure": "unknown",
+  "held_out_claim": "public_company_disjoint_only",
+  "product_accuracy_claim": false,
+  "split_algorithm": "sha256_company_key_v1",
+  "split_salt_sha256": "b1f8fb42797fb020821d42142bb74e70579688016f7d2c680a8b64502129fd2c",
+  "holdout_fraction": 0.2,
+  "rows": 10000,
+  "query_ids_sha256": "39b679e51c7f46a9f381c42b30bc21a26c7c60e59d328a07d9bf784aef2889ea",
+  "splits": {
+    "public_dev": {
+      "queries": 7616,
+      "companies": 85,
+      "query_ids_sha256": "b0e2163c2d9d0e4d5a948313bde2507418b552e22738d6f4c2f7825766dca65c",
+      "company_keys_sha256": "72b14f30b845a2b0e5f870b1797489feec33df78f8d4c49522749e2a54b4ee89",
+      "consumed": false,
+      "local_tuning_allowed": true,
+      "held_out_from_local_tuning": false
+    },
+    "public_holdout": {
+      "queries": 2384,
+      "companies": 26,
+      "query_ids_sha256": "4457d9268f0eaf14ffff9ab7e847adb9fb787b6283b98874370b3e301047ab88",
+      "company_keys_sha256": "1d5a8e526a6ff682a9cb77288f9c4264a879b5a2719a6e60719a0384d42b3027",
+      "consumed": false,
+      "local_tuning_allowed": false,
+      "held_out_from_local_tuning": true
+    }
+  },
+  "scoring_enabled": false,
+  "remote_calls": 0
+}
