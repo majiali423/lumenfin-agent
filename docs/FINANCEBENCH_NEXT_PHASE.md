@@ -69,6 +69,30 @@ Freeze **before** any retrieval score:
 If the set is smaller than ~40 questions, treat it as **one-shot
 confirmation**, not as a tuning loop.
 
+### Public development benchmark
+
+Before a private holdout exists, use
+[LEDGER](https://github.com/artefactory/LEDGER) for page-retrieval
+development. LEDGER code is MIT and its data is CC BY 4.0. It is public, so
+foundation-model training exposure is unknown and no result may be called a
+truly unseen or product-accuracy score.
+
+The adapter under `src/lumenfin/eval/holdout/ledger.py` accepts the official
+`artefactory/ledger-long-context-KPI-QA` `eval/test` parquet schema. It:
+
+- requires an immutable 40-character source revision and local snapshot hash;
+- preserves TREC `doc_id` qrels exactly rather than guessing PDF page numbers;
+- splits by exchange+ticker, never by individual question;
+- exposes repeatable `public_dev` and locally held-back `public_holdout`;
+- records only counts and identity hashes in the manifest, not questions,
+  report text, or qrel ids;
+- keeps scoring and remote calls disabled.
+
+The public holdout only protects against local tuning leakage. Once its results
+influence a change, mark it consumed and treat later runs as regression tests.
+FinRank may be added later as a separate passage-reranking stress test; its
+CC BY-NC 4.0 license must not be treated as commercial-use permission.
+
 ## Workstreams (priority)
 
 Work them in this order. Each is a separate locked arm on the **new** set.
