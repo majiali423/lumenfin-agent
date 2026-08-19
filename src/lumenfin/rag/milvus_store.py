@@ -146,6 +146,8 @@ class MilvusRAGStore:
             self.client = MilvusClient(uri)
             self._owns_client = True
         self._query_vector_cache: dict[str, list[float]] = {}
+        self.last_query_embed_physical_calls = 0
+        self.last_query_embed_cache_hit = False
         self.last_embed_ms = 0.0
         self.last_embed_chars = 0
         self._ensure_collection()
@@ -168,16 +170,25 @@ class MilvusRAGStore:
         return self._embed_query(query)
 
     def _embed_query(self, query: str) -> list[float]:
+        self.last_query_embed_physical_calls = 0
+        self.last_query_embed_cache_hit = False
         cache_key = hashlib.sha256(query.encode("utf-8")).hexdigest()
         cached = self._query_vector_cache.get(cache_key)
         if cached is not None:
+            self.last_query_embed_cache_hit = True
             return cached
         started = time.perf_counter()
         try:
             vector = self.embedder.embed([query])[0]
         except Exception as exc:
+            self.last_query_embed_physical_calls = int(
+                getattr(self.embedder, "last_physical_calls", 0)
+            )
             self._record_embed_stats([query], started)
             raise EmbeddingQueryError(f"Query embedding failed: {exc}") from exc
+        self.last_query_embed_physical_calls = int(
+            getattr(self.embedder, "last_physical_calls", 0)
+        )
         self._record_embed_stats([query], started)
         self._query_vector_cache[cache_key] = vector
         return vector

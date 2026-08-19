@@ -1,0 +1,259 @@
+{
+  "schema_version": "lumenfin_ledger_qwen3_paired.v1",
+  "orchestrator_source_sha256": "c49502ef3b1f0c9229097651dac90af0fa2701c0b25f3228675de00d1ed96092",
+  "split": "public_dev",
+  "cases": 250,
+  "selection": {
+    "strategy": "sorted_company_even_spacing_v1",
+    "companies": 5,
+    "cases": 250,
+    "documents": 2427,
+    "chunks": 15829,
+    "embed_chars": 9324961,
+    "estimated_document_http_calls": 1601,
+    "query_http_calls_without_retries": 250,
+    "expected_query_http_calls_minimum": 250,
+    "estimated_total_http_calls_without_retries": 1851,
+    "company_keys_sha256": "c6a9a94a4e19aa27d591e1b5f71bbd643ce897e9d5bc6a6d064cdf0e6452fa48",
+    "query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044",
+    "per_company": [
+      {
+        "company_key_sha256": "92a462cc7696c74eb74d6160e02622ba075f2ea98ed78e8a0c589b6601ee22dd",
+        "selected_cases": 50,
+        "query_ids_sha256": "a0eb96287811ef88063c833ff16fd6ed1ea270168f3d2bef2534ab6a3bdf972d",
+        "expected_query_http_calls": 50,
+        "documents": 650,
+        "reports": 5,
+        "chunks": 3840,
+        "embed_chars": 2298062,
+        "estimated_document_http_calls": 389
+      },
+      {
+        "company_key_sha256": "5f43b80877077290b80540d3145c4815b036c7eee4367dbf77958b3f5c034ac1",
+        "selected_cases": 50,
+        "query_ids_sha256": "85e387220c2a3a98614f87a4994041781ed8a4c60721bf8117d5d3b19d09debc",
+        "expected_query_http_calls": 50,
+        "documents": 606,
+        "reports": 6,
+        "chunks": 4212,
+        "embed_chars": 2487607,
+        "estimated_document_http_calls": 427
+      },
+      {
+        "company_key_sha256": "f113a359937f42de2d540e85ce509a7f135c7631cec66c015dd4f9bc7bd9e44a",
+        "selected_cases": 50,
+        "query_ids_sha256": "e07c900e71a1582c595e5c9bfdf9cb85d37117794dbea3b0eafb51c9f3a1cd0d",
+        "expected_query_http_calls": 50,
+        "documents": 264,
+        "reports": 2,
+        "chunks": 1818,
+        "embed_chars": 1052828,
+        "estimated_document_http_calls": 183
+      },
+      {
+        "company_key_sha256": "4912cabcf04002773eabe33c12da829508122989fc2b8cbc5a355e6669dfa2d9",
+        "selected_cases": 50,
+        "query_ids_sha256": "5d0fdb8ac0cd4afa8e1ca365d8bd2544408cf6ecfd07c83d8e4bc424efa9f9bc",
+        "expected_query_http_calls": 50,
+        "documents": 207,
+        "reports": 3,
+        "chunks": 1350,
+        "embed_chars": 804033,
+        "estimated_document_http_calls": 137
+      },
+      {
+        "company_key_sha256": "5970974f485200ef444e6e12ed485078ccae49198030a16e571bc920419a7065",
+        "selected_cases": 50,
+        "query_ids_sha256": "2f295c79ea384a8f3151354dce3b684571c63998e5bef3b64e5aa839711be091",
+        "expected_query_http_calls": 50,
+        "documents": 700,
+        "reports": 5,
+        "chunks": 4609,
+        "embed_chars": 2682431,
+        "estimated_document_http_calls": 465
+      }
+    ]
+  },
+  "candidate_manifest": {
+    "candidate_cache_sha256": "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a",
+    "candidate_set_identity_sha256": "108959e3b0c1efae6ded7c25d0575d12cd6fef8da789b8429ba18b374e6b393a",
+    "source_prerank_canonical_sha256": "d28f4548394ad9aaa7942533ee44a1643cad8d465ade9ab227f676585b3276e6"
+  },
+  "run_identity_sha256": "a2207f822c39154421c984f25e9e3b588530ee88a9fcb19cbafceab1ad08ffc1",
+  "reranker_source_sha256": "de16d110e016c185d45d4f9bb6563d0ace19b7b88c57ca45e2a63be7179dc839",
+  "rerank_settings": {
+    "model": "qwen3-rerank",
+    "instruct": "Given a financial due diligence query, retrieve passages that directly answer it. Prefer the correct company, reporting period, metric, scope, and filing context over merely topical passages.",
+    "timeout_seconds": 12.0,
+    "max_attempts": 2,
+    "backoff_seconds": 0.25,
+    "max_inflight": 2,
+    "max_document_chars": 4000,
+    "base_url_sha256": "babb97299e9da61393349618259126159403e5bad766df1d6da2d49735afbae6"
+  },
+  "comparison": {
+    "prerank": {
+      "A_prod": {
+        "arm": {
+          "name": "A_prod",
+          "pool_strategy": "ranked_chunks",
+          "source_k": 20,
+          "rerank_k": 20,
+          "final_k": 10
+        },
+        "cases": 250,
+        "pool_hit_rate": 0.728,
+        "page_hit_at_5": 0.368,
+        "page_hit_at_10": 0.556,
+        "mrr": 0.2494,
+        "ndcg_at_10": 0.1708,
+        "mean_unique_pages_top10": 9.336,
+        "mean_page_identity_coverage_top10": 1.0,
+        "mean_duplicate_page_occupancy_top10": 0.0664,
+        "failure_class_counts": {
+          "hit_at_10": 139,
+          "gold_in_pool_not_in_final_top10": 43,
+          "gold_not_in_rerank_pool": 68
+        },
+        "scoring_status": "public_dev_offline_prerank",
+        "remote_calls": 0
+      },
+      "R_page": {
+        "arm": {
+          "name": "R_page",
+          "pool_strategy": "unique_pages_same_source_window",
+          "source_k": 20,
+          "rerank_k": 20,
+          "final_k": 10
+        },
+        "cases": 250,
+        "pool_hit_rate": 0.728,
+        "page_hit_at_5": 0.376,
+        "page_hit_at_10": 0.568,
+        "mrr": 0.2528,
+        "ndcg_at_10": 0.1789,
+        "mean_unique_pages_top10": 10.0,
+        "mean_page_identity_coverage_top10": 1.0,
+        "mean_duplicate_page_occupancy_top10": 0.0,
+        "failure_class_counts": {
+          "hit_at_10": 142,
+          "gold_in_pool_not_in_final_top10": 40,
+          "gold_not_in_rerank_pool": 68
+        },
+        "scoring_status": "public_dev_offline_prerank",
+        "remote_calls": 0
+      }
+    },
+    "qwen3": {
+      "A_prod": {
+        "arm": {
+          "name": "A_prod",
+          "pool_strategy": "ranked_chunks",
+          "source_k": 20,
+          "rerank_k": 20,
+          "final_k": 10
+        },
+        "cases": 250,
+        "pool_hit_rate": 0.728,
+        "page_hit_at_5": 0.616,
+        "page_hit_at_10": 0.7,
+        "mrr": 0.4663,
+        "ndcg_at_10": 0.3141,
+        "mean_unique_pages_top10": 9.472,
+        "mean_page_identity_coverage_top10": 1.0,
+        "mean_duplicate_page_occupancy_top10": 0.0528,
+        "failure_class_counts": {
+          "hit_at_10": 175,
+          "gold_in_pool_not_in_final_top10": 7,
+          "gold_not_in_rerank_pool": 68
+        },
+        "scoring_status": "public_dev_remote_rerank",
+        "remote_calls": 250
+      },
+      "R_page": {
+        "arm": {
+          "name": "R_page",
+          "pool_strategy": "unique_pages_same_source_window",
+          "source_k": 20,
+          "rerank_k": 20,
+          "final_k": 10
+        },
+        "cases": 250,
+        "pool_hit_rate": 0.728,
+        "page_hit_at_5": 0.62,
+        "page_hit_at_10": 0.704,
+        "mrr": 0.4488,
+        "ndcg_at_10": 0.3067,
+        "mean_unique_pages_top10": 10.0,
+        "mean_page_identity_coverage_top10": 1.0,
+        "mean_duplicate_page_occupancy_top10": 0.0,
+        "failure_class_counts": {
+          "hit_at_10": 176,
+          "gold_in_pool_not_in_final_top10": 6,
+          "gold_not_in_rerank_pool": 68
+        },
+        "scoring_status": "public_dev_remote_rerank",
+        "remote_calls": 250
+      }
+    },
+    "delta_qwen3_minus_prerank": {
+      "A_prod": {
+        "page_hit_at_5": 0.248,
+        "page_hit_at_10": 0.144,
+        "mrr": 0.2169,
+        "ndcg_at_10": 0.1433,
+        "mean_unique_pages_top10": 0.136,
+        "mean_duplicate_page_occupancy_top10": -0.0136
+      },
+      "R_page": {
+        "page_hit_at_5": 0.244,
+        "page_hit_at_10": 0.136,
+        "mrr": 0.196,
+        "ndcg_at_10": 0.1278,
+        "mean_unique_pages_top10": 0.0,
+        "mean_duplicate_page_occupancy_top10": 0.0
+      }
+    },
+    "paired_counts": {
+      "A_prod": {
+        "hit_at_5": {
+          "gain": 72,
+          "loss": 10,
+          "unchanged": 168
+        },
+        "hit_at_10": {
+          "gain": 40,
+          "loss": 4,
+          "unchanged": 206
+        }
+      },
+      "R_page": {
+        "hit_at_5": {
+          "gain": 71,
+          "loss": 10,
+          "unchanged": 169
+        },
+        "hit_at_10": {
+          "gain": 39,
+          "loss": 5,
+          "unchanged": 206
+        }
+      }
+    }
+  },
+  "call_accounting": {
+    "candidate_embedding_remote_calls": 1851,
+    "qwen3_logical_calls": 500,
+    "qwen3_physical_attempts": 500,
+    "qwen3_tokens": 2392888,
+    "rerank_fallbacks": 0,
+    "remote_calls": 2351,
+    "billing_semantics": "persisted_complete_cases_at_least_once",
+    "unobserved_inflight_remote_calls_possible": true
+  },
+  "per_case_sha256": "5e27c5a1ce2a442ea7b04768f0d5fc655b1e9dbb170e5b69c61915b01de235ee",
+  "remote_calls": 2351,
+  "qwen3_calls": 500,
+  "primary_comparison_valid": true,
+  "product_accuracy_claim": false
+}

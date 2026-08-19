@@ -26,6 +26,7 @@ from .page_collapse import (
 class RankingArm:
     name: str
     pool_strategy: str
+    source_k: int
     rerank_k: int
     final_k: int
 
@@ -34,12 +35,14 @@ ARM_SPECS = {
     "A_prod": RankingArm(
         name="A_prod",
         pool_strategy="ranked_chunks",
+        source_k=20,
         rerank_k=20,
         final_k=10,
     ),
     "R_page": RankingArm(
         name="R_page",
-        pool_strategy="unique_pages_backfilled",
+        pool_strategy="unique_pages_same_source_window",
+        source_k=20,
         rerank_k=20,
         final_k=10,
     ),
@@ -52,10 +55,11 @@ def prepare_rerank_pool(
     arm: str | RankingArm,
 ) -> list[dict[str, Any]]:
     spec = ARM_SPECS[arm] if isinstance(arm, str) else arm
+    source_window = list(ranked_hits[: spec.source_k])
     if spec.pool_strategy == "ranked_chunks":
-        return list(ranked_hits[: spec.rerank_k])
-    if spec.pool_strategy == "unique_pages_backfilled":
-        return collapse_to_unique_pages(ranked_hits, k=spec.rerank_k)
+        return source_window[: spec.rerank_k]
+    if spec.pool_strategy == "unique_pages_same_source_window":
+        return collapse_to_unique_pages(source_window, k=spec.rerank_k)
     raise ValueError(f"unsupported holdout pool strategy: {spec.pool_strategy}")
 
 

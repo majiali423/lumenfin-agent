@@ -193,12 +193,14 @@ class HoldoutOfflineRankingTests(unittest.TestCase):
         return row
 
     def test_arm_specs_keep_candidate_budget_equal(self) -> None:
+        self.assertEqual(ARM_SPECS["A_prod"].source_k, 20)
+        self.assertEqual(ARM_SPECS["R_page"].source_k, 20)
         self.assertEqual(ARM_SPECS["A_prod"].rerank_k, 20)
         self.assertEqual(ARM_SPECS["R_page"].rerank_k, 20)
         self.assertEqual(ARM_SPECS["A_prod"].final_k, 10)
         self.assertEqual(ARM_SPECS["R_page"].final_k, 10)
 
-    def test_r_page_backfills_beyond_duplicate_heavy_top20(self) -> None:
+    def test_r_page_does_not_take_candidates_beyond_prod_top20(self) -> None:
         hits: list[dict] = []
         for page in range(1, 11):
             hits.append(self._hit(f"page-{page}-a", page))
@@ -209,10 +211,10 @@ class HoldoutOfflineRankingTests(unittest.TestCase):
         prod_pool = prepare_rerank_pool(hits, arm="A_prod")
         page_pool = prepare_rerank_pool(hits, arm="R_page")
         self.assertEqual(len(prod_pool), 20)
-        self.assertEqual(len(page_pool), 20)
+        self.assertEqual(len(page_pool), 10)
         self.assertNotIn("gold-page-12", {hit["chunk_id"] for hit in prod_pool})
-        self.assertIn("gold-page-12", {hit["chunk_id"] for hit in page_pool})
-        self.assertEqual(unique_pages_top_k(page_pool, k=20), 20)
+        self.assertNotIn("gold-page-12", {hit["chunk_id"] for hit in page_pool})
+        self.assertEqual(unique_pages_top_k(page_pool, k=20), 10)
 
     def test_case_metrics_preserve_unknown_rank_slots(self) -> None:
         question = self._question("holdout-ranking-1", 12)

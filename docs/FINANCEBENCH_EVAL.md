@@ -456,6 +456,7 @@ prompt version recorded.
 | Frozen config used for confirmation | `data/eval_rag/financebench/frozen_config.json`; hash `18a483f604f3a5420264e746d9219e77e3c9bddbd91c5c50252025b40ccb1ee7`; tag `financebench-confirmation-v1` |
 | Confirmation-50 (formerly dev-50) | **RECORDED** 2026-08-16; one-shot unseen at execution; now consumed/exposed; Hit@5 0.50, Hit@10 0.62, MRR 0.2955, nDCG@10 0.3461; **not** product accuracy; retune forbidden |
 | Candidate-pool / Qwen3 A/B/C on exposed test-100 | **RECORDED** 2026-08-17; post-hoc diagnostic; config hash `d0370c073be46fc42c2c6dded458182e3332e644666388b7111265d9b40e7bbd`; C is next-generation candidate only; production stays A; retune on test-100 forbidden |
+| LEDGER public-dev retrieval / packing / generate canaries | **SEALED / STOPPED** 2026-08-19; aggregates under `data/eval_rag/holdout/ledger_public_dev_*.json`; not FinanceBench; not product accuracy; `public_holdout` unopened; do not embed a page-parent index; protocol in [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) |
 | Phase 4 end-to-end answer metrics | `NOT_RUN` |
 
 Do not copy synthetic gate scores **or** these FinanceBench page-level rows

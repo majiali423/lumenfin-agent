@@ -36,7 +36,14 @@ def _dcg(relevances: Sequence[int]) -> float:
 def ndcg_at_k(retrieved: Sequence[object], relevant: set[object], *, k: int) -> float:
     if not relevant:
         return 0.0
-    grades = [1 if item in relevant else 0 for item in retrieved[:k]]
+    seen: set[object] = set()
+    grades: list[int] = []
+    for item in retrieved[:k]:
+        if item in seen:
+            grades.append(0)
+            continue
+        seen.add(item)
+        grades.append(1 if item in relevant else 0)
     ideal = [1] * min(k, len(relevant))
     ideal_dcg = _dcg(ideal)
     if ideal_dcg <= 0:

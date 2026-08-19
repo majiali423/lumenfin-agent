@@ -1,0 +1,41 @@
+{
+  "schema_version": "lumenfin_ledger_section_parent.v1",
+  "probe_source_sha256": "da675687b800ee71eb76f276877761217630f89ce7b26d2a7afa156e81c6e579",
+  "cases": 200,
+  "companies": 5,
+  "cases_per_company": 40,
+  "selection": {
+    "strategy": "frozen_5x50_company_suffix_v1",
+    "companies": 5,
+    "cases": 200,
+    "cases_per_company": 40,
+    "start_index": 10,
+    "parent_query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044",
+    "prefix_query_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
+    "query_ids_sha256": "7bd0906ea034b7c2a679957ac0ad82f1583934872f689c82385d5cc7a9aa9c33",
+    "gold_identity_sha256": "43c3cd1292530f3b32b7599d2b7d1c4f54f49bc8501d4b952e1dc25b2732c442"
+  },
+  "arm": "P_page",
+  "locked_index_unit": "page_parent_full",
+  "pages_indexed": 2427,
+  "pool_hit_at_20": {
+    "hybrid_chunk": 148,
+    "parent_page_bm25": 103,
+    "delta_parent_minus_hybrid": -45
+  },
+  "parent_hit_at_10": 66,
+  "paired_pool_hit": {
+    "gain": 12,
+    "loss": 57,
+    "unchanged": 131
+  },
+  "taxonomy_pool_miss_cases": 45,
+  "taxonomy_pool_miss_recovered": 11,
+  "recommended_next_workstream": "do_not_embed_page_parent_index",
+  "remote_calls": 0,
+  "qwen3_calls": 0,
+  "generate_calls": 0,
+  "product_accuracy_claim": false,
+  "financebench_phase4": "NOT_RUN",
+  "per_case_sha256": "a93f464921bb20afa1110a128a28735a440b017c3e68fb6aa42b8727f2e1a79f"
+}

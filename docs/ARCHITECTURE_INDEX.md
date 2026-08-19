@@ -44,7 +44,7 @@ Reliability layers (current):
 | [architecture_decisions.md](architecture_decisions.md) | Why LangGraph, planner, AST quant, fail-loud |
 | [evaluation_strategy.md](evaluation_strategy.md) | How LumenFin evaluates diligence quality |
 | [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench retrieval eval harness |
-| [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | Next unseen-holdout phase: ranking / diversity / parent retrieval |
+| [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | LEDGER public-dev sealed/stopped; further ranking work needs a new unseen holdout |
 | [MCP.md](MCP.md) | MCP tool layer boundary |
 | [../mcp_layer/README.md](../mcp_layer/README.md) | MCP servers/adapters |
 

@@ -1,0 +1,85 @@
+{
+  "schema_version": "lumenfin_ledger_e2e_failure_taxonomy.v1",
+  "taxonomy_source_sha256": "1347b55e9ee2d080b05845ac37e4322789f2294a833b0f3aed22c7617a34b980",
+  "e2e_run_identity_sha256": "d798ce2da83127f0c304ed30e5f98e6267f2beac492cb18a9a363e1a3dde7c5b",
+  "e2e_aggregate_sha256": "22f6bc9394c988b2d7277c639d841d50690b31709c748d790a31651ed062dec6",
+  "e2e_per_case_sha256": "39a8bcfc59ab83715ff5b67fdaeb5bcf7a4eed4481e995abd70c0d3d35a1bc12",
+  "candidate_cache_sha256": "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a",
+  "cases": 50,
+  "selection": {
+    "cases": 50,
+    "companies": 5,
+    "cases_per_company": 10,
+    "parent_query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044",
+    "query_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
+    "strategy": "frozen_5x50_company_prefix_v1"
+  },
+  "arm": "A_prod",
+  "comparison": {
+    "lexical": {
+      "arm": "lexical",
+      "cases": 50,
+      "leak_class_counts": {
+        "numeric_match": 11,
+        "unsupported_match": 1,
+        "retrieval_pool_miss": 15,
+        "ranking_top10_miss": 9,
+        "evidence_gap_unselected_chunk": 4,
+        "evidence_gap_number_absent": 10,
+        "generation_abstain": 0,
+        "generation_miss": 0
+      },
+      "ranking_class_counts": {
+        "gold_not_in_rerank_pool": 16,
+        "gold_in_pool_not_in_final_top10": 9,
+        "hit_at_10": 25
+      },
+      "next_workstream_counts": {
+        "section_parent_retrieval": 25,
+        "ranking": 9,
+        "none": 11,
+        "do_not_credit_generation": 1,
+        "same_page_parent_or_table_pack": 4
+      },
+      "recommended_next_workstream": "ranking",
+      "pool_hit_cases": 34,
+      "hit_at_10_cases": 25,
+      "number_in_final_context_cases": 13
+    },
+    "qwen3": {
+      "arm": "qwen3",
+      "cases": 50,
+      "leak_class_counts": {
+        "numeric_match": 15,
+        "unsupported_match": 1,
+        "retrieval_pool_miss": 15,
+        "ranking_top10_miss": 1,
+        "evidence_gap_unselected_chunk": 2,
+        "evidence_gap_number_absent": 16,
+        "generation_abstain": 0,
+        "generation_miss": 0
+      },
+      "ranking_class_counts": {
+        "gold_not_in_rerank_pool": 16,
+        "hit_at_10": 33,
+        "gold_in_pool_not_in_final_top10": 1
+      },
+      "next_workstream_counts": {
+        "section_parent_retrieval": 31,
+        "ranking": 1,
+        "none": 15,
+        "do_not_credit_generation": 1,
+        "same_page_parent_or_table_pack": 2
+      },
+      "recommended_next_workstream": "section_parent_retrieval",
+      "pool_hit_cases": 34,
+      "hit_at_10_cases": 33,
+      "number_in_final_context_cases": 16
+    }
+  },
+  "recommended_next_workstream": "section_parent_retrieval",
+  "remote_calls": 0,
+  "product_accuracy_claim": false,
+  "financebench_phase4": "NOT_RUN",
+  "per_case_sha256": "b0e07aa2a42a687185b10658762e2123e3d3b0eae87ccb647dbe730dabb9ccfa"
+}

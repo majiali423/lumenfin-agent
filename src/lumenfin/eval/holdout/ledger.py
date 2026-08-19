@@ -23,6 +23,7 @@ SPLIT_ALGORITHM = "sha256_company_key_v1"
 MANIFEST_SCHEMA = "lumenfin_public_benchmark_manifest.v1"
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+_PAGE_SPLIT_RE = re.compile(re.escape(LEDGER_PAGE_DELIMITER), re.IGNORECASE)
 
 
 def _required_text(row: Mapping[str, Any], field: str) -> str:
@@ -99,17 +100,21 @@ def adapt_ledger_row(row: Mapping[str, Any]) -> dict[str, Any]:
     mmd_text = row.get("mmd_text")
     if not isinstance(mmd_text, str) or not mmd_text.strip():
         raise HoldoutError("LEDGER row needs non-empty mmd_text")
-    page_count = mmd_text.count(LEDGER_PAGE_DELIMITER) + 1
+    page_count = len(_PAGE_SPLIT_RE.split(mmd_text))
     if page_count < 2:
         raise HoldoutError("LEDGER mmd_text must contain page delimiters")
     qrels = _normalize_qrels(row.get("qrels"))
     expected_doc_prefix = f"{exchange}_{ticker}_".casefold()
     if any(
-        not str(item["doc_id"]).casefold().startswith(expected_doc_prefix)
+        re.fullmatch(
+            re.escape(expected_doc_prefix) + r"\d{4}/page_\d{4,}",
+            str(item["doc_id"]).casefold(),
+        )
+        is None
         for item in qrels
     ):
         raise HoldoutError(
-            "LEDGER qrel doc_id crosses the query exchange+ticker boundary"
+            "LEDGER qrel doc_id is malformed or crosses the query exchange+ticker boundary"
         )
 
     return {

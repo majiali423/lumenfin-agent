@@ -55,10 +55,37 @@ class DashScopeEmbeddingTestCase(unittest.TestCase):
         self.assertEqual(out[0][0], 1.0)
         self.assertEqual(out[1][1], 1.0)
         self.assertEqual(mock_client.post.call_count, 1)
+        self.assertEqual(provider.last_physical_calls, 1)
         args, kwargs = mock_client.post.call_args
         self.assertIn("/embeddings", args[0])
         self.assertEqual(kwargs["json"]["dimensions"], 1024)
         self.assertEqual(kwargs["json"]["input"], ["alpha", "beta"])
+
+    def test_physical_call_count_tracks_internal_batches(self) -> None:
+        mock_client = MagicMock()
+
+        def post(_url, *, json, **_kwargs):
+            response = MagicMock()
+            response.is_error = False
+            response.json.return_value = {
+                "data": [
+                    {"index": index, "embedding": [1.0] + [0.0] * 63}
+                    for index, _text in enumerate(json["input"])
+                ]
+            }
+            return response
+
+        mock_client.post.side_effect = post
+        provider = DashScopeEmbeddingProvider(
+            api_key="sk-test",
+            model="text-embedding-v4",
+            dimension=64,
+            client=mock_client,
+        )
+        vectors = provider.embed([f"text-{index}" for index in range(23)])
+        self.assertEqual(len(vectors), 23)
+        self.assertEqual(mock_client.post.call_count, 3)
+        self.assertEqual(provider.last_physical_calls, 3)
 
     def test_rejects_bad_dimension(self) -> None:
         with self.assertRaises(ValueError):

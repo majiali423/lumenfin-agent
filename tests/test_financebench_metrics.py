@@ -49,6 +49,12 @@ class FinanceBenchMetricsTests(unittest.TestCase):
         self.assertEqual(recall_at_k(retrieved, relevant, k=5), 0.5)
         self.assertFalse(single_gold_recall_equals_hit(len(relevant)))
 
+    def test_duplicate_relevant_page_does_not_inflate_ndcg(self) -> None:
+        self.assertEqual(
+            ndcg_at_k(["gold", "gold"], {"gold"}, k=2),
+            1.0,
+        )
+
     def test_bootstrap_ci_is_deterministic(self) -> None:
         values = [1.0, 0.0, 1.0, 0.5]
         first = bootstrap_mean_ci(values, n_bootstrap=200, seed=7)

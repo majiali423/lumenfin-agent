@@ -44,6 +44,16 @@ data/**
 !data/eval_rag/holdout/
 !data/eval_rag/holdout/schema_example.jsonl
 !data/eval_rag/holdout/ledger_public_manifest.json
+!data/eval_rag/holdout/ledger_public_dev_bm25_baseline.json
+!data/eval_rag/holdout/ledger_public_dev_hybrid_stratified_5x50.json
+!data/eval_rag/holdout/ledger_public_dev_qwen3_paired_5x50.json
+!data/eval_rag/holdout/ledger_public_dev_e2e_canary_5x10.json
+!data/eval_rag/holdout/ledger_public_dev_e2e_failure_taxonomy_5x10.json
+!data/eval_rag/holdout/ledger_public_dev_parent_pack_probe_5x10.json
+!data/eval_rag/holdout/ledger_public_dev_parent_pack_suffix_5x40.json
+!data/eval_rag/holdout/ledger_public_dev_parent_page_e2e_5x40.json
+!data/eval_rag/holdout/ledger_public_dev_parent_page_e2e_taxonomy_5x40.json
+!data/eval_rag/holdout/ledger_public_dev_section_parent_bm25_5x40.json
 !data/.gitkeep
 
 .env

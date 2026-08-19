@@ -1,0 +1,135 @@
+{
+  "schema_version": "lumenfin_ledger_public_dev_scoring.v1",
+  "split": "public_dev",
+  "cases": 7615,
+  "arms": {
+    "A_prod": {
+      "arm": {
+        "name": "A_prod",
+        "pool_strategy": "ranked_chunks",
+        "source_k": 20,
+        "rerank_k": 20,
+        "final_k": 10
+      },
+      "cases": 7615,
+      "pool_hit_rate": 0.4412,
+      "page_hit_at_5": 0.2144,
+      "page_hit_at_10": 0.3124,
+      "mrr": 0.1391,
+      "ndcg_at_10": 0.0796,
+      "mean_unique_pages_top10": 8.9913,
+      "mean_page_identity_coverage_top10": 1.0,
+      "mean_duplicate_page_occupancy_top10": 0.1009,
+      "failure_class_counts": {
+        "hit_at_10": 2379,
+        "gold_in_pool_not_in_final_top10": 981,
+        "gold_not_in_rerank_pool": 4255
+      },
+      "scoring_status": "public_dev_offline_prerank",
+      "remote_calls": 0
+    },
+    "R_page": {
+      "arm": {
+        "name": "R_page",
+        "pool_strategy": "unique_pages_same_source_window",
+        "source_k": 20,
+        "rerank_k": 20,
+        "final_k": 10
+      },
+      "cases": 7615,
+      "pool_hit_rate": 0.4412,
+      "page_hit_at_5": 0.2235,
+      "page_hit_at_10": 0.3308,
+      "mrr": 0.1433,
+      "ndcg_at_10": 0.0844,
+      "mean_unique_pages_top10": 9.9825,
+      "mean_page_identity_coverage_top10": 1.0,
+      "mean_duplicate_page_occupancy_top10": 0.0,
+      "failure_class_counts": {
+        "hit_at_10": 2519,
+        "gold_in_pool_not_in_final_top10": 841,
+        "gold_not_in_rerank_pool": 4255
+      },
+      "scoring_status": "public_dev_offline_prerank",
+      "remote_calls": 0
+    }
+  },
+  "call_accounting": {
+    "retrieval_calls": 7615,
+    "retrieval_remote_calls": 0,
+    "rerank_calls": 0,
+    "rerank_attempts": 0,
+    "rerank_fallbacks": 0,
+    "remote_calls": 0
+  },
+  "primary_comparison_valid": false,
+  "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
+  "run_config": {
+    "schema_version": "lumenfin_ledger_ranking_run_config.v2",
+    "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
+    "manifest_canonical_sha256": "e0a3266e3f2492c4f2cdb3e226cdc35d87286fc2f6b0e3bfe432187442932cad",
+    "evaluator_source_sha256": "0c25c3de8346af05b4fceb74c832b576b2e20ad1501f0963f652a1ee7f9df2ca",
+    "arms": {
+      "A_prod": {
+        "name": "A_prod",
+        "pool_strategy": "ranked_chunks",
+        "source_k": 20,
+        "rerank_k": 20,
+        "final_k": 10
+      },
+      "R_page": {
+        "name": "R_page",
+        "pool_strategy": "unique_pages_same_source_window",
+        "source_k": 20,
+        "rerank_k": 20,
+        "final_k": 10
+      }
+    },
+    "embedding_provider": "deterministic",
+    "embedding_dimension": 384,
+    "embedding_model": "",
+    "retrieval_mode": "bm25",
+    "collection_schema": "dense_bm25_v1",
+    "qrel_policy": "drop_unindexable_blank_qrels_v1",
+    "python_version": "3.12.9",
+    "package_versions": {
+      "jieba": "0.42.1",
+      "milvus-lite": "3.1.0",
+      "pymilvus": "3.0.0"
+    }
+  },
+  "run_config_sha256": "721e68ba3ea99fc469cf0fae98ea918ef7874f42bea0185fe95e25575e3c9785",
+  "per_case_sha256": "48c42f246950b5c0092505f3fb8c95b553493add6500347224c883a39ea6eae2",
+  "source_manifest_sha256": "b337429afa31f2f2aaf10143eb4720e03b2557d46bf679a030adcb2a31b5631f",
+  "index": {
+    "documents_indexed": 36215,
+    "chunks_indexed": 269454,
+    "embed_calls": 290,
+    "companies": 85,
+    "reports": 372,
+    "embedding_provider": "deterministic",
+    "retrieval_mode": "bm25",
+    "shards": 17,
+    "indexes_retained": false
+  },
+  "qrel_corpus_audit": {
+    "policy": "drop_unindexable_blank_qrels_v1",
+    "blank_pages_indexed": false,
+    "source_queries": 7616,
+    "scorable_queries": 7615,
+    "scorable_query_ids_sha256": "3dcfdab4b585834634c89d0b0d7a590862cdee19007960ca69366d4106c4ac75",
+    "ignored_zero_qrels": 116,
+    "unavailable_positive_qrels": 72,
+    "queries_with_unavailable_positive_qrels": 69,
+    "excluded_queries_without_reachable_positive": 1,
+    "excluded_query_ids_sha256": "f1e85e3e237632a945f65b497fff4dfa7da3ef85019b32730215d0e70cd30253"
+  },
+  "selection": {
+    "strategy": "company_modulo_shard_v1",
+    "company_shards": 17,
+    "selected_cases": 7615,
+    "selected_companies": 85
+  },
+  "remote_calls": 0,
+  "qwen3_calls": 0
+}

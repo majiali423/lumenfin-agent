@@ -18,6 +18,12 @@ from .ledger import (
     iter_ledger_parquet_rows,
     ledger_snapshot_sha256,
 )
+from .ledger_corpus import (
+    LedgerPublicDevDataset,
+    build_ledger_public_dev_dataset,
+    ledger_public_dev_qrel_audit,
+)
+from .ledger_scoring import score_ledger_public_dev
 from .page_collapse import (
     collapse_to_unique_pages,
     duplicate_page_occupancy,
@@ -43,6 +49,7 @@ __all__ = [
     "HOLDOUT_SPLIT",
     "HoldoutError",
     "LEDGER_DATASET_ID",
+    "LedgerPublicDevDataset",
     "PUBLIC_DEV",
     "PUBLIC_HOLDOUT",
     "RankingArm",
@@ -51,17 +58,20 @@ __all__ = [
     "adapt_ledger_row",
     "assign_ledger_company_split",
     "build_ledger_split_manifest",
+    "build_ledger_public_dev_dataset",
     "collapse_to_unique_pages",
     "duplicate_page_occupancy",
     "evaluate_ranking_case",
     "holdout_file_sha256",
     "iter_ledger_parquet_rows",
     "ledger_snapshot_sha256",
+    "ledger_public_dev_qrel_audit",
     "load_holdout_questions",
     "page_identity_coverage_top_k",
     "prepare_rerank_pool",
     "resolve_holdout_questions_path",
     "section_metadata_for",
+    "score_ledger_public_dev",
     "summarize_ranking_cases",
     "unique_pages_top_k",
     "validate_holdout_request",

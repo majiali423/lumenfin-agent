@@ -44,8 +44,8 @@ release gate.
 | [INPUT_GUARDRAIL.md](INPUT_GUARDRAIL.md) | Input and upload guards |
 | [MCP.md](MCP.md) | Optional MCP boundary |
 | [evaluation_strategy.md](evaluation_strategy.md) | Internal evaluation strategy |
-| [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench RAG retrieval eval (test-100 exploratory; confirmation-50 consumed; candidate-pool A/B/C sealed as next-gen candidate only; not product accuracy) |
-| [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | Next eval-only phase: reranker / page diversity / section-parent retrieval on new unseen data; production stays A |
+| [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench RAG retrieval eval (test-100 exploratory; confirmation-50 consumed; A/B/C sealed; LEDGER public-dev sealed and stopped; Phase 4 `NOT_RUN`; not product accuracy) |
+| [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | LEDGER public-dev chain is sealed; do not embed page-parent index; production stays A; further work needs a new unseen holdout |
 | [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
 | [README_zh.md](README_zh.md) | Legacy Chinese stub — prefer root [../README.zh-CN.md](../README.zh-CN.md) |
 

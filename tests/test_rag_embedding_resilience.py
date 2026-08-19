@@ -72,6 +72,7 @@ class EmbeddingResilienceTestCase(unittest.TestCase):
         self.assertEqual(len(vectors), 1)
         self.assertEqual(flaky.calls, 3)
         self.assertEqual(provider.last_attempts, 3)
+        self.assertEqual(provider.last_physical_calls, 3)
         self.assertEqual(sleeps, [0.25, 0.5])
 
     def test_resilient_gives_up_on_persistent_timeout(self) -> None:
@@ -105,12 +106,12 @@ class QueryCacheAndDegradeTestCase(unittest.TestCase):
         shutil.rmtree(self.root, ignore_errors=True)
 
     def test_query_embedding_cached_across_searches(self) -> None:
-        counter = DeterministicEmbeddingProvider()
         # Wrap with a counting shim
         class Counting:
             def __init__(self) -> None:
                 self.inner = DeterministicEmbeddingProvider()
                 self.calls = 0
+                self.last_physical_calls = 0
 
             @property
             def dimension(self) -> int:
@@ -118,6 +119,7 @@ class QueryCacheAndDegradeTestCase(unittest.TestCase):
 
             def embed(self, texts: list[str]) -> list[list[float]]:
                 self.calls += 1
+                self.last_physical_calls = 1
                 return self.inner.embed(texts)
 
         counting = Counting()
@@ -138,7 +140,11 @@ class QueryCacheAndDegradeTestCase(unittest.TestCase):
             index_calls = counting.calls
             store.prime_query_embedding("Apple supply chain risk")
             self.assertEqual(counting.calls, index_calls + 1)
+            self.assertEqual(store.last_query_embed_physical_calls, 1)
+            self.assertFalse(store.last_query_embed_cache_hit)
             store.vector_search("Apple supply chain risk", session_id="sess", companies=["Apple"], top_k=2)
+            self.assertEqual(store.last_query_embed_physical_calls, 0)
+            self.assertTrue(store.last_query_embed_cache_hit)
             store.vector_search("Apple supply chain risk", session_id="sess", companies=["Apple"], top_k=2)
             # Same query should not re-embed.
             self.assertEqual(counting.calls, index_calls + 1)

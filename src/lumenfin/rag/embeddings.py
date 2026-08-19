@@ -6,11 +6,11 @@ import math
 import os
 import re
 import time
-from typing import Any, Callable, Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 import httpx
 
-from ..provider_retry import call_with_transient_retry
 from ..provider_resilience import (
     InvalidProviderResponseError,
     ProviderCallContext,
@@ -121,17 +121,20 @@ class DashScopeEmbeddingProvider:
         ).rstrip("/")
         self._timeout = float(timeout_seconds)
         self._client = client
+        self.last_physical_calls = 0
 
     @property
     def dimension(self) -> int:
         return self._dimension
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        self.last_physical_calls = 0
         if not texts:
             return []
         vectors: list[list[float]] = []
         for start in range(0, len(texts), _DASHSCOPE_BATCH):
             batch = texts[start : start + _DASHSCOPE_BATCH]
+            self.last_physical_calls += 1
             vectors.extend(self._embed_batch(batch))
         return vectors
 
@@ -163,7 +166,7 @@ class DashScopeEmbeddingProvider:
             )
         try:
             data = response.json()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise InvalidProviderResponseError(f"malformed embedding JSON: {exc}") from exc
         items = data.get("data") or []
         # OpenAI-compatible responses may be unordered; sort by index.
@@ -205,6 +208,7 @@ class ResilientEmbeddingProvider:
         self._call_context = call_context
         self.jitter_ratio = float(jitter_ratio)
         self.last_attempts = 0
+        self.last_physical_calls = 0
         self.last_error: str | None = None
         self.last_embed_ms = 0.0
         self.last_embed_chars = 0
@@ -223,6 +227,7 @@ class ResilientEmbeddingProvider:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         self.last_attempts = 0
+        self.last_physical_calls = 0
         self.last_error = None
         self.last_embed_ms = 0.0
         self.last_embed_chars = sum(len(text or "") for text in texts)
@@ -243,7 +248,12 @@ class ResilientEmbeddingProvider:
         before = len(context.trace_sink)
 
         def _call() -> list[list[float]]:
-            return self._inner.embed(texts)
+            try:
+                return self._inner.embed(texts)
+            finally:
+                self.last_physical_calls += int(
+                    getattr(self._inner, "last_physical_calls", 1)
+                )
 
         release = None
         try:

@@ -41,5 +41,18 @@
     }
   },
   "scoring_enabled": false,
+  "public_dev_offline_bm25_preflight_enabled": true,
+  "public_dev_corpus_audit": {
+    "policy": "drop_unindexable_blank_qrels_v1",
+    "blank_pages_indexed": false,
+    "source_queries": 7616,
+    "scorable_queries": 7615,
+    "scorable_query_ids_sha256": "3dcfdab4b585834634c89d0b0d7a590862cdee19007960ca69366d4106c4ac75",
+    "ignored_zero_qrels": 116,
+    "unavailable_positive_qrels": 72,
+    "queries_with_unavailable_positive_qrels": 69,
+    "excluded_queries_without_reachable_positive": 1,
+    "excluded_query_ids_sha256": "f1e85e3e237632a945f65b497fff4dfa7da3ef85019b32730215d0e70cd30253"
+  },
   "remote_calls": 0
 }

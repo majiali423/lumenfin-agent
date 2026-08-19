@@ -1,0 +1,65 @@
+{
+  "schema_version": "lumenfin_ledger_parent_pack_probe.v1",
+  "probe_source_sha256": "bb1d6da4e66366d82e582447754721a50475c66bb37dbadd6e444fbabf32888d",
+  "e2e_run_identity_sha256": "d798ce2da83127f0c304ed30e5f98e6267f2beac492cb18a9a363e1a3dde7c5b",
+  "taxonomy_source_sha256": "1347b55e9ee2d080b05845ac37e4322789f2294a833b0f3aed22c7617a34b980",
+  "cases": 50,
+  "arm": "A_prod",
+  "ranking_arm": "qwen3",
+  "recovered_cases": {
+    "chunk_final": 16,
+    "retrieved_page_full": 38,
+    "retrieved_page_window_1": 44,
+    "gold_page_full": 46
+  },
+  "recovered_by_leak_class": {
+    "evidence_gap_number_absent": {
+      "cases": 16,
+      "chunk_final": 0,
+      "retrieved_page_full": 16,
+      "retrieved_page_window_1": 16,
+      "gold_page_full": 15
+    },
+    "evidence_gap_unselected_chunk": {
+      "cases": 2,
+      "chunk_final": 0,
+      "retrieved_page_full": 2,
+      "retrieved_page_window_1": 2,
+      "gold_page_full": 2
+    },
+    "numeric_match": {
+      "cases": 15,
+      "chunk_final": 15,
+      "retrieved_page_full": 15,
+      "retrieved_page_window_1": 15,
+      "gold_page_full": 13
+    },
+    "ranking_top10_miss": {
+      "cases": 1,
+      "chunk_final": 0,
+      "retrieved_page_full": 1,
+      "retrieved_page_window_1": 1,
+      "gold_page_full": 0
+    },
+    "retrieval_pool_miss": {
+      "cases": 15,
+      "chunk_final": 0,
+      "retrieved_page_full": 3,
+      "retrieved_page_window_1": 9,
+      "gold_page_full": 15
+    },
+    "unsupported_match": {
+      "cases": 1,
+      "chunk_final": 1,
+      "retrieved_page_full": 1,
+      "retrieved_page_window_1": 1,
+      "gold_page_full": 1
+    }
+  },
+  "recommended_next_workstream": "retrieve_child_return_parent_page",
+  "remote_calls": 0,
+  "product_accuracy_claim": false,
+  "financebench_phase4": "NOT_RUN",
+  "latency_scope": "text_packing_not_generation",
+  "per_case_sha256": "70ac8e3752504ac4e30fed65e81c13fbcfd488adcdb0b7e3e75c7b4eef562946"
+}

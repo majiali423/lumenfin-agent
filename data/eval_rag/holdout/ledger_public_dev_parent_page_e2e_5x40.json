@@ -1,0 +1,92 @@
+{
+  "schema_version": "lumenfin_ledger_parent_page_e2e.v1",
+  "e2e_source_sha256": "98a4ff84e7f18b1314775c3b2fc336ac236c9d1bcb95ae778fa8219b90bec735",
+  "parent_return_source_sha256": "05cf7bea35cf04061a5c2bdd213ac82a03d15ecf85ab528b248ad2056224b8a7",
+  "run_identity_sha256": "1cc44cf5a9642fefa70b34283d0f0456fc0392a25d1620320cd2844f8a63d51e",
+  "split": "public_dev",
+  "cases": 200,
+  "selection": {
+    "strategy": "frozen_5x50_company_suffix_v1",
+    "companies": 5,
+    "cases": 200,
+    "cases_per_company": 40,
+    "start_index": 10,
+    "parent_query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044",
+    "prefix_query_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
+    "query_ids_sha256": "7bd0906ea034b7c2a679957ac0ad82f1583934872f689c82385d5cc7a9aa9c33",
+    "gold_identity_sha256": "43c3cd1292530f3b32b7599d2b7d1c4f54f49bc8501d4b952e1dc25b2732c442"
+  },
+  "candidate_manifest": {
+    "candidate_cache_sha256": "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a",
+    "candidate_set_identity_sha256": "108959e3b0c1efae6ded7c25d0575d12cd6fef8da789b8429ba18b374e6b393a"
+  },
+  "llm_settings": {
+    "model": "deepseek-v4-flash",
+    "timeout_seconds": 45.0,
+    "max_retries": 3,
+    "temperature": 0.0,
+    "max_tokens": 200,
+    "base_url_sha256": "a34e2a4708ed1c61008a151688838dcf1c44d4e7f08054633e72ba7c0b16cfc1"
+  },
+  "chunk_max_document_chars": 4000,
+  "comparison": {
+    "chunk": {
+      "arm": "chunk",
+      "cases": 200,
+      "numeric_accuracy": 0.51,
+      "abstain_rate": 0.4,
+      "citation_support_rate": 0.0,
+      "generate_error_cases": 0,
+      "generate_attempts": 200,
+      "generate_tokens": 435100,
+      "prompt_chars": 1381511,
+      "latency_ms": {
+        "p50_generate": 735.2,
+        "p95_generate": 1075.81,
+        "mean_generate": 789.98
+      }
+    },
+    "parent_page": {
+      "arm": "parent_page",
+      "cases": 200,
+      "numeric_accuracy": 0.715,
+      "abstain_rate": 0.21,
+      "citation_support_rate": 0.005,
+      "generate_error_cases": 0,
+      "generate_attempts": 200,
+      "generate_tokens": 1745293,
+      "prompt_chars": 5699395,
+      "latency_ms": {
+        "p50_generate": 1133.68,
+        "p95_generate": 1856.19,
+        "mean_generate": 1192.7
+      }
+    },
+    "delta_parent_minus_chunk": {
+      "numeric_accuracy": 0.205,
+      "citation_support_rate": 0.005
+    },
+    "paired_numeric_match": {
+      "gain": 41,
+      "loss": 0,
+      "unchanged": 159
+    }
+  },
+  "call_accounting": {
+    "qwen3_calls": 0,
+    "generate_logical_calls": 400,
+    "generate_physical_attempts": 400,
+    "generate_errors": 0,
+    "billing_semantics": "persisted_complete_cases_at_least_once",
+    "unobserved_inflight_remote_calls_possible": true,
+    "latency_scope": "generate_not_production_e2e"
+  },
+  "qwen3_calls": 0,
+  "generate_calls": 400,
+  "locked_strategy": "retrieved_page_full",
+  "arm": "A_prod",
+  "primary_comparison_valid": true,
+  "product_accuracy_claim": false,
+  "financebench_phase4": "NOT_RUN",
+  "per_case_sha256": "d7fde129d11f45b477928807c3b8577fe316e354a0bff20bae326ba322b2cfab"
+}

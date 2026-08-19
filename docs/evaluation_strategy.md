@@ -97,6 +97,13 @@ end-to-end QA, and **not** the 10-case Qwen3 hard-negative gate (Top-1/MRR
 1.0000). Do not rerun or retune. Phase 4 end-to-end answer metrics remain
 `NOT_RUN`.
 
+LEDGER `public_dev` retrieval / packing / numeric-generate canaries are
+**sealed and stopped** (see [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md)).
+They are a public development benchmark, not product accuracy and not
+FinanceBench Phase 4. `public_holdout` remains unopened. Locked next on
+that chain is `do_not_embed_page_parent_index`. Production RAG defaults
+are unchanged.
+
 ## 后续增强方向
 
 1. 加 golden trace 数据集，作为每次改动后的回归基准。
@@ -104,7 +111,8 @@ end-to-end QA, and **not** the 10-case Qwen3 hard-negative gate (Top-1/MRR
 3. 记录每个节点耗时和 token 成本。
 4. 对 PDF 抽取结果做字段级置信度评分。
 5. 把 evaluator 接入 API，前端展示运行质量分。
-6. FinanceBench 端到端回答评测（数值 / citation / 拒答），与检索阶段分开。
-7. 新的未见 holdout 上做 reranker / 页面多样性 / section-parent retrieval
-   （[FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md)）。禁止在
-   test-100 或 confirmation-50 上再调参；生产默认仍为 A。
+6. FinanceBench 端到端回答评测（Phase 4）仍为 `NOT_RUN`；不要在已消耗的
+   150 题上补跑。
+7. 若再做检索实验，先独立出题并冻私有 holdout，或打开尚未打分的 LEDGER
+   `public_holdout`。禁止在 FinanceBench test-100 / confirmation-50 或
+   已看过的 LEDGER 5×50 后缀上再调参；生产默认仍为 A。
