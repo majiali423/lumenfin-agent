@@ -108,6 +108,23 @@ python scripts\validate_cross_repo.py --profile ci
 The summary records both commits, FinRun schema, profile, and core/extended
 mutation results. LumenFin CI also runs this gate at the pinned evaluator tag.
 
+### External RAG eval (FinanceBench + LEDGER)
+
+These are **page-retrieval / packing canaries**, not FinAgentBench and not
+product accuracy. FinanceBench end-to-end answers (Phase 4) remain `NOT_RUN`.
+Production retrieval defaults (chunker, lexical reranker) are unchanged.
+
+- FinanceBench confirmation-50 is **consumed**: page Hit@10 `0.62`. Do not
+  rerun or retune. Aggregate:
+  [`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json).
+- LEDGER `public_dev` is **sealed and stopped**. Parent-page *return* is
+  eval-only; do **not** embed a page-parent index. `public_holdout` is
+  unopened. Aggregates:
+  [`data/eval_rag/holdout/`](data/eval_rag/holdout/).
+- Protocol: [docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) ·
+  [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md).
+  Offline checks: [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md).
+
 ---
 
 ## One-command offline demo
@@ -243,7 +260,7 @@ flowchart TD
 | Analyze | `quant`, `psychologist` | AST-safe financial calculations and management-sentiment analysis |
 | Validate and repair | `critic`, `repair`, `claim_binder` | Completeness checks, directed re-run, Claim–Evidence Binding |
 | Publish (in-graph) | `synthesizer` → `END` | Verified-only report; LangGraph ends here |
-| Evaluate (out-of-graph) | FinRun export, FinAgentBench | Post-run artifact + independent sibling evaluator |
+| Evaluate (out-of-graph) | FinRun export, FinAgentBench, optional FinanceBench/LEDGER | Replay evaluator + sealed RAG canaries (not product accuracy) |
 
 Routing details and edge conditions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -353,7 +370,9 @@ Do **not** merge these into one “accuracy” number.
 | **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational; measured under evaluator pin `v0.1.0-rc.1`) |
 | Core mutation detection | Wrong entity / number / citation / risk | **4/4** |
 | **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.3` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
-| **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback) |
+| **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback; **not** FinanceBench) |
+| **FinanceBench confirmation-50** | Page-level retrieval on a consumed split | Hit@10 **0.62**; not product accuracy; Phase 4 `NOT_RUN` |
+| **LEDGER public-dev** | Public KPI retrieval / packing / generate canary | **Sealed / stopped**; not product accuracy; do not embed page-parent index |
 | **Compose hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
 
 The **RC-tag** unit-regression counts were frozen during full validation on
@@ -473,17 +492,21 @@ Full text: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)
 | [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md) | Controlled RC boundary + validated gate summary |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | Supported commands |
+| [docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) | External FinanceBench page retrieval (consumed; Phase 4 `NOT_RUN`) |
+| [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md) | LEDGER public-dev sealed/stopped; production stays A |
 
 ---
 
 ## Repository layout
 
 ```text
-src/lumenfin/     Agent runtime, grounding, claims, FinRun, RAG, providers
-tests/            Offline regression
-scripts/          Tests, demos, queue/worker + provider-resilience harnesses
-docs/             Architecture and release docs
-reports/current/  Authoritative RC evidence packs
+src/lumenfin/           Agent runtime, grounding, claims, FinRun, RAG, providers
+src/lumenfin/eval/      FinanceBench + LEDGER eval harness (does not change production RAG)
+tests/                  Offline regression
+scripts/                Tests, demos, workers, sealed eval runners
+docs/                   Architecture and release docs
+data/eval_rag/          Tracked aggregates only (no raw questions or PDFs)
+reports/current/        Authoritative RC evidence packs
 ```
 
 ---

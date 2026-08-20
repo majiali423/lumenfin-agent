@@ -75,6 +75,16 @@ evidence pages. Operators must obtain the dataset under its own terms and keep
 it in a gitignored directory such as `data/external/financebench/`. LumenFin's
 MIT license does not relicense FinanceBench.
 
+## LEDGER
+
+The optional public-dev KPI retrieval canary uses
+[artefactory/ledger-long-context-KPI-QA](https://huggingface.co/datasets/artefactory/ledger-long-context-KPI-QA)
+(data CC-BY-4.0; LEDGER code MIT). This repository does not vendor the parquet
+or report text. Operators must obtain the pinned snapshot locally. Tracked
+files under `data/eval_rag/holdout/` are identity hashes and numeric
+aggregates only. LumenFin's MIT license does not relicense LEDGER data.
+`public_holdout` scoring is disabled.
+
 ## External services and data
 
 DeepSeek, Alibaba Cloud DashScope, SEC EDGAR, Yahoo Finance, and any configured

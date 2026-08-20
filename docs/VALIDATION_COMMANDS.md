@@ -166,3 +166,19 @@ python scripts/run_financebench_retrieval_eval.py `
   --embedding-provider dashscope --embedding-dimension 1024 `
   --index-scope company --keep-index --top-k 10
 ```
+
+## 8. LEDGER public-dev (sealed / stopped)
+
+LEDGER scores are a **public development canary**, not product accuracy and
+not FinanceBench Phase 4. Do not open `public_holdout`. Do not embed a
+page-parent index. Do not rescore the frozen 5×50 suffix.
+
+Tracked aggregates: `data/eval_rag/holdout/ledger_public_dev_*.json`.
+Protocol: [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md).
+
+Offline identity / unit checks only (do not re-run remote scoring or rewrite
+the tracked manifest):
+
+```powershell
+python -m unittest tests.test_ledger_public_benchmark tests.test_ledger_section_parent tests.test_ledger_parent_page_e2e -v
+```

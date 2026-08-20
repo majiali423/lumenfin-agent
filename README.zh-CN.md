@@ -103,6 +103,21 @@ python scripts\validate_cross_repo.py --profile ci
 摘要记录双方 commit、FinRun schema、profile 与 core/extended mutation 结果。
 LumenFin CI 也会在 pin 的评测器 tag 上运行该门禁。
 
+### 外部 RAG 评测（FinanceBench + LEDGER）
+
+这是**页级检索 / packing canary**，不是 FinAgentBench，也不是产品准确率。
+FinanceBench 端到端答题（Phase 4）仍为 `NOT_RUN`。生产检索默认（chunker、
+lexical reranker）未改。
+
+- FinanceBench confirmation-50 已**消耗**：页 Hit@10 `0.62`。不要重跑或据此调参。
+  聚合：[`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json)。
+- LEDGER `public_dev` 已**封存并停止**。整页 *返回* 仅限 eval；**不要**给
+  page-parent 索引做 embedding。`public_holdout` 未打开。聚合：
+  [`data/eval_rag/holdout/`](data/eval_rag/holdout/)。
+- 协议：[docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) ·
+  [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md)。
+  离线检查：[docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md)。
+
 ---
 
 ## 一键离线演示
@@ -237,7 +252,7 @@ flowchart TD
 | Analyze | `quant`, `psychologist` | AST-safe 财务计算与管理层情绪分析 |
 | Validate and repair | `critic`, `repair`, `claim_binder` | 完整性检查、定向重跑、Claim–Evidence Binding |
 | Publish（图内） | `synthesizer` → `END` | 仅发布已验证报告；LangGraph 在此结束 |
-| Evaluate（图外） | FinRun export、FinAgentBench | 运行后产物 + 独立 sibling 评测器 |
+| Evaluate（图外） | FinRun export、FinAgentBench、可选 FinanceBench/LEDGER | 回放评测器 + 已封存 RAG canary（不是产品准确率） |
 
 路由细节与边条件见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
@@ -343,7 +358,9 @@ PDF / SEC / Yahoo / market providers
 | **Benchmark reliability** | FinAgentBench 完成案例均分 | **92.97**（informational；在评测器 pin `v0.1.0-rc.1` 下测得） |
 | Core mutation detection | 错误实体 / 数值 / 引用 / 风险 | **4/4** |
 | **Evaluator compatibility** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.3` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
-| **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback） |
+| **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback；**不是** FinanceBench） |
+| **FinanceBench confirmation-50** | 已消耗切分上的页级检索 | Hit@10 **0.62**；不是产品准确率；Phase 4 `NOT_RUN` |
+| **LEDGER public-dev** | 公开 KPI 检索 / packing / 生成 canary | **已封存并停止**；不是产品准确率；不要给 page-parent 索引做 embedding |
 | **Compose hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
 
 **RC 标签**单元回归计数冻结于 2026-08-12 全量验证，并随
@@ -457,17 +474,21 @@ flowchart LR
 | [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md) | 受控 RC 边界与已验证门禁摘要 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
 | [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md) | 支持的命令 |
+| [docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) | 外部 FinanceBench 页检索（已消耗；Phase 4 `NOT_RUN`） |
+| [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md) | LEDGER public-dev 已封存停止；生产仍为 A |
 
 ---
 
 ## 仓库结构
 
 ```text
-src/lumenfin/     Agent 运行时、grounding、claims、FinRun、RAG、providers
-tests/            离线回归
-scripts/          测试、演示、queue/worker + provider-resilience harness
-docs/             架构与发布文档
-reports/current/  权威 RC 证据包
+src/lumenfin/           Agent 运行时、grounding、claims、FinRun、RAG、providers
+src/lumenfin/eval/      FinanceBench + LEDGER 评测 harness（不改生产 RAG）
+tests/                  离线回归
+scripts/                测试、演示、worker、已封存评测 runner
+docs/                   架构与发布文档
+data/eval_rag/          仅跟踪聚合（不含原题或 PDF）
+reports/current/        权威 RC 证据包
 ```
 
 ---

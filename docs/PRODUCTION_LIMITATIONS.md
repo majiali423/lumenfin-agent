@@ -103,6 +103,9 @@ across API containers may reach the **sum** of per-process bulkhead limits.
 - Human review remains required for material decisions
 - FinAgentBench measures FinRun replay / execution reliability; it does not
   prove future investment performance or act as a third-party market benchmark
+- FinanceBench page Hit@k and LEDGER public-dev canaries are **not** product
+  accuracy. Phase 4 answer metrics remain `NOT_RUN`. Production RAG defaults
+  are unchanged; do not treat sealed eval packers as a cutover
 - Project-owned source is MIT licensed
 - PyMuPDF licensing (AGPL-3.0 and/or commercial terms) remains a blocker for
   publishing the application image as a purely MIT artifact

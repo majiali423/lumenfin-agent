@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Evaluation
+
+- Sealed the LEDGER `public_dev` retrieval / packing / generate canary chain
+  under `data/eval_rag/holdout/`. Parent-page *return* stays eval-only; do not
+  embed a page-parent index. `public_holdout` remains unopened. FinanceBench
+  Phase 4 stays `NOT_RUN`. Production RAG defaults are unchanged.
+
 ## 0.1.0rc4 — 2026-08-13
 
 Controlled release candidate for tenant authorization, upgrade safety, and
