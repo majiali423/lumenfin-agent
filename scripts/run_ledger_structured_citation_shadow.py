@@ -2,8 +2,10 @@
 """LEDGER public/dev structured-citation shadow CLI.
 
 Exposed public/dev shadow only. Not held-out, not product accuracy, not a
-LEDGER benchmark, and not rc5. This stage implements tools and preflight;
-it does not authorize a paid remote run.
+LEDGER benchmark, and not rc5. Formal scoring requires both
+--confirm-exposed-shadow and --allow-remote. Preflight refuses remote
+authorization and makes no provider calls. This stage does not run the paid
+public/dev shadow.
 """
 from __future__ import annotations
 
@@ -53,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-remote",
         action="store_true",
-        help="Required for a future paid run. This stage must not pass it.",
+        help="Required for a paid public/dev run together with --confirm-exposed-shadow.",
     )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
@@ -89,10 +91,10 @@ def main(argv: list[str] | None = None) -> int:
             args.frozen_config,
             require_published=require_published,
         )
-        if args.allow_remote and not args.preflight_only:
-            raise ShadowError(
-                "this stage forbids --allow-remote; do not run the paid public/dev shadow"
-            )
+        if args.preflight_only and args.allow_remote:
+            raise ShadowError("refusing --allow-remote with --preflight-only")
+        if not args.preflight_only and not args.allow_remote:
+            raise ShadowError("formal scoring requires --allow-remote")
         run_shadow(
             repo_root=ROOT,
             frozen_config=config,
@@ -104,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
             allow_remote=bool(args.allow_remote),
             preflight_only=bool(args.preflight_only),
             resume=bool(args.resume),
+            live_generate=bool(args.allow_remote) and not bool(args.preflight_only),
+            strict_paths=True,
         )
         return 0
     except ShadowError as exc:

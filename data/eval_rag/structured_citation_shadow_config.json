@@ -21,6 +21,12 @@
   },
   "lumenfin_protocol_commit": "78a719e2b744777aee5353acc24b9b88c410066e",
   "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
+  "candidate_cache": {
+    "manifest_path": "data/eval_rag/structured_citation_shadow_cache_manifest.json",
+    "manifest_sha256": "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90",
+    "cache_kind": "frozen_hybrid_candidate_replay",
+    "not_live_production_retrieval": true
+  },
   "split_manifest": {
     "path": "data/eval_rag/holdout/ledger_public_manifest.json",
     "sha256": "889329d3647a3c4543d12fa0ebae0172969e787bb877f73c2f0aee967a4920d5",
@@ -169,5 +175,5 @@
       "config_hash"
     ]
   },
-  "config_hash": "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
+  "config_hash": "ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e"
 }

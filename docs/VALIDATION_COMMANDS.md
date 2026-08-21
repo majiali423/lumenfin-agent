@@ -205,16 +205,21 @@ not product accuracy).
 
 Exposed public/dev shadow harness. Not held-out, not product accuracy, not a
 LEDGER benchmark, not rc5. Refuses `public_holdout`. Do **not** run official
-preflight or `--allow-remote` in this stage.
+preflight or the paid public/dev shadow in this stage.
 
 Frozen config:
-[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
+[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json)
+(`config_hash` `ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e`;
+previous unused hash `3e834f0e…` never executed).
+Cache identity:
+[`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
 
 ```powershell
 python -m unittest tests.test_ledger_structured_citation_shadow tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
 ```
 
-Future official CLI (do not execute yet):
+Future official CLI (do not execute yet). Dual key: `--confirm-exposed-shadow`
+AND `--allow-remote`. Preflight must omit `--allow-remote`.
 
 ```powershell
 python scripts/run_ledger_structured_citation_shadow.py `

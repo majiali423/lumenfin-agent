@@ -54,8 +54,15 @@ image has been created. Latest published LumenFin remains
   `ledger-public-dev-chain-v1` / `ec4d9e40`. Frozen config:
   `data/eval_rag/structured_citation_shadow_config.json`. This is an
   exposed public/dev shadow tool, not held-out, not product accuracy, not
-  a new LEDGER benchmark, and not rc5. Official preflight and
-  `--allow-remote` are not run in this stage. `public_holdout` stays closed.
+  a new LEDGER benchmark, and not rc5. Official preflight and the paid
+  public/dev shadow are not run in this stage. `public_holdout` stays closed.
+- Hardened that shadow harness with dual-key remote authorization
+  (`--confirm-exposed-shadow` AND `--allow-remote`), a tracked frozen
+  hybrid candidate-cache identity manifest, and split protocol/execution
+  commits. The previous unused config hash
+  `3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac`
+  never executed and produced no results; the revised hash is
+  `ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e`.
 
 ## 0.1.0rc4 — 2026-08-13
 

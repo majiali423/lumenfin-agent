@@ -18,6 +18,7 @@ import re
 import socket
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -58,8 +59,15 @@ SEAL_TAG = "ledger-public-dev-chain-v1"
 SEAL_TARGET_COMMIT = "ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c"
 PROTOCOL_COMMIT = "78a719e2b744777aee5353acc24b9b88c410066e"
 DEFAULT_FROZEN_CONFIG_PATH = Path("data") / "eval_rag" / "structured_citation_shadow_config.json"
+DEFAULT_CACHE_MANIFEST_PATH = (
+    Path("data") / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
+)
 DEFAULT_OFFICIAL_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_v1"
 DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v1"
+CACHE_MANIFEST_SCHEMA = "lumenfin_ledger_structured_citation_shadow_cache.v1"
+PREVIOUS_UNUSED_CONFIG_HASH = (
+    "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
+)
 CHAIN_SEAL_RELATIVE = Path("data") / "eval_rag" / "holdout" / "ledger_public_dev_chain_seal.json"
 SPLIT_MANIFEST_RELATIVE = Path("data") / "eval_rag" / "holdout" / "ledger_public_manifest.json"
 SEALED_BASELINE_RELATIVE = (
@@ -104,6 +112,30 @@ STRUCTURED_SHADOW_SYSTEM_PROMPT = (
 GenerateFn = Callable[[Mapping[str, Any]], str]
 
 
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    model: str
+    timeout_seconds: float
+    max_retries: int
+    retry_backoff_seconds: float
+    base_url: str
+    prompt: str
+    rerank_provider: str
+    rerank_instruct: str
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "timeout_seconds": self.timeout_seconds,
+            "max_retries": self.max_retries,
+            "retry_backoff_seconds": self.retry_backoff_seconds,
+            "base_url_sha256": chat_base_url_sha256(self.base_url),
+            "prompt_sha256": prompt_sha256(self.prompt),
+            "rerank_provider": self.rerank_provider,
+            "rerank_instruct": self.rerank_instruct,
+        }
+
+
 class ShadowError(ValueError):
     """Fail-closed structured-citation shadow error. No secrets, no holdout text."""
 
@@ -140,6 +172,249 @@ def chat_base_url_sha256(url: str = DEFAULT_CHAT_BASE_URL) -> str:
     return hashlib.sha256(url.strip().encode("utf-8")).hexdigest()
 
 
+def sha256_raw_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def select_prefix_rows(
+    rows: list[Mapping[str, Any]],
+    *,
+    cases_per_company: int,
+) -> list[Mapping[str, Any]]:
+    blocks: list[list[Mapping[str, Any]]] = []
+    current_key = None
+    current: list[Mapping[str, Any]] = []
+    for row in rows:
+        key = str(row.get("company_key_sha256") or "")
+        if current_key is None:
+            current_key = key
+        if key != current_key:
+            blocks.append(current)
+            current = []
+            current_key = key
+        current.append(row)
+    if current:
+        blocks.append(current)
+    selected: list[Mapping[str, Any]] = []
+    for block in blocks:
+        selected.extend(block[: int(cases_per_company)])
+    return selected
+
+
+def chunk_ids_sha256(rows: list[Mapping[str, Any]]) -> str:
+    payload = [
+        {
+            "query_id": str(row.get("query_id") or row.get("case_id") or ""),
+            "chunk_ids": [
+                str(hit.get("chunk_id") or "") for hit in (row.get("hits") or [])
+            ],
+        }
+        for row in rows
+    ]
+    return sha256_text(canonical_dumps(payload))
+
+
+def load_cache_rows(path: Path) -> list[dict[str, Any]]:
+    safe = assert_safe_input_path(path, field="candidate-cache")
+    if not safe.is_file():
+        raise ShadowError("frozen candidate cache is missing")
+    rows: list[dict[str, Any]] = []
+    for line in safe.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            raise ShadowError("candidate cache row is invalid")
+        rows.append(payload)
+    return rows
+
+
+def verify_candidate_cache(
+    *,
+    repo_root: Path,
+    config: FrozenShadowConfig,
+) -> dict[str, Any]:
+    rel = Path(str(config.field("candidate_cache", "manifest_path") or DEFAULT_CACHE_MANIFEST_PATH))
+    manifest_path = assert_safe_input_path(repo_root / rel, field="cache-manifest")
+    payload = read_json_object(manifest_path, field="cache-manifest")
+    actual_hash = sha256_normalized_file(manifest_path)
+    expected_hash = str(config.field("candidate_cache", "manifest_sha256") or "")
+    if actual_hash != expected_hash:
+        raise ShadowError("candidate cache manifest hash mismatch")
+    if payload.get("schema_version") != CACHE_MANIFEST_SCHEMA:
+        raise ShadowError("candidate cache manifest schema mismatch")
+    if payload.get("rebuild_forbidden") is not True:
+        raise ShadowError("candidate cache must forbid rebuild")
+    if payload.get("embedding_fallback_forbidden") is not True:
+        raise ShadowError("candidate cache must forbid embedding fallback")
+    if payload.get("not_live_production_retrieval") is not True:
+        raise ShadowError("candidate cache must be marked as frozen replay")
+    rag = payload.get("rag_config") or {}
+    expected_rag = config.field("production_rag") or {}
+    for key in ("arm", "ranking_arm", "pool_strategy", "source_k", "rerank_k", "final_k"):
+        if rag.get(key) != expected_rag.get(key):
+            raise ShadowError("candidate cache RAG identity does not match frozen config")
+    embedding = payload.get("embedding_identity") or {}
+    frozen_embed = config.field("embedding") or {}
+    if (
+        embedding.get("provider") != frozen_embed.get("provider")
+        or embedding.get("model") != frozen_embed.get("model")
+        or int(embedding.get("dimension") or 0) != int(frozen_embed.get("dimension") or 0)
+    ):
+        raise ShadowError("candidate cache embedding identity does not match frozen config")
+    rerank = payload.get("rerank_identity") or {}
+    if str(rerank.get("provider") or "") != str(config.field("reranker", "provider")):
+        raise ShadowError("candidate cache rerank identity does not match frozen config")
+    cache_rel = Path(str(payload.get("source_path_identity") or ""))
+    cache_path = assert_safe_input_path(repo_root / cache_rel, field="candidate-cache")
+    report = {
+        "manifest_sha256": actual_hash,
+        "cache_file_sha256": str(payload.get("cache_file_sha256") or ""),
+        "case_ids_sha256": str(payload.get("case_ids_sha256") or ""),
+        "chunk_ids_sha256": str(payload.get("chunk_ids_sha256") or ""),
+        "candidate_set_identity_sha256": str(payload.get("candidate_set_identity_sha256") or ""),
+        "cache_kind": str(payload.get("cache_kind") or ""),
+        "not_live_production_retrieval": True,
+        "cache_present": cache_path.is_file(),
+    }
+    if not cache_path.is_file():
+        raise ShadowError("frozen candidate cache is missing")
+    before = sha256_raw_file(cache_path)
+    if before != str(payload.get("cache_file_sha256") or ""):
+        raise ShadowError("candidate cache file hash mismatch")
+    rows = load_cache_rows(cache_path)
+    after = sha256_raw_file(cache_path)
+    if after != before:
+        raise ShadowError("candidate cache changed during read")
+    if len(rows) != int(payload.get("candidate_records_count") or -1):
+        raise ShadowError("candidate cache record count mismatch")
+    query_ids = [str(row.get("query_id") or "") for row in rows]
+    if len(query_ids) != len(set(query_ids)):
+        raise ShadowError("candidate cache contains duplicate case ids")
+    parent_hash = ids_sha256(query_ids)
+    if parent_hash != str(payload.get("parent_query_ids_sha256") or ""):
+        raise ShadowError("candidate cache parent case id hash mismatch")
+    prefix = select_prefix_rows(
+        rows,
+        cases_per_company=int(config.field("case_selection", "cases_per_company") or 10),
+    )
+    if len(prefix) != int(payload.get("case_count") or -1):
+        raise ShadowError("candidate cache prefix case count mismatch")
+    prefix_ids = [str(row.get("query_id") or "") for row in prefix]
+    if ids_sha256(prefix_ids) != str(payload.get("case_ids_sha256") or ""):
+        raise ShadowError("candidate cache prefix case id hash mismatch")
+    if ids_sha256(prefix_ids) != str(config.field("case_selection", "query_ids_sha256") or ""):
+        raise ShadowError("candidate cache prefix does not match frozen case selection")
+    if chunk_ids_sha256(prefix) != str(payload.get("chunk_ids_sha256") or ""):
+        raise ShadowError("candidate cache chunk id hash mismatch")
+    hits_per = int(payload.get("hits_per_case") or 0)
+    if any(len(row.get("hits") or []) != hits_per for row in prefix):
+        raise ShadowError("candidate cache hit count mismatch")
+    if any(
+        not str(hit.get("chunk_id") or "").strip()
+        for row in prefix
+        for hit in (row.get("hits") or [])
+    ):
+        raise ShadowError("candidate cache is missing chunk ids")
+    local_manifest_rel = Path(str(payload.get("source_local_manifest_identity") or ""))
+    if str(local_manifest_rel):
+        local_manifest = repo_root / local_manifest_rel
+        if local_manifest.is_file():
+            local_hash = sha256_normalized_file(
+                assert_safe_input_path(local_manifest, field="local-cache-manifest")
+            )
+            if local_hash != str(payload.get("local_candidate_manifest_sha256") or ""):
+                raise ShadowError("local candidate manifest hash mismatch")
+    report["prefix_case_ids"] = prefix_ids
+    report["verified"] = True
+    return report
+
+
+def capture_runtime_snapshot() -> RuntimeSnapshot:
+    settings = LLMSettings.from_env()
+    rerank_provider = (os.getenv("MAS_RAG_RERANK_PROVIDER") or "lexical").strip().casefold()
+    if rerank_provider in {"dashscope", "dashscope-qwen3"}:
+        rerank_provider = "qwen3"
+    instruct = (
+        os.getenv("MAS_RAG_RERANK_INSTRUCT") or DEFAULT_RERANK_INSTRUCT
+    ).strip()
+    return RuntimeSnapshot(
+        model=settings.model,
+        timeout_seconds=float(settings.timeout_seconds),
+        max_retries=int(settings.max_retries),
+        retry_backoff_seconds=float(settings.retry_backoff_seconds),
+        base_url=settings.base_url,
+        prompt=STRUCTURED_SHADOW_SYSTEM_PROMPT,
+        rerank_provider=rerank_provider,
+        rerank_instruct=instruct,
+    )
+
+
+def verify_snapshot_matches_frozen(
+    snapshot: RuntimeSnapshot,
+    config: FrozenShadowConfig,
+) -> None:
+    if snapshot.model != str(config.field("chat", "model")):
+        raise ShadowError("runtime chat model does not match frozen config")
+    if float(snapshot.timeout_seconds) != float(config.field("chat", "timeout_seconds")):
+        raise ShadowError("runtime chat timeout does not match frozen config")
+    if int(snapshot.max_retries) != int(config.field("chat", "max_retries")):
+        raise ShadowError("runtime chat retry does not match frozen config")
+    if chat_base_url_sha256(snapshot.base_url) != str(config.field("chat", "base_url_sha256")):
+        raise ShadowError("runtime chat endpoint hash does not match frozen config")
+    if prompt_sha256(snapshot.prompt) != str(config.field("prompts", "system_prompt_sha256")):
+        raise ShadowError("runtime prompt hash does not match frozen config")
+    if snapshot.rerank_provider != str(config.field("reranker", "provider")):
+        raise ShadowError("runtime rerank provider does not match frozen config")
+    if snapshot.rerank_instruct != str(config.field("reranker", "instruct")):
+        raise ShadowError("runtime rerank instruct does not match frozen config")
+    rag = config.field("production_rag") or {}
+    arm = ARM_SPECS[str(rag.get("ranking_arm") or "A_prod")]
+    if (
+        arm.source_k != int(rag["source_k"])
+        or arm.rerank_k != int(rag["rerank_k"])
+        or arm.final_k != int(rag["final_k"])
+        or arm.pool_strategy != str(rag["pool_strategy"])
+    ):
+        raise ShadowError("runtime RAG A_prod spec does not match frozen config")
+
+
+def verify_runtime_matches_frozen(config: FrozenShadowConfig) -> RuntimeSnapshot:
+    snapshot = capture_runtime_snapshot()
+    verify_snapshot_matches_frozen(snapshot, config)
+    return snapshot
+
+
+def assert_exact_output_path(
+    path: Path,
+    expected: Path,
+    *,
+    repo_root: Path,
+    field: str,
+) -> Path:
+    actual = Path(path)
+    if actual.is_absolute():
+        expected_resolved = (repo_root / expected).resolve()
+        try:
+            actual_resolved = actual.resolve()
+        except OSError as exc:
+            raise ShadowError(f"{field} path is invalid") from exc
+        if actual_resolved != expected_resolved:
+            raise ShadowError(f"{field} must be the exact frozen output directory")
+        return actual
+    if actual.as_posix() != expected.as_posix():
+        raise ShadowError(f"{field} must be the exact frozen output directory")
+    return actual
+
+
+def refuse_env_remote_override() -> None:
+    for key in ("LUMENFIN_SHADOW_ALLOW_REMOTE", "ALLOW_REMOTE", "MAS_ALLOW_REMOTE"):
+        raw = os.getenv(key)
+        if raw and raw.strip() and raw.strip().lower() not in {"0", "false", "no"}:
+            raise ShadowError("environment variables cannot authorize remote shadow execution")
+
+
+
 def git_snapshot(repo_root: Path) -> dict[str, Any]:
     def _run(args: list[str]) -> str:
         result = subprocess.run(
@@ -154,7 +429,9 @@ def git_snapshot(repo_root: Path) -> dict[str, Any]:
     commit = _run(["git", "rev-parse", "HEAD"])
     porcelain = _run(["git", "status", "--porcelain"])
     return {
+        "execution_commit": commit or "unknown",
         "lumenfin_commit": commit or "unknown",
+        "protocol_ancestor": PROTOCOL_COMMIT,
         "worktree_dirty": bool(porcelain),
         "worktree_status": "dirty" if porcelain else "clean",
     }
@@ -317,6 +594,12 @@ def published_frozen_config_fields() -> dict[str, Any]:
         },
         "lumenfin_protocol_commit": PROTOCOL_COMMIT,
         "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
+        "candidate_cache": {
+            "manifest_path": DEFAULT_CACHE_MANIFEST_PATH.as_posix(),
+            "manifest_sha256": "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90",
+            "cache_kind": "frozen_hybrid_candidate_replay",
+            "not_live_production_retrieval": True,
+        },
         "split_manifest": {
             "path": SPLIT_MANIFEST_RELATIVE.as_posix(),
             "sha256": "889329d3647a3c4543d12fa0ebae0172969e787bb877f73c2f0aee967a4920d5",
@@ -526,6 +809,13 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
         raise ShadowError("frozen config must not claim a benchmark")
     if payload.get("retuning_allowed") is not False:
         raise ShadowError("frozen config must forbid retuning")
+    cache = payload.get("candidate_cache") or {}
+    if cache.get("not_live_production_retrieval") is not True:
+        raise ShadowError("frozen config must mark candidate cache as frozen replay")
+    if not str(cache.get("manifest_path") or "").strip():
+        raise ShadowError("frozen config is missing candidate cache manifest path")
+    if len(str(cache.get("manifest_sha256") or "")) != 64:
+        raise ShadowError("frozen config is missing candidate cache manifest hash")
     seal = payload.get("ledger_seal") or {}
     if seal.get("tag") != SEAL_TAG or seal.get("target_commit") != SEAL_TARGET_COMMIT:
         raise ShadowError("frozen config LEDGER seal identity mismatch")
@@ -536,39 +826,6 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
         raise ShadowError("frozen config contains a raw endpoint")
     if _ABS_PATH_RE.search(blob):
         raise ShadowError("frozen config contains a local absolute path")
-
-
-def verify_runtime_matches_frozen(config: FrozenShadowConfig) -> None:
-    settings = LLMSettings.from_env()
-    expected_model = str(config.field("chat", "model"))
-    if settings.model != expected_model:
-        raise ShadowError("runtime chat model does not match frozen config")
-    expected_timeout = float(config.field("chat", "timeout_seconds"))
-    if float(settings.timeout_seconds) != expected_timeout:
-        raise ShadowError("runtime chat timeout does not match frozen config")
-    expected_retries = int(config.field("chat", "max_retries"))
-    if int(settings.max_retries) != expected_retries:
-        raise ShadowError("runtime chat retry does not match frozen config")
-    actual_url_hash = chat_base_url_sha256(settings.base_url)
-    if actual_url_hash != str(config.field("chat", "base_url_sha256")):
-        raise ShadowError("runtime chat endpoint hash does not match frozen config")
-    rerank_provider = (os.getenv("MAS_RAG_RERANK_PROVIDER") or "lexical").strip().casefold()
-    if rerank_provider in {"dashscope", "dashscope-qwen3"}:
-        rerank_provider = "qwen3"
-    if rerank_provider != str(config.field("reranker", "provider")):
-        raise ShadowError("runtime rerank provider does not match frozen config")
-    instruct = os.getenv("MAS_RAG_RERANK_INSTRUCT")
-    if instruct and instruct.strip() != str(config.field("reranker", "instruct")):
-        raise ShadowError("runtime rerank instruct does not match frozen config")
-    rag = config.field("production_rag") or {}
-    arm = ARM_SPECS[str(rag.get("ranking_arm") or "A_prod")]
-    if (
-        arm.source_k != int(rag["source_k"])
-        or arm.rerank_k != int(rag["rerank_k"])
-        or arm.final_k != int(rag["final_k"])
-        or arm.pool_strategy != str(rag["pool_strategy"])
-    ):
-        raise ShadowError("runtime RAG A_prod spec does not match frozen config")
 
 
 def credential_presence(*, repo_root: Path) -> list[dict[str, Any]]:
@@ -1031,18 +1288,22 @@ def validate_resume_identity(
     config_hash: str,
     seal_hash: str,
     case_manifest_hash: str,
+    cache_hash: str,
     provider: str,
     model: str,
+    protocol_ancestor: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     manifest = read_json_object(output_dir / "manifest.json", field="manifest")
     checkpoint = read_json_object(output_dir / "checkpoint.json", field="checkpoint")
     rows = _read_complete_per_case(output_dir / "per_case.jsonl")
     per_case_ids = {str(row["case_id"]) for row in rows}
     expected = {
-        "lumenfin_commit": git_commit,
+        "execution_commit": git_commit,
+        "protocol_ancestor": protocol_ancestor,
         "config_hash": config_hash,
         "seal_hash": seal_hash,
         "case_manifest_hash": case_manifest_hash,
+        "candidate_cache_hash": cache_hash,
         "provider": provider,
         "model": model,
         "output_dirname": output_dir.name,
@@ -1064,12 +1325,15 @@ def validate_resume_identity(
 
 def identity_payload(
     *,
-    git_commit: str,
+    execution_commit: str,
+    protocol_ancestor: str,
     config_hash: str,
     seal_hash: str,
     case_manifest_hash: str,
+    cache_hash: str,
     provider: str,
     model: str,
+    prompt_sha256_value: str,
     output_dir: Path,
     completed_ids: list[str],
     cases_total: int,
@@ -1080,12 +1344,16 @@ def identity_payload(
     return {
         "schema_version": SCHEMA_VERSION,
         "suite": SUITE,
-        "lumenfin_commit": git_commit,
+        "protocol_ancestor": protocol_ancestor,
+        "execution_commit": execution_commit,
+        "lumenfin_commit": execution_commit,
         "config_hash": config_hash,
         "seal_hash": seal_hash,
         "case_manifest_hash": case_manifest_hash,
+        "candidate_cache_hash": cache_hash,
         "provider": provider,
         "model": model,
+        "prompt_sha256": prompt_sha256_value,
         "output_dirname": output_dir.name,
         "completed_case_ids": completed_ids,
         "completed_cases": len(completed_ids),
@@ -1101,6 +1369,7 @@ def identity_payload(
         "product_accuracy_claim": False,
         "benchmark_claim": False,
         "exposed_public_dev_shadow": True,
+        "not_live_production_retrieval": True,
     }
 
 
@@ -1194,8 +1463,10 @@ def run_preflight(
     if require_clean:
         require_protocol_ancestor(repo_root, str(frozen_config.field("lumenfin_protocol_commit")))
     bind = bind_chain_seal(repo_root=repo_root, config=frozen_config, verify_tag=verify_tag)
+    snapshot = None
     if verify_runtime:
-        verify_runtime_matches_frozen(frozen_config)
+        snapshot = verify_runtime_matches_frozen(frozen_config)
+    cache = verify_candidate_cache(repo_root=repo_root, config=frozen_config)
     if official_output_dir.exists() and any(official_output_dir.iterdir()):
         raise ShadowError("official shadow output directory already exists")
     credentials = credential_presence(repo_root=repo_root)
@@ -1205,10 +1476,18 @@ def run_preflight(
         "kind": "preflight",
         "suite": SUITE,
         "split": CANONICAL_SPLIT,
-        "lumenfin_commit": git["lumenfin_commit"],
+        "protocol_ancestor": str(frozen_config.field("lumenfin_protocol_commit")),
+        "execution_commit": git["execution_commit"],
+        "lumenfin_commit": git["execution_commit"],
         "worktree_status": git["worktree_status"],
         "config_hash": frozen_config.config_hash,
         "seal": bind,
+        "candidate_cache": {
+            key: value
+            for key, value in cache.items()
+            if key != "prefix_case_ids"
+        },
+        "runtime": None if snapshot is None else snapshot.public_dict(),
         "cases_executed": 0,
         "remote_request_count": 0,
         "remote_calls_expected": expected_calls,
@@ -1218,6 +1497,7 @@ def run_preflight(
         "product_accuracy_claim": False,
         "benchmark_claim": False,
         "exposed_public_dev_shadow": True,
+        "not_live_production_retrieval": True,
         "billing_semantics": BILLING_SEMANTICS,
         "exactly_once": False,
     }
@@ -1270,6 +1550,37 @@ def _write_run_artifacts(
     atomic_write_text(output_dir / "results.md", render_results_md(summary))
 
 
+def build_live_generate(snapshot: RuntimeSnapshot) -> GenerateFn:
+    from ..llm import DeepSeekChatClient, LLMSettings
+
+    settings = LLMSettings(
+        api_key=(os.getenv("DEEPSEEK_API_KEY") or "").strip() or None,
+        base_url=snapshot.base_url,
+        model=snapshot.model,
+        timeout_seconds=snapshot.timeout_seconds,
+        max_retries=snapshot.max_retries,
+        retry_backoff_seconds=snapshot.retry_backoff_seconds,
+    )
+    if settings.model != snapshot.model or settings.base_url != snapshot.base_url:
+        raise ShadowError("live provider snapshot drifted before initialization")
+    client = DeepSeekChatClient(settings)
+
+    def generate(case: Mapping[str, Any]) -> str:
+        user_prompt = build_generation_prompt(
+            query_text=str(case.get("query_text") or ""),
+            hits=list(case.get("hits") or []),
+            max_document_chars=4000,
+        )
+        return client.chat(
+            snapshot.prompt,
+            user_prompt,
+            temperature=0.0,
+            max_tokens=200,
+        )
+
+    return generate
+
+
 def run_shadow(
     *,
     repo_root: Path,
@@ -1290,7 +1601,11 @@ def run_shadow(
     allowlist: list[str] | None = None,
     sealed_override: Mapping[str, Any] | None = None,
     probe: NetworkProbe | None = None,
+    allow_injected_generate: bool = False,
+    live_generate: bool = False,
+    strict_paths: bool = False,
 ) -> dict[str, Any]:
+    refuse_env_remote_override()
     if not confirm_exposed_shadow:
         raise ShadowError("structured citation shadow requires --confirm-exposed-shadow")
     canonical_split(split)
@@ -1298,7 +1613,22 @@ def run_shadow(
         raise ShadowError("refusing --allow-remote with --preflight-only")
     if preflight_only and resume:
         raise ShadowError("refusing --resume with --preflight-only")
+    if preflight_only and live_generate:
+        raise ShadowError("refusing live generate with --preflight-only")
     if preflight_only:
+        if strict_paths:
+            assert_exact_output_path(
+                output_dir,
+                DEFAULT_OFFICIAL_OUTPUT_DIR,
+                repo_root=repo_root,
+                field="output-dir",
+            )
+            assert_exact_output_path(
+                preflight_output_dir,
+                DEFAULT_PREFLIGHT_OUTPUT_DIR,
+                repo_root=repo_root,
+                field="preflight-dir",
+            )
         return run_preflight(
             repo_root=repo_root,
             frozen_config=frozen_config,
@@ -1309,24 +1639,52 @@ def run_shadow(
             require_clean=require_clean,
             verify_runtime=verify_runtime,
         )
-    if allow_remote and generate_fn is None:
-        raise ShadowError("this stage forbids live provider generate")
-    if generate_fn is None:
+    if not allow_remote:
         raise ShadowError("formal scoring requires --allow-remote")
+    if generate_fn is not None and not allow_injected_generate:
+        raise ShadowError("injected generate is not part of the authorized CLI path")
+    if generate_fn is None and not live_generate:
+        raise ShadowError("live generate is only available through the CLI authorization path")
+    if generate_fn is not None and live_generate:
+        raise ShadowError("refusing injected generate with live generate")
+
+    if strict_paths:
+        assert_exact_output_path(
+            output_dir,
+            DEFAULT_OFFICIAL_OUTPUT_DIR,
+            repo_root=repo_root,
+            field="output-dir",
+        )
+        assert_exact_output_path(
+            preflight_output_dir,
+            DEFAULT_PREFLIGHT_OUTPUT_DIR,
+            repo_root=repo_root,
+            field="preflight-dir",
+        )
 
     git = git_snapshot(repo_root)
     if require_clean and git["worktree_dirty"]:
         raise ShadowError("structured citation shadow requires a clean worktree")
+    protocol_ancestor = str(frozen_config.field("lumenfin_protocol_commit"))
     if require_clean:
-        require_protocol_ancestor(repo_root, str(frozen_config.field("lumenfin_protocol_commit")))
+        require_protocol_ancestor(repo_root, protocol_ancestor)
+    snapshot = None
     if verify_runtime:
-        verify_runtime_matches_frozen(frozen_config)
+        snapshot = verify_runtime_matches_frozen(frozen_config)
+    elif live_generate:
+        raise ShadowError("live generate requires a frozen runtime snapshot")
+    cache = verify_candidate_cache(repo_root=repo_root, config=frozen_config)
     bind = bind_chain_seal(repo_root=repo_root, config=frozen_config, verify_tag=verify_tag)
     sealed = dict(sealed_override or read_sealed_baseline_readonly(repo_root=repo_root, config=frozen_config))
 
     expected_hash = str(frozen_config.field("case_selection", "query_ids_sha256"))
     if cases is None:
         if cases_path is None:
+            if live_generate:
+                raise ShadowError(
+                    "live shadow requires bound case payloads; parquet/query text "
+                    "is not auto-fetched and cache rebuild is forbidden"
+                )
             raise ShadowError("shadow cases fixture is required")
         expected_ids = allowlist or []
         cases = load_case_fixture(
@@ -1340,39 +1698,55 @@ def run_shadow(
             expected_ids=allowlist,
             expected_hash=expected_hash,
         )
+    if cache.get("prefix_case_ids") and allowlist is None:
+        if [str(item["case_id"]) for item in cases] != list(cache["prefix_case_ids"]):
+            raise ShadowError("case ids do not match verified candidate cache prefix")
+
+    if live_generate:
+        if snapshot is None:
+            raise ShadowError("live generate requires a frozen runtime snapshot")
+        active_generate: GenerateFn = build_live_generate(snapshot)
+    elif generate_fn is None:
+        raise ShadowError("live generate is only available through the CLI authorization path")
+    else:
+        active_generate = generate_fn
 
     require_fresh_or_resume(output_dir, resume=resume)
     output_dir.mkdir(parents=True, exist_ok=True)
     case_manifest_hash = ids_sha256([str(item["case_id"]) for item in cases])
     provider = str(frozen_config.field("chat", "provider"))
     model = str(frozen_config.field("chat", "model"))
+    prompt_digest = str(config_field_prompt(frozen_config, snapshot))
     completed_rows: list[dict[str, Any]] = []
     calls_this_invocation = 0
     if resume:
         completed_rows, _manifest, _checkpoint = validate_resume_identity(
             output_dir=output_dir,
-            git_commit=str(git["lumenfin_commit"]),
+            git_commit=str(git["execution_commit"]),
             config_hash=frozen_config.config_hash,
             seal_hash=str(bind["seal_commit"]),
             case_manifest_hash=case_manifest_hash,
+            cache_hash=str(cache["cache_file_sha256"]),
             provider=provider,
             model=model,
+            protocol_ancestor=protocol_ancestor,
         )
     completed_ids = [str(row["case_id"]) for row in completed_rows]
     remaining = [case for case in cases if str(case["case_id"]) not in set(completed_ids)]
-    owned_probe = probe is None
+    block_network = not live_generate
+    owned_probe = probe is None and block_network
     active_probe = probe or NetworkProbe()
-    if owned_probe:
+    if owned_probe or (probe is None and block_network):
         active_probe.install()
     try:
         for case in remaining:
             started = time.perf_counter()
             remote_before = active_probe.remote_request_count
             try:
-                raw = generate_fn(case)
+                raw = active_generate(case)
                 latency_ms = (time.perf_counter() - started) * 1000.0
                 remote_delta = active_probe.remote_request_count - remote_before
-                if remote_delta:
+                if block_network and remote_delta:
                     raise ShadowError("shadow generate performed a remote request")
                 row = score_case(
                     case,
@@ -1386,18 +1760,22 @@ def run_shadow(
             except Exception as exc:
                 row = failed_case(case, exc, remote_calls=1)
             calls_this_invocation += 1
-            row["remote_request_count"] = 0
+            row["remote_request_count"] = 0 if block_network else int(row.get("remote_calls") or 0)
+            row["not_live_production_retrieval"] = True
             append_completed_case(output_dir / "per_case.jsonl", row)
             completed_rows.append(row)
             completed_ids = [str(item["case_id"]) for item in completed_rows]
             calls_total = sum(int(item.get("remote_calls") or 0) for item in completed_rows)
             identity = identity_payload(
-                git_commit=str(git["lumenfin_commit"]),
+                execution_commit=str(git["execution_commit"]),
+                protocol_ancestor=protocol_ancestor,
                 config_hash=frozen_config.config_hash,
                 seal_hash=str(bind["seal_commit"]),
                 case_manifest_hash=case_manifest_hash,
+                cache_hash=str(cache["cache_file_sha256"]),
                 provider=provider,
                 model=model,
+                prompt_sha256_value=prompt_digest,
                 output_dir=output_dir,
                 completed_ids=completed_ids,
                 cases_total=len(cases),
@@ -1407,7 +1785,7 @@ def run_shadow(
             )
             atomic_write_json(output_dir / "manifest.json", identity)
             atomic_write_json(output_dir / "checkpoint.json", identity)
-        if active_probe.remote_request_count:
+        if block_network and active_probe.remote_request_count:
             raise ShadowError("shadow run performed a remote request")
     finally:
         if owned_probe:
@@ -1417,16 +1795,20 @@ def run_shadow(
     summary = summarize_rows(
         completed_rows,
         cases_total=len(cases),
-        remote_request_count=0,
+        remote_request_count=0 if block_network else calls_this_invocation,
         sealed=sealed,
     )
+    summary["not_live_production_retrieval"] = True
     identity = identity_payload(
-        git_commit=str(git["lumenfin_commit"]),
+        execution_commit=str(git["execution_commit"]),
+        protocol_ancestor=protocol_ancestor,
         config_hash=frozen_config.config_hash,
         seal_hash=str(bind["seal_commit"]),
         case_manifest_hash=case_manifest_hash,
+        cache_hash=str(cache["cache_file_sha256"]),
         provider=provider,
         model=model,
+        prompt_sha256_value=prompt_digest,
         output_dir=output_dir,
         completed_ids=[str(item["case_id"]) for item in completed_rows],
         cases_total=len(cases),
@@ -1435,15 +1817,20 @@ def run_shadow(
         calls_this_invocation=calls_this_invocation,
     )
     environment = {
-        "lumenfin_commit": git["lumenfin_commit"],
+        "protocol_ancestor": protocol_ancestor,
+        "execution_commit": git["execution_commit"],
         "worktree_status": git["worktree_status"],
         "config_hash": frozen_config.config_hash,
+        "candidate_cache_hash": cache["cache_file_sha256"],
         "chat_model": model,
         "chat_provider": provider,
+        "prompt_sha256": prompt_digest,
         "rerank_provider": frozen_config.field("reranker", "provider"),
+        "runtime": None if snapshot is None else snapshot.public_dict(),
         "credentials": credential_presence(repo_root=repo_root),
         "held_out": False,
         "product_accuracy_claim": False,
+        "not_live_production_retrieval": True,
     }
     _write_run_artifacts(
         output_dir=output_dir,
@@ -1457,8 +1844,17 @@ def run_shadow(
         "summary": summary,
         "identity": identity,
         "cases": completed_rows,
-        "remote_request_count": 0,
+        "remote_request_count": 0 if block_network else calls_this_invocation,
     }
+
+
+def config_field_prompt(
+    frozen_config: FrozenShadowConfig,
+    snapshot: RuntimeSnapshot | None,
+) -> str:
+    if snapshot is not None:
+        return prompt_sha256(snapshot.prompt)
+    return str(frozen_config.field("prompts", "system_prompt_sha256"))
 
 
 def parse_cli_guard(argv: list[str] | None = None) -> dict[str, Any]:

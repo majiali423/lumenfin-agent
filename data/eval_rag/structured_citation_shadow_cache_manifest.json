@@ -1,0 +1,49 @@
+{
+  "schema_version": "lumenfin_ledger_structured_citation_shadow_cache.v1",
+  "cache_kind": "frozen_hybrid_candidate_replay",
+  "not_live_production_retrieval": true,
+  "rebuild_forbidden": true,
+  "embedding_fallback_forbidden": true,
+  "readonly": true,
+  "source_path_identity": "outputs/ledger_public_dev_qwen3_paired_5x50_v3/candidates.jsonl",
+  "source_local_manifest_identity": "outputs/ledger_public_dev_qwen3_paired_5x50_v3/candidate_manifest.json",
+  "source_schema_version": "lumenfin_ledger_hybrid_candidates.v1",
+  "source_commit": "ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c",
+  "source_worktree_dirty": null,
+  "source_worktree_recorded": false,
+  "source_commit_reason": "candidate_cache_sha256 sealed into ledger_public_dev_qwen3_paired_5x50.json and the public-dev chain seal",
+  "parent_case_count": 250,
+  "parent_query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044",
+  "case_count": 50,
+  "case_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
+  "candidate_records_count": 250,
+  "hits_per_case": 20,
+  "candidate_ordering": "cache_file_order_company_blocks_then_frozen_5x50_company_prefix_v1",
+  "chunk_ids_sha256": "5fdda190968fe51089522e288effe78eb100d4b6d4b8353d3556d9882691a5ea",
+  "candidate_set_identity_sha256": "108959e3b0c1efae6ded7c25d0575d12cd6fef8da789b8429ba18b374e6b393a",
+  "cache_file_sha256": "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a",
+  "local_candidate_manifest_sha256": "4736633501e661e1290414ddaf91f131e16bb0ced64c575302a57808e610033b",
+  "rag_config": {
+    "arm": "A",
+    "ranking_arm": "A_prod",
+    "pool_strategy": "ranked_chunks",
+    "source_k": 20,
+    "rerank_k": 20,
+    "final_k": 10
+  },
+  "embedding_identity": {
+    "provider": "dashscope",
+    "model": "text-embedding-v4",
+    "dimension": 1024,
+    "used_in_this_suite": false
+  },
+  "rerank_identity": {
+    "provider": "lexical",
+    "model": "lexical",
+    "used_in_this_suite": true
+  },
+  "sealed_provenance": {
+    "qwen3_paired_artifact": "data/eval_rag/holdout/ledger_public_dev_qwen3_paired_5x50.json",
+    "e2e_canary_artifact": "data/eval_rag/holdout/ledger_public_dev_e2e_canary_5x10.json"
+  }
+}

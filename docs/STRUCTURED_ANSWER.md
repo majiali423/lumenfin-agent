@@ -137,8 +137,14 @@ benchmark, and not rc5. `public_holdout` stays closed. Production RAG A
 is unchanged.
 
 Frozen config:
-[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
-CLI: `scripts/run_ledger_structured_citation_shadow.py`. This stage
-implements binding, isolation, preflight, resume, and offline tests.
-Do **not** run official `--preflight-only` or `--allow-remote` until a
-later explicit approval.
+[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json)
+(`config_hash` `ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e`).
+Candidate-cache identity:
+[`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
+CLI: `scripts/run_ledger_structured_citation_shadow.py`.
+A future paid run requires both `--confirm-exposed-shadow` and
+`--allow-remote`, a verified frozen candidate cache, a clean worktree, and
+the exact official output directory. Preflight refuses `--allow-remote` and
+makes no provider calls. Do **not** run official `--preflight-only` or the
+paid public/dev shadow until a later explicit approval. The previous unused
+hash `3e834f0e…` never executed.

@@ -57,6 +57,7 @@ data/**
 !data/eval_rag/holdout/ledger_public_dev_chain_seal.json
 !data/eval_rag/structured_citation_canary_result.json
 !data/eval_rag/structured_citation_shadow_config.json
+!data/eval_rag/structured_citation_shadow_cache_manifest.json
 !data/.gitkeep
 
 .env

@@ -18,6 +18,7 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     CANONICAL_SPLIT,
     CLI_SPLIT,
     DEFAULT_FROZEN_CONFIG_PATH,
+    PREVIOUS_UNUSED_CONFIG_HASH,
     PROTOCOL_COMMIT,
     SEAL_TAG,
     SEAL_TARGET_COMMIT,
@@ -28,6 +29,7 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     assert_safe_input_path,
     bind_chain_seal,
     canonical_split,
+    chunk_ids_sha256,
     compute_config_hash,
     ids_sha256,
     load_case_fixture,
@@ -40,7 +42,9 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     read_sealed_baseline_readonly,
     run_shadow,
     sha256_normalized_file,
+    sha256_raw_file,
     summarize_rows,
+    verify_candidate_cache,
 )
 from lumenfin.structured_answer import STRUCTURED_ANSWER_SCHEMA_VERSION
 
@@ -174,6 +178,72 @@ def _mini_world(tmp: Path, case_ids: list[str]) -> tuple[FrozenShadowConfig, lis
     _write_json(seal_path, seal)
     _write_json(manifest_path, manifest)
     _write_json(baseline_path, baseline)
+    cases = [_case(case_id, index + 1) for index, case_id in enumerate(case_ids)]
+    cache_rows = []
+    for case in cases:
+        cache_rows.append(
+            {
+                "query_id": case["case_id"],
+                "company_key_sha256": "company-a",
+                "hits": [
+                    {
+                        "chunk_id": hit["chunk_id"],
+                        "document_id": hit["document_id"],
+                        "text": hit["text"],
+                    }
+                    for hit in case["hits"]
+                ],
+            }
+        )
+    cache_rel = Path("outputs") / "cache" / "candidates.jsonl"
+    cache_path = tmp / cache_rel
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in cache_rows),
+        encoding="utf-8",
+    )
+    cache_manifest = {
+        "schema_version": "lumenfin_ledger_structured_citation_shadow_cache.v1",
+        "cache_kind": "frozen_hybrid_candidate_replay",
+        "not_live_production_retrieval": True,
+        "rebuild_forbidden": True,
+        "embedding_fallback_forbidden": True,
+        "readonly": True,
+        "source_path_identity": cache_rel.as_posix(),
+        "source_local_manifest_identity": "",
+        "source_schema_version": "lumenfin_ledger_hybrid_candidates.v1",
+        "source_commit": SEAL_TARGET_COMMIT,
+        "source_worktree_dirty": None,
+        "source_worktree_recorded": False,
+        "parent_case_count": len(case_ids),
+        "parent_query_ids_sha256": ids_sha256(case_ids),
+        "case_count": len(case_ids),
+        "case_ids_sha256": ids_sha256(case_ids),
+        "candidate_records_count": len(cache_rows),
+        "hits_per_case": len(cases[0]["hits"]),
+        "candidate_ordering": "cache_file_order_company_blocks_then_frozen_5x50_company_prefix_v1",
+        "chunk_ids_sha256": chunk_ids_sha256(cache_rows),
+        "candidate_set_identity_sha256": "test",
+        "cache_file_sha256": sha256_raw_file(cache_path),
+        "local_candidate_manifest_sha256": "",
+        "rag_config": {
+            "arm": "A",
+            "ranking_arm": "A_prod",
+            "pool_strategy": "ranked_chunks",
+            "source_k": 20,
+            "rerank_k": 20,
+            "final_k": 10,
+        },
+        "embedding_identity": {
+            "provider": "dashscope",
+            "model": "text-embedding-v4",
+            "dimension": 1024,
+            "used_in_this_suite": False,
+        },
+        "rerank_identity": {"provider": "lexical", "model": "lexical", "used_in_this_suite": True},
+    }
+    cache_manifest_path = tmp / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
+    _write_json(cache_manifest_path, cache_manifest)
     fields = published_frozen_config_fields()
     fields["case_selection"]["query_count"] = len(case_ids)
     fields["case_selection"]["query_ids_sha256"] = ids_sha256(case_ids)
@@ -182,11 +252,22 @@ def _mini_world(tmp: Path, case_ids: list[str]) -> tuple[FrozenShadowConfig, lis
     fields["call_budget"]["remote_calls_expected"] = len(case_ids)
     fields["split_manifest"]["sha256"] = sha256_normalized_file(manifest_path)
     fields["sealed_baseline"]["sha256"] = sha256_normalized_file(baseline_path)
+    fields["candidate_cache"]["manifest_sha256"] = sha256_normalized_file(cache_manifest_path)
     fields["config_hash"] = compute_config_hash(fields)
     config_path = tmp / "frozen.json"
     _write_json(config_path, fields)
-    cases = [_case(case_id, index + 1) for index, case_id in enumerate(case_ids)]
     return load_frozen_config(config_path), cases, tmp
+
+
+def _authorized_run(generate, **kwargs):
+    kwargs.setdefault("confirm_exposed_shadow", True)
+    kwargs.setdefault("allow_remote", True)
+    kwargs.setdefault("allow_injected_generate", True)
+    kwargs.setdefault("verify_tag", False)
+    kwargs.setdefault("require_clean", False)
+    kwargs.setdefault("verify_runtime", False)
+    kwargs["generate_fn"] = generate
+    return run_shadow(**kwargs)
 
 
 class LedgerStructuredCitationShadowTests(unittest.TestCase):
@@ -200,6 +281,11 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertIs(loaded.payload["held_out"], False)
         self.assertIs(loaded.payload["product_accuracy_claim"], False)
         self.assertIs(loaded.payload["benchmark_claim"], False)
+        self.assertTrue(loaded.payload["candidate_cache"]["not_live_production_retrieval"])
+        self.assertNotEqual(
+            loaded.config_hash,
+            PREVIOUS_UNUSED_CONFIG_HASH,
+        )
         blob = path.read_text(encoding="utf-8")
         self.assertNotIn("sk-", blob)
         self.assertNotIn("Authorization", blob)
@@ -282,18 +368,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 side_effect=AssertionError("parquet must not be read"),
             ):
                 with self.assertRaisesRegex(ShadowError, "allowlist"):
-                    run_shadow(
+                    _authorized_run(
+                        generate,
                         repo_root=root,
                         frozen_config=config,
                         split=CLI_SPLIT,
-                        confirm_exposed_shadow=True,
                         output_dir=root / "out",
                         preflight_output_dir=root / "preflight",
                         cases=cases,
-                        generate_fn=generate,
-                        verify_tag=False,
-                        require_clean=False,
-                        verify_runtime=False,
                         allowlist=["pd-1", "pd-2"],
                     )
             self.assertEqual(generate_calls["n"], 0)
@@ -318,17 +400,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             config, cases, _ = _mini_world(root, ["pd-1"])
             with patch.dict(os.environ, {"DEEPSEEK_MODEL": "other-model"}):
                 with self.assertRaisesRegex(ShadowError, "chat model"):
-                    run_shadow(
+                    _authorized_run(
+                        lambda _case: _structured_payload(1),
                         repo_root=root,
                         frozen_config=config,
                         split=CLI_SPLIT,
-                        confirm_exposed_shadow=True,
                         output_dir=root / "out",
                         preflight_output_dir=root / "preflight",
                         cases=cases,
-                        generate_fn=lambda _case: _structured_payload(1),
-                        verify_tag=False,
-                        require_clean=False,
                         verify_runtime=True,
                         allowlist=["pd-1"],
                     )
@@ -355,6 +434,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 )
             self.assertEqual(report["remote_request_count"], 0)
             self.assertEqual(report["cases_executed"], 0)
+            self.assertEqual(report["protocol_ancestor"], PROTOCOL_COMMIT)
+            self.assertTrue(report["not_live_production_retrieval"])
+            self.assertTrue(report["candidate_cache"]["not_live_production_retrieval"])
             self.assertEqual(report["remote_calls_expected"], 2)
             self.assertEqual(
                 sorted(item.name for item in preflight_dir.iterdir()),
@@ -381,37 +463,29 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 calls.append(str(case["case_id"]))
                 return _structured_payload(int(str(case["case_id"]).split("-")[1]))
 
-            first = run_shadow(
+            first = _authorized_run(
+                generate,
                 repo_root=root,
                 frozen_config=config,
                 split=CLI_SPLIT,
-                confirm_exposed_shadow=True,
                 output_dir=out,
                 preflight_output_dir=root / "preflight",
                 cases=cases,
-                generate_fn=generate,
-                verify_tag=False,
-                require_clean=False,
-                verify_runtime=False,
                 allowlist=case_ids,
             )
             self.assertEqual(calls, case_ids)
             self.assertEqual(first["identity"]["calls_this_invocation"], 3)
             self.assertEqual(first["identity"]["calls_total"], 3)
             calls.clear()
-            second = run_shadow(
+            second = _authorized_run(
+                generate,
                 repo_root=root,
                 frozen_config=config,
                 split=CLI_SPLIT,
-                confirm_exposed_shadow=True,
                 output_dir=out,
                 preflight_output_dir=root / "preflight",
                 cases=cases,
-                generate_fn=generate,
                 resume=True,
-                verify_tag=False,
-                require_clean=False,
-                verify_runtime=False,
                 allowlist=case_ids,
             )
             self.assertEqual(calls, [])
@@ -439,18 +513,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 return _structured_payload(1)
 
             with self.assertRaisesRegex(ShadowError, "injected interrupt"):
-                run_shadow(
+                _authorized_run(
+                    generate_interrupt,
                     repo_root=root,
                     frozen_config=config,
                     split=CLI_SPLIT,
-                    confirm_exposed_shadow=True,
                     output_dir=out,
                     preflight_output_dir=root / "preflight",
                     cases=cases,
-                    generate_fn=generate_interrupt,
-                    verify_tag=False,
-                    require_clean=False,
-                    verify_runtime=False,
                     allowlist=case_ids,
                 )
             self.assertEqual(calls, ["pd-1", "pd-2"])
@@ -460,19 +530,15 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 calls.append(str(case["case_id"]))
                 return _structured_payload(int(str(case["case_id"]).split("-")[1]))
 
-            resumed = run_shadow(
+            resumed = _authorized_run(
+                generate_resume,
                 repo_root=root,
                 frozen_config=config,
                 split=CLI_SPLIT,
-                confirm_exposed_shadow=True,
                 output_dir=out,
                 preflight_output_dir=root / "preflight",
                 cases=cases,
-                generate_fn=generate_resume,
                 resume=True,
-                verify_tag=False,
-                require_clean=False,
-                verify_runtime=False,
                 allowlist=case_ids,
             )
             self.assertEqual(calls, ["pd-2"])
@@ -490,18 +556,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             def generate(case: dict) -> str:
                 return _structured_payload(int(str(case["case_id"]).split("-")[1]))
 
-            run_shadow(
+            _authorized_run(
+                generate,
                 repo_root=root,
                 frozen_config=config,
                 split=CLI_SPLIT,
-                confirm_exposed_shadow=True,
                 output_dir=out,
                 preflight_output_dir=root / "preflight",
                 cases=cases,
-                generate_fn=generate,
-                verify_tag=False,
-                require_clean=False,
-                verify_runtime=False,
                 allowlist=case_ids,
             )
             manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
@@ -519,19 +581,15 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 json.dumps(forked_checkpoint, indent=2) + "\n", encoding="utf-8"
             )
             with self.assertRaisesRegex(ShadowError, "diverge|missing from per_case"):
-                run_shadow(
+                _authorized_run(
+                    generate,
                     repo_root=root,
                     frozen_config=config,
                     split=CLI_SPLIT,
-                    confirm_exposed_shadow=True,
                     output_dir=out,
                     preflight_output_dir=root / "preflight",
                     cases=cases,
-                    generate_fn=generate,
                     resume=True,
-                    verify_tag=False,
-                    require_clean=False,
-                    verify_runtime=False,
                     allowlist=case_ids,
                 )
             (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -540,19 +598,15 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             (out / "manifest.json").write_text(json.dumps(changed, indent=2) + "\n", encoding="utf-8")
             (out / "checkpoint.json").write_text(json.dumps(changed, indent=2) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(ShadowError, "config_hash"):
-                run_shadow(
+                _authorized_run(
+                    generate,
                     repo_root=root,
                     frozen_config=config,
                     split=CLI_SPLIT,
-                    confirm_exposed_shadow=True,
                     output_dir=out,
                     preflight_output_dir=root / "preflight",
                     cases=cases,
-                    generate_fn=generate,
                     resume=True,
-                    verify_tag=False,
-                    require_clean=False,
-                    verify_runtime=False,
                     allowlist=case_ids,
                 )
 
@@ -572,18 +626,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             def generate(case: dict) -> str:
                 return payloads[str(case["case_id"])]
 
-            result = run_shadow(
+            result = _authorized_run(
+                generate,
                 repo_root=root,
                 frozen_config=config,
                 split=CLI_SPLIT,
-                confirm_exposed_shadow=True,
                 output_dir=root / "out",
                 preflight_output_dir=root / "preflight",
                 cases=cases,
-                generate_fn=generate,
-                verify_tag=False,
-                require_clean=False,
-                verify_runtime=False,
                 allowlist=case_ids,
             )
             summary = result["summary"]
@@ -614,18 +664,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                     "Authorization: Bearer sk-secret123 https://api.deepseek.com C:\\Users\\lili\\key"
                 )
 
-            result = run_shadow(
+            result = _authorized_run(
+                generate,
                 repo_root=root,
                 frozen_config=config,
                 split=CLI_SPLIT,
-                confirm_exposed_shadow=True,
                 output_dir=root / "out",
                 preflight_output_dir=root / "preflight",
                 cases=cases,
-                generate_fn=generate,
-                verify_tag=False,
-                require_clean=False,
-                verify_runtime=False,
                 allowlist=["pd-1"],
             )
             blob = (root / "out" / "failures.jsonl").read_text(encoding="utf-8")
@@ -667,11 +713,230 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                     "--frozen-config",
                     str(ROOT / DEFAULT_FROZEN_CONFIG_PATH),
                     "--confirm-exposed-shadow",
+                ]
+            ),
+            2,
+        )
+        self.assertEqual(
+            cli.main(
+                [
+                    "--split",
+                    "public-dev",
+                    "--frozen-config",
+                    str(ROOT / DEFAULT_FROZEN_CONFIG_PATH),
+                    "--confirm-exposed-shadow",
+                    "--preflight-only",
                     "--allow-remote",
                 ]
             ),
             2,
         )
+
+    def test_dual_key_and_env_cannot_bypass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1"])
+            generate_calls = {"n": 0}
+
+            def generate(_case: dict) -> str:
+                generate_calls["n"] += 1
+                return _structured_payload(1)
+
+            with self.assertRaisesRegex(ShadowError, "confirm-exposed-shadow"):
+                run_shadow(
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    confirm_exposed_shadow=False,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    cases=cases,
+                    allow_remote=True,
+                    allow_injected_generate=True,
+                    generate_fn=generate,
+                    verify_tag=False,
+                    require_clean=False,
+                    verify_runtime=False,
+                    allowlist=["pd-1"],
+                )
+            with self.assertRaisesRegex(ShadowError, "allow-remote"):
+                run_shadow(
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    confirm_exposed_shadow=True,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    cases=cases,
+                    allow_remote=False,
+                    allow_injected_generate=True,
+                    generate_fn=generate,
+                    verify_tag=False,
+                    require_clean=False,
+                    verify_runtime=False,
+                    allowlist=["pd-1"],
+                )
+            with self.assertRaisesRegex(ShadowError, "CLI authorization path"):
+                run_shadow(
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    confirm_exposed_shadow=True,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    cases=cases,
+                    allow_remote=True,
+                    verify_tag=False,
+                    require_clean=False,
+                    verify_runtime=False,
+                    allowlist=["pd-1"],
+                )
+            with patch.dict(os.environ, {"LUMENFIN_SHADOW_ALLOW_REMOTE": "1"}):
+                with self.assertRaisesRegex(ShadowError, "environment variables cannot authorize"):
+                    run_shadow(
+                        repo_root=root,
+                        frozen_config=config,
+                        split=CLI_SPLIT,
+                        confirm_exposed_shadow=True,
+                        output_dir=root / "out",
+                        preflight_output_dir=root / "preflight",
+                        cases=cases,
+                        allow_remote=False,
+                        allow_injected_generate=True,
+                        generate_fn=generate,
+                        verify_tag=False,
+                        require_clean=False,
+                        verify_runtime=False,
+                        allowlist=["pd-1"],
+                    )
+            with self.assertRaisesRegex(ShadowError, "allow-remote with --preflight-only"):
+                run_shadow(
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    confirm_exposed_shadow=True,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    preflight_only=True,
+                    allow_remote=True,
+                    verify_tag=False,
+                    require_clean=False,
+                    verify_runtime=False,
+                )
+            result = _authorized_run(
+                generate,
+                repo_root=root,
+                frozen_config=config,
+                split=CLI_SPLIT,
+                output_dir=root / "out",
+                preflight_output_dir=root / "preflight",
+                cases=cases,
+                allowlist=["pd-1"],
+            )
+            self.assertEqual(generate_calls["n"], 1)
+            self.assertEqual(result["remote_request_count"], 0)
+            self.assertEqual(result["identity"]["protocol_ancestor"], PROTOCOL_COMMIT)
+            self.assertNotEqual(
+                result["identity"]["execution_commit"],
+                result["identity"]["protocol_ancestor"],
+            )
+            self.assertTrue(result["identity"]["not_live_production_retrieval"])
+
+    def test_candidate_cache_identity_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1", "pd-2"])
+            cache_path = root / "outputs" / "cache" / "candidates.jsonl"
+            original = cache_path.read_bytes()
+            manifest_path = root / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
+            original_manifest = manifest_path.read_bytes()
+            generate_calls = {"n": 0}
+
+            def generate(_case: dict) -> str:
+                generate_calls["n"] += 1
+                raise AssertionError("generate must not run")
+
+            missing_root = root / "missing"
+            missing_config, missing_cases, _ = _mini_world(missing_root, ["pd-1", "pd-2"])
+            (missing_root / "outputs" / "cache" / "candidates.jsonl").unlink()
+            with self.assertRaisesRegex(ShadowError, "missing"):
+                _authorized_run(
+                    generate,
+                    repo_root=missing_root,
+                    frozen_config=missing_config,
+                    split=CLI_SPLIT,
+                    output_dir=missing_root / "out",
+                    preflight_output_dir=missing_root / "preflight",
+                    cases=missing_cases,
+                    allowlist=["pd-1", "pd-2"],
+                )
+            cache_path.write_bytes(original + b" ")
+            with self.assertRaisesRegex(ShadowError, "file hash"):
+                _authorized_run(
+                    generate,
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    cases=cases,
+                    allowlist=["pd-1", "pd-2"],
+                )
+            cache_path.write_bytes(original)
+            mutated_rows = json.loads(json.dumps([
+                json.loads(line) for line in original.decode("utf-8").splitlines() if line.strip()
+            ]))
+            mutated_rows[0]["hits"][0]["chunk_id"] = "mutated-chunk"
+            mutated_bytes = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in mutated_rows).encode("utf-8")
+            cache_path.write_bytes(mutated_bytes)
+            manifest_path = root / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["cache_file_sha256"] = sha256_raw_file(cache_path)
+            manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            fields = json.loads((root / "frozen.json").read_text(encoding="utf-8"))
+            fields["candidate_cache"]["manifest_sha256"] = sha256_normalized_file(manifest_path)
+            fields["config_hash"] = compute_config_hash(fields)
+            (root / "frozen.json").write_text(json.dumps(fields, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            mutated_config = load_frozen_config(root / "frozen.json")
+            with self.assertRaisesRegex(ShadowError, "chunk id hash"):
+                _authorized_run(
+                    generate,
+                    repo_root=root,
+                    frozen_config=mutated_config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    cases=cases,
+                    allowlist=["pd-1", "pd-2"],
+                )
+            cache_path.write_bytes(original)
+            manifest_path.write_bytes(original_manifest)
+            report = verify_candidate_cache(repo_root=root, config=config)
+            self.assertTrue(report["verified"])
+            self.assertEqual(sha256_raw_file(cache_path), json.loads(
+                (root / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )["cache_file_sha256"])
+            self.assertEqual(generate_calls["n"], 0)
+            self.assertFalse((root / "out").exists())
+
+    def test_strict_output_path_rejects_subdirectory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1"])
+            with self.assertRaisesRegex(ShadowError, "exact frozen output directory"):
+                _authorized_run(
+                    lambda _case: _structured_payload(1),
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "outputs" / "ledger_structured_citation_shadow_v1" / "nested",
+                    preflight_output_dir=root / "outputs" / "ledger_structured_citation_shadow_preflight_v1",
+                    cases=cases,
+                    strict_paths=True,
+                    allowlist=["pd-1"],
+                )
 
     def test_paired_helper_does_not_claim_accuracy(self) -> None:
         shadow = summarize_rows(
