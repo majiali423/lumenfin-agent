@@ -50,6 +50,28 @@ class SynthesisMixin:
             self.session_memory.save({**state, **update})
             return update
 
+    def _attach_structured_answer(self, state: FinanceState, update: FinanceState) -> None:
+        from ..structured_answer import (
+            CITATION_SOURCE_UNAVAILABLE,
+            STRUCTURED_ANSWER_SCHEMA_VERSION,
+            StructuredAnswerError,
+            build_structured_answer_from_state,
+            redact_structured_error,
+        )
+
+        merged = {**state, **update}
+        try:
+            update["structured_answer"] = build_structured_answer_from_state(merged).to_dict()
+        except StructuredAnswerError as exc:
+            update["structured_answer"] = {
+                "answer": str(merged.get("final_report") or merged.get("executive_summary") or ""),
+                "citations": [],
+                "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                "citation_source": CITATION_SOURCE_UNAVAILABLE,
+                "workflow_status": str(merged.get("workflow_status") or "completed"),
+                "validation_error": redact_structured_error(str(exc)),
+            }
+
     # ═══════════════════════════════════════════════════════════════
     # SYNTHESIZER — Investment-Grade Report Assembly
     # ═══════════════════════════════════════════════════════════════
@@ -162,6 +184,7 @@ class SynthesisMixin:
                 "workflow_status": "incomplete_data",
                 "degraded_mode": True,
             }
+            self._attach_structured_answer(state, update)
             update.update(
                 self._record(
                     "synthesizer",
@@ -867,6 +890,7 @@ class SynthesisMixin:
             "chart_data": chart_data,
             "workflow_status": "completed",
         }
+        self._attach_structured_answer(state, update)
         synth_detail = (
             f"Report assembled from verified claims only "
             f"(mode={output_format}; verified={len(verified_claims)}/{len(all_claims)}; "

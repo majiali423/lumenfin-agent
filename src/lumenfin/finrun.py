@@ -3,6 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 from .metrics_schema import get_fundamental, period_label_from_meta
+from .structured_answer import (
+    CITATION_SOURCE_UNAVAILABLE,
+    STRUCTURED_ANSWER_SCHEMA_VERSION,
+    StructuredAnswerError,
+    allowed_evidence_from_state,
+    build_structured_answer_from_state,
+    redact_structured_error,
+    validate_structured_answer,
+)
 
 FINRUN_SCHEMA_VERSION = "1.0"
 
@@ -37,6 +46,9 @@ def export_finrun_state(state: dict[str, Any]) -> dict[str, Any]:
             "claim_binding": state.get("claim_binding") or {},
             "verified_claim_count": len(state.get("verified_claims") or []),
             "claim_count": len(state.get("claims") or []),
+            "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+            "citation_source": _structured_answer(state).get("citation_source"),
+            "citation_path": "verified_evidence.chunk_id",
         },
         "entities": [{"name": company} for company in _companies(state)],
         "steps": _steps(state),
@@ -45,6 +57,7 @@ def export_finrun_state(state: dict[str, Any]) -> dict[str, Any]:
         "market_data": _market_data(state),
         "final_output": str(state.get("final_report") or ""),
         "claims": list(state.get("verified_claims") or []),
+        "structured_answer": _structured_answer(state),
     }
 
 
@@ -67,6 +80,49 @@ def _retrieval_provenance(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
         structured_source = str(bundle.get("structured_source") or "none")
         derived[str(company)] = {"structured_source": structured_source}
     return derived
+
+
+def _structured_answer(state: dict[str, Any]) -> dict[str, Any]:
+    existing = state.get("structured_answer")
+    if isinstance(existing, dict) and existing.get("structured_answer_schema_version"):
+        payload = dict(existing)
+    else:
+        try:
+            payload = build_structured_answer_from_state(state).to_dict()
+        except StructuredAnswerError as exc:
+            payload = {
+                "answer": str(state.get("final_report") or ""),
+                "citations": [],
+                "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                "citation_source": CITATION_SOURCE_UNAVAILABLE,
+                "workflow_status": str(state.get("workflow_status") or "completed"),
+                "validation_error": redact_structured_error(str(exc)),
+            }
+    payload.setdefault("answer", str(state.get("final_report") or ""))
+    payload.setdefault("citations", [])
+    payload.setdefault("structured_answer_schema_version", STRUCTURED_ANSWER_SCHEMA_VERSION)
+    payload.setdefault(
+        "citation_source",
+        CITATION_SOURCE_UNAVAILABLE if not payload.get("citations") else payload.get("citation_source"),
+    )
+    try:
+        validated = validate_structured_answer(
+            payload,
+            allowed=allowed_evidence_from_state(state),
+            expected_tenant_id=str(state.get("rag_tenant_id") or state.get("tenant_id") or ""),
+            expected_session_id=str(state.get("thread_id") or state.get("run_id") or ""),
+            require_citation_for_factual=False,
+        )
+        return validated.to_dict()
+    except StructuredAnswerError as exc:
+        return {
+            "answer": str(payload.get("answer") or state.get("final_report") or ""),
+            "citations": [],
+            "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+            "citation_source": CITATION_SOURCE_UNAVAILABLE,
+            "workflow_status": str(state.get("workflow_status") or "completed"),
+            "validation_error": redact_structured_error(str(exc)),
+        }
 
 
 def _companies(state: dict[str, Any]) -> list[str]:
@@ -180,6 +236,7 @@ def _evidence(state: dict[str, Any]) -> list[dict[str, str]]:
                 citation=citation,
                 source_type=str(hit.get("source_type") or "rag"),
                 text=str(hit.get("text") or hit.get("snippet") or hit.get("excerpt") or ""),
+                chunk_id=str(hit.get("chunk_id") or "").strip() or None,
             )
 
     for company, payload in retrieved_docs.items():
@@ -257,6 +314,7 @@ def _evidence(state: dict[str, Any]) -> list[dict[str, str]]:
                 citation=citation,
                 source_type=str(ref.get("source_type") or "claim"),
                 text=text,
+                chunk_id=str(ref.get("chunk_id") or "").strip() or None,
             )
     for company, scores in (state.get("risk_scores") or {}).items():
         if not isinstance(scores, dict):
@@ -312,21 +370,23 @@ def _append_evidence(
     source_type: str,
     text: str,
     period: str | None = None,
+    chunk_id: str | None = None,
 ) -> None:
     key = (company, citation)
     if key in seen:
         return
     seen.add(key)
-    evidence.append(
-        {
-            "entity": company,
-            "citation": citation,
-            "period": period or "latest",
-            "source_type": source_type,
-            "provider": "lumenfin",
-            "text": text,
-        }
-    )
+    row = {
+        "entity": company,
+        "citation": citation,
+        "period": period or "latest",
+        "source_type": source_type,
+        "provider": "lumenfin",
+        "text": text,
+    }
+    if chunk_id:
+        row["chunk_id"] = chunk_id
+    evidence.append(row)
 
 
 def _market_data(state: dict[str, Any]) -> list[dict[str, Any]]:

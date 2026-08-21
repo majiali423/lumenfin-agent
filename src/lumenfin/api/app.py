@@ -364,6 +364,8 @@ def create_app(
         }
 
     def _compact_state(result: dict) -> dict:
+        structured = result.get("structured_answer") or {}
+        citations = structured.get("citations") if isinstance(structured, dict) else None
         return {
             "run_id": result.get("run_id"),
             "thread_id": result.get("thread_id"),
@@ -373,6 +375,12 @@ def create_app(
             "data_mode": result.get("data_mode") or app_config.data_mode,
             "llm_backend": result.get("llm_backend"),
             "clarification_questions": result.get("clarification_questions", []),
+            "citations": list(citations or []),
+            "structured_answer_schema_version": (
+                structured.get("structured_answer_schema_version")
+                if isinstance(structured, dict)
+                else None
+            ),
         }
 
     def _public_job(job: dict) -> dict:
@@ -437,6 +445,11 @@ def create_app(
             degraded=bool(payload.get("degraded")),
             provider_degraded=payload.get("provider_degraded"),
             provider_call_summary=payload.get("provider_call_summary"),
+            answer=result.get("final_report", ""),
+            citations=list((result.get("structured_answer") or {}).get("citations") or []),
+            structured_answer_schema_version=(
+                (result.get("structured_answer") or {}).get("structured_answer_schema_version")
+            ),
         )
 
     @app.post("/api/v1/analyze", response_model=AnalyzeResponse)

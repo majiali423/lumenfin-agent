@@ -60,6 +60,9 @@ class AnalyzeResponse(BaseModel):
     degraded: bool = False
     provider_degraded: Optional[dict[str, Any]] = None
     provider_call_summary: Optional[dict[str, Any]] = None
+    answer: Optional[str] = None
+    citations: list[str] = Field(default_factory=list)
+    structured_answer_schema_version: Optional[str] = None
 
 
 class ClarifyRequest(BaseModel):
