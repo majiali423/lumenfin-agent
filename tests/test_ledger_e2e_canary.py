@@ -14,6 +14,7 @@ if str(SRC) not in sys.path:
 
 from lumenfin.eval.holdout import HoldoutError
 from lumenfin.eval.holdout.ledger_e2e import (
+    account_ledger_citations,
     build_generation_prompt,
     citation_supported,
     load_ledger_gold_values,
@@ -221,6 +222,79 @@ class LedgerE2ECanaryTests(unittest.TestCase):
                 candidate_by_id={"q1": {"candidate_identity_sha256": "cand"}},
                 run_identity_sha256="run",
             )
+
+    def test_structured_citations_are_preferred_and_prose_is_not_guessed(self) -> None:
+        parsed = parse_answer_payload(
+            '{"answer": "12.5", "value": 12.5, "citations": ["chunk-1"], '
+            '"structured_answer_schema_version": "1.0", "abstain": false}'
+        )
+        self.assertEqual(parsed["citations"], ["chunk-1"])
+        self.assertEqual(parsed["citation_source"], "structured")
+        with self.assertRaisesRegex(HoldoutError, "did not return JSON"):
+            parse_answer_payload("The answer is 12.5 from chunk-1 without JSON")
+
+    def test_citation_mutations_are_detected(self) -> None:
+        hits = [
+            {**_hit(1), "tenant_id": "t1", "session_id": "s1"},
+            {**_hit(2), "tenant_id": "t1", "session_id": "s1"},
+            {**_hit(3), "tenant_id": "t2", "session_id": "s1"},
+            {**_hit(4), "tenant_id": "t1", "session_id": "s1", "unverified": True},
+        ]
+        qrels = {"doc-1": 1}
+        empty = account_ledger_citations(
+            cited_chunk_ids=[],
+            hits=hits,
+            qrels=qrels,
+            citation_source="structured",
+            tenant_id="t1",
+            session_id="s1",
+        )
+        self.assertTrue(empty["no_citation"])
+        unknown = account_ledger_citations(
+            cited_chunk_ids=["does-not-exist"],
+            hits=hits,
+            qrels=qrels,
+            citation_source="structured",
+            tenant_id="t1",
+            session_id="s1",
+        )
+        self.assertGreaterEqual(unknown["unknown_citation"], 1)
+        other_question = account_ledger_citations(
+            cited_chunk_ids=["chunk-2"],
+            hits=hits,
+            qrels=qrels,
+            citation_source="structured",
+            tenant_id="t1",
+            session_id="s1",
+        )
+        self.assertTrue(other_question["unsupported_claim"])
+        cross = account_ledger_citations(
+            cited_chunk_ids=["chunk-3"],
+            hits=hits,
+            qrels=qrels,
+            citation_source="structured",
+            tenant_id="t1",
+            session_id="s1",
+        )
+        self.assertGreaterEqual(cross["cross_run_or_tenant_citation"], 1)
+        unverified = account_ledger_citations(
+            cited_chunk_ids=["chunk-4"],
+            hits=hits,
+            qrels=qrels,
+            citation_source="structured",
+            tenant_id="t1",
+            session_id="s1",
+        )
+        self.assertGreaterEqual(unverified["unverified_citation"], 1)
+        mismatch = score_generated_answer(
+            gold_value=1000.0,
+            parsed={"value": 1000.0, "citations": ["chunk-2"], "citation_source": "structured"},
+            hits=hits,
+            qrels=qrels,
+        )
+        self.assertTrue(mismatch["numeric_match"])
+        self.assertFalse(mismatch["citation_supported"])
+        self.assertTrue(mismatch["citation_accounting"]["unsupported_claim"])
 
 
 if __name__ == "__main__":
