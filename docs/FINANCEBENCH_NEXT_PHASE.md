@@ -5,6 +5,7 @@ title: FinanceBench next phase
 # Next phase: reranker, page diversity, section/parent retrieval
 
 **LEDGER `public_dev` status (2026-08-19): sealed and stopped.**
+Chain seal: `data/eval_rag/holdout/ledger_public_dev_chain_seal.json`.
 Do not embed a page-parent index. Do not rescore the frozen 5×50 suffix.
 FinanceBench Phase 4 remains `NOT_RUN`. Production RAG defaults unchanged.
 

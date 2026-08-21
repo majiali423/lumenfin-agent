@@ -174,11 +174,13 @@ not FinanceBench Phase 4. Do not open `public_holdout`. Do not embed a
 page-parent index. Do not rescore the frozen 5×50 suffix.
 
 Tracked aggregates: `data/eval_rag/holdout/ledger_public_dev_*.json`.
-Protocol: [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md).
+Chain provenance: `data/eval_rag/holdout/ledger_public_dev_chain_seal.json`
+(hashes only; recommended tag `ledger-public-dev-chain-v1` is **not** created
+here). Protocol: [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md).
 
 Offline identity / unit checks only (do not re-run remote scoring or rewrite
 the tracked manifest):
 
 ```powershell
-python -m unittest tests.test_ledger_public_benchmark tests.test_ledger_section_parent tests.test_ledger_parent_page_e2e -v
+python -m unittest tests.test_ledger_public_benchmark tests.test_ledger_section_parent tests.test_ledger_parent_page_e2e tests.test_ledger_public_dev_chain_seal -v
 ```

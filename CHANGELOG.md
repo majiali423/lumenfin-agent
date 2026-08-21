@@ -24,6 +24,9 @@ image has been created. Latest published LumenFin remains
   under `data/eval_rag/holdout/`. Parent-page *return* stays eval-only; do not
   embed a page-parent index. `public_holdout` remains unopened. FinanceBench
   Phase 4 stays `NOT_RUN`. Production RAG defaults are unchanged.
+- Added `data/eval_rag/holdout/ledger_public_dev_chain_seal.json` so sealed
+  public-dev artifacts can be hash-checked as one provenance chain. Recommended
+  annotated tag name `ledger-public-dev-chain-v1` is recorded but not created.
 
 ## 0.1.0rc4 — 2026-08-13
 

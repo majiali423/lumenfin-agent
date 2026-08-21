@@ -54,6 +54,7 @@ data/**
 !data/eval_rag/holdout/ledger_public_dev_parent_page_e2e_5x40.json
 !data/eval_rag/holdout/ledger_public_dev_parent_page_e2e_taxonomy_5x40.json
 !data/eval_rag/holdout/ledger_public_dev_section_parent_bm25_5x40.json
+!data/eval_rag/holdout/ledger_public_dev_chain_seal.json
 !data/.gitkeep
 
 .env

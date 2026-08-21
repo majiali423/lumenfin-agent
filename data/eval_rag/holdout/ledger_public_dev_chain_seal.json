@@ -1,0 +1,115 @@
+{
+  "schema_version": "lumenfin_ledger_public_dev_chain_seal.v1",
+  "split": "public_dev",
+  "public_dev_status": "sealed_stopped",
+  "public_holdout_consumed": false,
+  "product_accuracy_claim": false,
+  "production_change_authorized": false,
+  "financebench_phase4": "NOT_RUN",
+  "retuning_on_public_dev_forbidden": true,
+  "public_holdout_scoring_requires_new_explicit_approval": true,
+  "do_not_embed_page_parent_index": true,
+  "parent_page_return_eval_only": true,
+  "production_rag_arm": "A",
+  "dataset_id": "artefactory/ledger-long-context-KPI-QA",
+  "dataset_revision": "b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619",
+  "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
+  "source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad",
+  "split_manifest_path": "data/eval_rag/holdout/ledger_public_manifest.json",
+  "split_manifest_sha256": "889329d3647a3c4543d12fa0ebae0172969e787bb877f73c2f0aee967a4920d5",
+  "data_seal_commit": "ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c",
+  "readme_followup_commit": "3bd1bf4b35b0c158b6971101c3fb1b64d64876a8",
+  "recommended_annotated_tag": "ledger-public-dev-chain-v1",
+  "recommended_tag_target_commit": "ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c",
+  "recommended_tag_target_reason": "ec4d9e4 is the existing history commit that sealed the tracked public-dev aggregates and locked do_not_embed_page_parent_index. 3bd1bf4 is README-only and does not change sealed metrics. This tag name is not created in this preparation; do not retarget it to a future unpublished commit.",
+  "artifacts": [
+    {
+      "path": "data/eval_rag/holdout/ledger_public_manifest.json",
+      "sha256": "889329d3647a3c4543d12fa0ebae0172969e787bb877f73c2f0aee967a4920d5",
+      "schema_version": "lumenfin_public_benchmark_manifest.v1",
+      "query_count": 7616,
+      "remote_calls": 0,
+      "result_role": "split_identity"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_bm25_baseline.json",
+      "sha256": "c1ab95da9a1c49f70a620de3284d220234ca31db8a38d6fccb936cdf21bd6fda",
+      "schema_version": "lumenfin_ledger_public_dev_scoring.v1",
+      "query_count": 7615,
+      "remote_calls": 0,
+      "result_role": "retrieval_bm25_baseline"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_hybrid_stratified_5x50.json",
+      "sha256": "86f626f988dc5fcc65c6de1aa0604a83a56a771b8f14e9c74eb291e6ddd1578b",
+      "schema_version": "lumenfin_ledger_hybrid_stratified.v1",
+      "query_count": 250,
+      "remote_calls": 1851,
+      "result_role": "retrieval_hybrid_stratified"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_qwen3_paired_5x50.json",
+      "sha256": "18cfb120f180c2096c8f8bc3dc451d08c2f5812954b04a31026410750602d1f9",
+      "schema_version": "lumenfin_ledger_qwen3_paired.v1",
+      "query_count": 250,
+      "remote_calls": 2351,
+      "result_role": "retrieval_qwen3_paired"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_e2e_canary_5x10.json",
+      "sha256": "a7b4868da2694118e31aad62a840453f5acf44dbb5a8e7593b0e3197db3d2b21",
+      "schema_version": "lumenfin_ledger_e2e_canary.v1",
+      "query_count": 50,
+      "remote_calls": 150,
+      "result_role": "generation_canary"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_e2e_failure_taxonomy_5x10.json",
+      "sha256": "74cb38e616f9a297e69773475a6cae05eca8dfc49ec5b43cd75086537f1f628b",
+      "schema_version": "lumenfin_ledger_e2e_failure_taxonomy.v1",
+      "query_count": 50,
+      "remote_calls": 0,
+      "result_role": "generation_failure_taxonomy"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_parent_pack_probe_5x10.json",
+      "sha256": "4c3644d9b8adf19c11dd4e7395b1e12339e62427d49838565a1cb7e81a5033b1",
+      "schema_version": "lumenfin_ledger_parent_pack_probe.v1",
+      "query_count": 50,
+      "remote_calls": 0,
+      "result_role": "parent_pack_probe"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_parent_pack_suffix_5x40.json",
+      "sha256": "f26d8d45859cf22651c2a9176818ef5f52234b6f7d228a6739ed9b9f4f3e1552",
+      "schema_version": "lumenfin_ledger_parent_page_return.v1",
+      "query_count": 200,
+      "remote_calls": 0,
+      "result_role": "parent_page_return_suffix"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_parent_page_e2e_5x40.json",
+      "sha256": "d3d033597b532fcfb1ed4bf19f161d96ce382b237c65309ce413506279275b45",
+      "schema_version": "lumenfin_ledger_parent_page_e2e.v1",
+      "query_count": 200,
+      "remote_calls": 400,
+      "result_role": "parent_page_generation_canary"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_parent_page_e2e_taxonomy_5x40.json",
+      "sha256": "046c9180f896a6e612c5bb5b1d439cee0d1aedb1087ff46d4ebf834f058cec09",
+      "schema_version": "lumenfin_ledger_parent_page_e2e_taxonomy.v1",
+      "query_count": 200,
+      "remote_calls": 0,
+      "result_role": "parent_page_generation_taxonomy"
+    },
+    {
+      "path": "data/eval_rag/holdout/ledger_public_dev_section_parent_bm25_5x40.json",
+      "sha256": "04ffa94902807e0ede82eff0da28fd4c33dff47436e2060986b9105b9ee189fb",
+      "schema_version": "lumenfin_ledger_section_parent.v1",
+      "query_count": 200,
+      "remote_calls": 0,
+      "result_role": "page_as_index_negative_result"
+    }
+  ]
+}
