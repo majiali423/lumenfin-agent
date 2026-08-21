@@ -1,0 +1,173 @@
+{
+  "schema_version": "lumenfin_ledger_structured_citation_shadow_config.v1",
+  "suite": "ledger_structured_citation_shadow",
+  "suite_version": "1.0",
+  "structured_answer_schema_version": "1.0",
+  "split": "public_dev",
+  "cli_split": "public-dev",
+  "exposed_public_dev_shadow": true,
+  "held_out": false,
+  "product_accuracy_claim": false,
+  "benchmark_claim": false,
+  "retuning_allowed": false,
+  "public_holdout_consumed": false,
+  "production_change_authorized": false,
+  "financebench_phase4": "NOT_RUN",
+  "ledger_seal": {
+    "tag": "ledger-public-dev-chain-v1",
+    "target_commit": "ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c",
+    "manifest_path": "data/eval_rag/holdout/ledger_public_dev_chain_seal.json",
+    "schema_version": "lumenfin_ledger_public_dev_chain_seal.v1"
+  },
+  "lumenfin_protocol_commit": "78a719e2b744777aee5353acc24b9b88c410066e",
+  "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
+  "split_manifest": {
+    "path": "data/eval_rag/holdout/ledger_public_manifest.json",
+    "sha256": "889329d3647a3c4543d12fa0ebae0172969e787bb877f73c2f0aee967a4920d5",
+    "schema_version": "lumenfin_public_benchmark_manifest.v1",
+    "public_dev_query_ids_sha256": "b0e2163c2d9d0e4d5a948313bde2507418b552e22738d6f4c2f7825766dca65c"
+  },
+  "case_selection": {
+    "source_artifact": "data/eval_rag/holdout/ledger_public_dev_e2e_canary_5x10.json",
+    "strategy": "frozen_5x50_company_prefix_v1",
+    "companies": 5,
+    "cases_per_company": 10,
+    "query_count": 50,
+    "query_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
+    "parent_query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044"
+  },
+  "sealed_baseline": {
+    "path": "data/eval_rag/holdout/ledger_public_dev_e2e_canary_5x10.json",
+    "sha256": "a7b4868da2694118e31aad62a840453f5acf44dbb5a8e7593b0e3197db3d2b21",
+    "schema_version": "lumenfin_ledger_e2e_canary.v1",
+    "e2e_source_sha256": "382a81525103276508ff25b269e699e061f952621e6df607d187a0528f7395a4",
+    "readonly": true,
+    "comparison_arm": "lexical"
+  },
+  "dataset": {
+    "dataset_id": "artefactory/ledger-long-context-KPI-QA",
+    "dataset_revision": "b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619",
+    "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
+    "source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad"
+  },
+  "chat": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "timeout_seconds": 45.0,
+    "max_retries": 3,
+    "retry_backoff_seconds": 0.5,
+    "temperature": 0.0,
+    "max_tokens": 200,
+    "base_url_sha256": "a34e2a4708ed1c61008a151688838dcf1c44d4e7f08054633e72ba7c0b16cfc1"
+  },
+  "embedding": {
+    "provider": "dashscope",
+    "model": "text-embedding-v4",
+    "dimension": 1024,
+    "used_in_this_suite": false,
+    "reason": "frozen_hybrid_candidate_cache_no_reembed"
+  },
+  "reranker": {
+    "provider": "lexical",
+    "model": "lexical",
+    "instruct": "Given a financial due diligence query, retrieve passages that directly answer it. Prefer the correct company, reporting period, metric, scope, and filing context over merely topical passages.",
+    "timeout_seconds": 12.0,
+    "max_attempts": 2,
+    "backoff_seconds": 0.25,
+    "max_inflight": 2,
+    "max_document_chars": 4000
+  },
+  "production_rag": {
+    "arm": "A",
+    "ranking_arm": "A_prod",
+    "pool_strategy": "ranked_chunks",
+    "source_k": 20,
+    "rerank_k": 20,
+    "final_k": 10,
+    "bm25_rrf_weight": 1.1,
+    "rerank_enabled": true
+  },
+  "prompts": {
+    "version": "ledger_structured_citation_shadow_v1",
+    "system_prompt_sha256": "a60bd04d0014ee749a335ce6295ee36843aee3f5172a5b7c7fce1cd530ae690d"
+  },
+  "timeouts": {
+    "chat_timeout_seconds": 45.0,
+    "rerank_timeout_seconds": 12.0
+  },
+  "retry": {
+    "chat_max_retries": 3,
+    "rerank_max_attempts": 2
+  },
+  "concurrency": {
+    "workers": 1,
+    "max_inflight": 1
+  },
+  "bootstrap": {
+    "seed": 20260816,
+    "samples": 1000
+  },
+  "output": {
+    "schema_version": "lumenfin_ledger_structured_citation_shadow.v1",
+    "official_dirname": "ledger_structured_citation_shadow_v1",
+    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v1"
+  },
+  "call_budget": {
+    "cases_total": 50,
+    "generate_logical_calls_expected": 50,
+    "rerank_remote_calls_expected": 0,
+    "embedding_remote_calls_expected": 0,
+    "remote_calls_expected": 50,
+    "billing_semantics": "at_least_once",
+    "exactly_once": false
+  },
+  "evaluation_metrics": [
+    "cases_total",
+    "cases_succeeded",
+    "cases_failed",
+    "provider_errors",
+    "remote_request_count",
+    "latency_p50",
+    "latency_p95",
+    "structured_answer_present",
+    "structured_emission_rate",
+    "citation_source_distribution",
+    "answers_with_citations",
+    "citations_total",
+    "valid_citations",
+    "unknown_citations",
+    "unverified_citations",
+    "cross_scope_citations",
+    "stale_citations",
+    "citation_validation_failed",
+    "claims_total",
+    "supported_claims",
+    "unsupported_claims",
+    "citation_support_rate",
+    "answers_fully_supported",
+    "answers_partially_supported",
+    "answers_unsupported",
+    "complete",
+    "incomplete_data",
+    "degraded",
+    "failed"
+  ],
+  "paired_comparison": {
+    "kind": "post-hoc exposed comparison",
+    "held_out": false,
+    "suitable_for_model_selection": false,
+    "writes_sealed_aggregate": false
+  },
+  "config_hash_canonicalization": {
+    "sort_keys": true,
+    "separators": [
+      ",",
+      ":"
+    ],
+    "ensure_ascii": false,
+    "excluded_keys": [
+      "config_hash"
+    ]
+  },
+  "config_hash": "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
+}

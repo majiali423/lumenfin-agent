@@ -128,3 +128,17 @@ overwrite. Raw artifacts stay gitignored under
 `6f85a617a16446afc17b940919bc57c10b397b588279466aa824e93e8536f2fa`,
 `cases_failed=0`, `remote_request_count=0`). That file is not a
 FinanceBench or LEDGER aggregate and is not a product-accuracy claim.
+
+## LEDGER public/dev structured-citation shadow (tools only)
+
+Frozen harness for a future **exposed public/dev** shadow of structured
+citations. It is not held-out, not product accuracy, not a new LEDGER
+benchmark, and not rc5. `public_holdout` stays closed. Production RAG A
+is unchanged.
+
+Frozen config:
+[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
+CLI: `scripts/run_ledger_structured_citation_shadow.py`. This stage
+implements binding, isolation, preflight, resume, and offline tests.
+Do **not** run official `--preflight-only` or `--allow-remote` until a
+later explicit approval.

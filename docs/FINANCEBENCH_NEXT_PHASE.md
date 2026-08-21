@@ -9,6 +9,11 @@ Chain seal: `data/eval_rag/holdout/ledger_public_dev_chain_seal.json`.
 Do not embed a page-parent index. Do not rescore the frozen 5×50 suffix.
 FinanceBench Phase 4 remains `NOT_RUN`. Production RAG defaults unchanged.
 
+A structured-citation **public/dev shadow harness** is frozen under
+`data/eval_rag/structured_citation_shadow_config.json`. It is not a new
+LEDGER benchmark, not held-out, and is not authorized to run in this
+stage. Do not open `public_holdout`. Do not retune from exposed public/dev.
+
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.
 

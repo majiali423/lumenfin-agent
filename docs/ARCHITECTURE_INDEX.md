@@ -14,7 +14,7 @@ behavior.
 | [CONFIGURATION.md](CONFIGURATION.md) | Runtime/provider configuration |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Locked install + release gates |
 | [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Controlled deployment boundary + validated gate summary |
-| [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer / verified chunk-id citations (`1.0`); synthetic contract canary is not an accuracy claim |
+| [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer / verified chunk-id citations (`1.0`); synthetic canary and public/dev shadow harness are not accuracy claims |
 | [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline and optional live demo runbook |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Current RC freeze evidence |
 

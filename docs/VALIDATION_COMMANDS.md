@@ -175,8 +175,9 @@ page-parent index. Do not rescore the frozen 5×50 suffix.
 
 Tracked aggregates: `data/eval_rag/holdout/ledger_public_dev_*.json`.
 Chain provenance: `data/eval_rag/holdout/ledger_public_dev_chain_seal.json`
-(hashes only; recommended tag `ledger-public-dev-chain-v1` is **not** created
-here). Protocol: [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md).
+(hashes only). Annotated tag `ledger-public-dev-chain-v1` peels to
+`ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c`. Protocol:
+[FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md).
 
 Offline identity / unit checks only (do not re-run remote scoring or rewrite
 the tracked manifest):
@@ -199,3 +200,26 @@ Slim tracked record:
 [`../data/eval_rag/structured_citation_canary_result.json`](../data/eval_rag/structured_citation_canary_result.json)
 (`config_hash` `6f85a617a16446afc17b940919bc57c10b397b588279466aa824e93e8536f2fa`;
 not product accuracy).
+
+## 8c. LEDGER structured-citation public/dev shadow (tools only)
+
+Exposed public/dev shadow harness. Not held-out, not product accuracy, not a
+LEDGER benchmark, not rc5. Refuses `public_holdout`. Do **not** run official
+preflight or `--allow-remote` in this stage.
+
+Frozen config:
+[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
+
+```powershell
+python -m unittest tests.test_ledger_structured_citation_shadow tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
+```
+
+Future official CLI (do not execute yet):
+
+```powershell
+python scripts/run_ledger_structured_citation_shadow.py `
+  --split public-dev `
+  --frozen-config data/eval_rag/structured_citation_shadow_config.json `
+  --confirm-exposed-shadow `
+  --preflight-only
+```

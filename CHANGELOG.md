@@ -49,6 +49,13 @@ image has been created. Latest published LumenFin remains
   stays closed. Sealed slim record:
   `data/eval_rag/structured_citation_canary_result.json`
   (`config_hash` `6f85a617a16446afc17b940919bc57c10b397b588279466aa824e93e8536f2fa`).
+- Added a LEDGER public/dev structured-citation shadow harness
+  (`scripts/run_ledger_structured_citation_shadow.py`) bound to
+  `ledger-public-dev-chain-v1` / `ec4d9e40`. Frozen config:
+  `data/eval_rag/structured_citation_shadow_config.json`. This is an
+  exposed public/dev shadow tool, not held-out, not product accuracy, not
+  a new LEDGER benchmark, and not rc5. Official preflight and
+  `--allow-remote` are not run in this stage. `public_holdout` stays closed.
 
 ## 0.1.0rc4 — 2026-08-13
 
