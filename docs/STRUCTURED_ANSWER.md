@@ -37,11 +37,20 @@ alongside this object. The two fields below have unique meaning:
 | `answer` | User-facing final answer / report body (string). |
 | `citations` | Ordered, de-duplicated list of **verified** stable chunk IDs that support that answer. |
 
-`citation_source` is provenance, not a second citation list:
+`citation_source` is provenance, not a second citation list. Canonical write
+values:
 
-- `structured` — IDs taken from verified evidence objects
-- `legacy_text` — reserved for an explicit legacy adapter; **not** silent prose guessing
+- `structured` — IDs taken from verified evidence objects / schema `citations`
+- `legacy_structured` — IDs taken from the older LEDGER JSON field `cited_chunk_ids`
 - `unavailable` — no reliable chunk IDs (including `incomplete_data` and fundamentals-only runs)
+
+`legacy_text` is a read-only alias for unpublished drafts; writers emit
+`legacy_structured`. There is **no** prose-regex citation path. Display
+markers such as `[1]` are converted only through an explicit index→chunk map.
+
+On validation failure FinRun/API do **not** keep a cleaned `structured`
+object. They degrade to `citation_source=unavailable` with
+`citation_validation=failed` and `citation_path=validation_failed`.
 
 ## Validation rules
 
@@ -62,6 +71,10 @@ Allowed:
 - verified fundamentals-only answers with empty `citations` and
   `citation_source=unavailable` (do **not** invent chunk IDs)
 
+`incomplete_data` is judged from `workflow_status` / `fatal_data_gap` and from
+whether verified numeric/growth claims exist. The validator does not NLP-scan
+report prose for ratios.
+
 Order is first-seen order from verified evidence refs. Duplicates keep the
 first position. Display markers such as `[1]` may be converted **only** through
 a program-owned index→`chunk_id` map. Conversion failure emits no citation.
@@ -69,24 +82,27 @@ a program-owned index→`chunk_id` map. Conversion failure emits no citation.
 ## Compatibility
 
 - Existing `final_report` remains the prose field for old API clients.
-- Optional API fields: `answer`, `citations`, `structured_answer_schema_version`.
-- FinRun schema stays `1.0`. Structured citations are **optional** metadata /
-  `structured_answer` and must not break old consumers.
+- Optional API fields `answer`, `citations`, and
+  `structured_answer_schema_version` are an atomic triple: all present and
+  valid, or omitted (`answer=null`, empty citations, no schema version).
+  `final_report` remains the prose field for old clients.
+- FinRun envelope `schema_version` (`FINRUN_SCHEMA_VERSION`) is independent of
+  `structured_answer_schema_version` even when both currently equal `1.0`.
 - Historical FinRun artifacts and sealed LEDGER aggregates are not rewritten.
 
 ## FinRun mapping
 
-Exporter copies the validated `StructuredAnswer` object. Provenance records
-`citation_source`. Evidence entries may still carry display `citation` strings.
-`chunk_id` is added on evidence rows when known, as an optional field.
+Exporter re-validates the structured object against current-run evidence.
+Illegal citations are not exported as `structured`. Provenance records
+`citation_validation` and `citation_path`. Evidence entries may still carry
+display `citation` strings. `chunk_id` is added on evidence rows when known.
 
 ## LEDGER reading
 
 Evaluator prefers `citations` + schema `1.0`. The existing eval JSON field
-`cited_chunk_ids` remains readable and is marked as the prior eval payload,
-not as a license to regex chunk IDs out of prose. Missing structured IDs are
-`unavailable`, not guessed. This protocol does not change sealed public-dev
-metrics and is not an accuracy improvement.
+`cited_chunk_ids` remains readable as `legacy_structured`. Missing structured
+IDs are `unavailable`, not guessed. This protocol does not change sealed
+public-dev metrics and is not an accuracy improvement.
 
 ## Failure behavior
 

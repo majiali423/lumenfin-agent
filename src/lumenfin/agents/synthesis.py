@@ -52,25 +52,20 @@ class SynthesisMixin:
 
     def _attach_structured_answer(self, state: FinanceState, update: FinanceState) -> None:
         from ..structured_answer import (
-            CITATION_SOURCE_UNAVAILABLE,
-            STRUCTURED_ANSWER_SCHEMA_VERSION,
             StructuredAnswerError,
             build_structured_answer_from_state,
-            redact_structured_error,
+            degraded_structured_answer,
         )
 
         merged = {**state, **update}
         try:
             update["structured_answer"] = build_structured_answer_from_state(merged).to_dict()
         except StructuredAnswerError as exc:
-            update["structured_answer"] = {
-                "answer": str(merged.get("final_report") or merged.get("executive_summary") or ""),
-                "citations": [],
-                "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
-                "citation_source": CITATION_SOURCE_UNAVAILABLE,
-                "workflow_status": str(merged.get("workflow_status") or "completed"),
-                "validation_error": redact_structured_error(str(exc)),
-            }
+            update["structured_answer"] = degraded_structured_answer(
+                answer=str(merged.get("final_report") or merged.get("executive_summary") or ""),
+                workflow_status=str(merged.get("workflow_status") or "completed"),
+                error=exc,
+            )
 
     # ═══════════════════════════════════════════════════════════════
     # SYNTHESIZER — Investment-Grade Report Assembly

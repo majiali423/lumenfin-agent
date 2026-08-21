@@ -12,11 +12,12 @@ from .governance import HoldoutError
 from .ledger import iter_ledger_parquet_rows
 from ...structured_answer import (
     AllowedEvidence,
-    CITATION_SOURCE_LEGACY_TEXT,
+    CITATION_SOURCE_LEGACY_STRUCTURED,
     CITATION_SOURCE_STRUCTURED,
     CITATION_SOURCE_UNAVAILABLE,
     STRUCTURED_ANSWER_SCHEMA_VERSION,
     StructuredAnswerError,
+    canonicalize_citation_source,
     validate_structured_answer,
 )
 
@@ -91,20 +92,23 @@ def parse_answer_payload(raw: str) -> dict[str, Any]:
     source = CITATION_SOURCE_STRUCTURED
     if cited is None:
         cited = payload.get("cited_chunk_ids") or []
-        source = CITATION_SOURCE_LEGACY_TEXT if cited else CITATION_SOURCE_UNAVAILABLE
+        source = CITATION_SOURCE_LEGACY_STRUCTURED if cited else CITATION_SOURCE_UNAVAILABLE
     if not isinstance(cited, list) or any(not str(item).strip() for item in cited):
         raise HoldoutError("LEDGER e2e cited_chunk_ids must be non-empty strings")
     cited_ids = [str(item).strip() for item in cited]
     if len(set(cited_ids)) != len(cited_ids):
         raise HoldoutError("LEDGER e2e cited_chunk_ids contain duplicates")
-    schema_version = str(
-        payload.get("structured_answer_schema_version") or payload.get("schema_version") or ""
-    )
+    schema_version = str(payload.get("structured_answer_schema_version") or "")
     if schema_version and schema_version != STRUCTURED_ANSWER_SCHEMA_VERSION:
         raise HoldoutError("LEDGER e2e structured_answer_schema_version is unsupported")
     if payload.get("citations") is not None:
         source = CITATION_SOURCE_STRUCTURED
         schema_version = schema_version or STRUCTURED_ANSWER_SCHEMA_VERSION
+    elif payload.get("citation_source"):
+        try:
+            source = canonicalize_citation_source(payload.get("citation_source"))
+        except StructuredAnswerError as exc:
+            raise HoldoutError("LEDGER e2e citation_source is unsupported") from exc
     if abstain and value is not None:
         raise HoldoutError("LEDGER e2e abstain cannot include a numeric value")
     return {
@@ -267,9 +271,16 @@ def account_ledger_citations(
             else:
                 unknown += 1
     supported = citation_supported(cited_chunk_ids, hits, qrels)
+    try:
+        canonical_source = canonicalize_citation_source(
+            citation_source or CITATION_SOURCE_UNAVAILABLE
+        )
+    except StructuredAnswerError:
+        canonical_source = CITATION_SOURCE_UNAVAILABLE
     return {
-        "structured_citation_present": citation_source == CITATION_SOURCE_STRUCTURED and bool(cited_chunk_ids),
-        "legacy_fallback": citation_source == CITATION_SOURCE_LEGACY_TEXT,
+        "structured_citation_present": canonical_source == CITATION_SOURCE_STRUCTURED
+        and bool(cited_chunk_ids),
+        "legacy_fallback": canonical_source == CITATION_SOURCE_LEGACY_STRUCTURED,
         "no_citation": not cited_chunk_ids,
         "valid_citation": valid,
         "unknown_citation": unknown,
@@ -277,5 +288,5 @@ def account_ledger_citations(
         "cross_run_or_tenant_citation": cross_scope,
         "supported_claim": bool(supported),
         "unsupported_claim": bool(cited_chunk_ids) and not supported,
-        "citation_source": citation_source if cited_chunk_ids else CITATION_SOURCE_UNAVAILABLE,
+        "citation_source": canonical_source if cited_chunk_ids else CITATION_SOURCE_UNAVAILABLE,
     }

@@ -230,6 +230,15 @@ class LedgerE2ECanaryTests(unittest.TestCase):
         )
         self.assertEqual(parsed["citations"], ["chunk-1"])
         self.assertEqual(parsed["citation_source"], "structured")
+        legacy = parse_answer_payload(
+            '{"value": 12.5, "cited_chunk_ids": ["chunk-1"], "abstain": false}'
+        )
+        self.assertEqual(legacy["citation_source"], "legacy_structured")
+        alias = parse_answer_payload(
+            '{"value": 12.5, "cited_chunk_ids": ["chunk-1"], '
+            '"citation_source": "legacy_text", "abstain": false}'
+        )
+        self.assertEqual(alias["citation_source"], "legacy_structured")
         with self.assertRaisesRegex(HoldoutError, "did not return JSON"):
             parse_answer_payload("The answer is 12.5 from chunk-1 without JSON")
 

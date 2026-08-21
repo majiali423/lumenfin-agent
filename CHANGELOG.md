@@ -40,6 +40,9 @@ image has been created. Latest published LumenFin remains
 - Added structured answer citation schema `1.0` so verified `chunk_id` values
   can be read by API, FinRun, and LEDGER without guessing IDs from prose.
   This is a contract, not an accuracy claim. `public_holdout` stays closed.
+- Fail-closed citation boundaries: illegal IDs degrade with explicit
+  `citation_validation=failed`; `citation_source` write values are
+  `structured` / `legacy_structured` / `unavailable`.
 
 ## 0.1.0rc4 — 2026-08-13
 

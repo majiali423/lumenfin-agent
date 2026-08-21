@@ -12,14 +12,19 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from lumenfin.finrun import export_finrun_state
+from lumenfin.finrun import FINRUN_SCHEMA_VERSION, export_finrun_state
+from lumenfin.structured_answer import (
+    CITATION_PATH_VALIDATION_FAILED,
+    CITATION_VALIDATION_FAILED,
+    STRUCTURED_ANSWER_SCHEMA_VERSION,
+)
 
 
 class FinRunExportTestCase(unittest.TestCase):
     def test_export_finrun_state_maps_lumenfin_trace(self) -> None:
         finrun = export_finrun_state(_sample_state())
 
-        self.assertEqual(finrun["schema_version"], "1.0")
+        self.assertEqual(finrun["schema_version"], FINRUN_SCHEMA_VERSION)
         self.assertEqual(finrun["run_id"], "lumenfin-sample")
         self.assertEqual({entity["name"] for entity in finrun["entities"]}, {"Apple"})
         self.assertTrue(any(step["name"] == "retrieval" for step in finrun["steps"]))
@@ -40,12 +45,13 @@ class FinRunExportTestCase(unittest.TestCase):
         self.assertEqual(metric["inputs"]["revenue"]["period_source"], "provider_record")
         self.assertEqual(metric["inputs"]["revenue"]["source_record_id"], "sample:apple:FY2025:revenue")
         structured = finrun["structured_answer"]
-        self.assertEqual(structured["structured_answer_schema_version"], "1.0")
-        self.assertEqual(structured["answer"], _sample_state()["final_report"])
+        self.assertEqual(finrun["schema_version"], FINRUN_SCHEMA_VERSION)
+        self.assertEqual(structured["structured_answer_schema_version"], STRUCTURED_ANSWER_SCHEMA_VERSION)
         self.assertEqual(structured["citations"], [])
         self.assertEqual(structured["citation_source"], "unavailable")
-        self.assertEqual(finrun["schema_version"], "1.0")
-        self.assertIn("final_output", finrun)
+        self.assertEqual(structured["citation_validation"], "passed")
+        self.assertEqual(structured["citation_path"], "unavailable")
+        self.assertEqual(finrun["metadata"]["citation_validation"], "passed")
 
     def test_export_preserves_structured_citations_and_does_not_guess_from_prose(self) -> None:
         state = _sample_state()
@@ -86,6 +92,7 @@ class FinRunExportTestCase(unittest.TestCase):
         finrun = export_finrun_state(state)
         self.assertEqual(finrun["structured_answer"]["citations"], ["apple:p1:c0"])
         self.assertEqual(finrun["structured_answer"]["citation_source"], "structured")
+        self.assertEqual(finrun["structured_answer"]["citation_validation"], "passed")
         self.assertTrue(any(item.get("chunk_id") == "apple:p1:c0" for item in finrun["evidence"]))
         self.assertEqual(finrun["metadata"]["citation_path"], "verified_evidence.chunk_id")
 
@@ -103,7 +110,63 @@ class FinRunExportTestCase(unittest.TestCase):
         finrun = export_finrun_state(state)
         self.assertEqual(finrun["structured_answer"]["citations"], [])
         self.assertEqual(finrun["structured_answer"]["citation_source"], "unavailable")
+        self.assertEqual(
+            finrun["structured_answer"]["citation_validation"],
+            CITATION_VALIDATION_FAILED,
+        )
+        self.assertEqual(
+            finrun["structured_answer"]["citation_path"],
+            CITATION_PATH_VALIDATION_FAILED,
+        )
+        self.assertEqual(finrun["metadata"]["citation_validation"], CITATION_VALIDATION_FAILED)
+        self.assertEqual(finrun["metadata"]["citation_path"], CITATION_PATH_VALIDATION_FAILED)
+        error = str(finrun["structured_answer"].get("validation_error") or "")
+        self.assertTrue(error)
+        self.assertNotIn("invented-chunk", error)
+        self.assertNotIn("412.0 billion", error)
         self.assertFalse(any(item.get("chunk_id") == "invented-chunk" for item in finrun["evidence"]))
+
+    def test_unverified_and_cross_scope_citations_degrade_explicitly(self) -> None:
+        state = _sample_state()
+        state["rag_tenant_id"] = "tenant-a"
+        state["rag_evidence"] = {
+            "Apple": [
+                {
+                    "chunk_id": "apple:p1:c0",
+                    "citation": "10k.pdf#p1",
+                    "text": "Apple revenue.",
+                    "tenant_id": "tenant-b",
+                    "session_id": "lumenfin-sample",
+                }
+            ]
+        }
+        state["verified_claims"] = [
+            {
+                "claim_id": "c1",
+                "entity": "Apple",
+                "claim_type": "numeric",
+                "statement": "Apple revenue was 412.",
+                "verification": "verified",
+                "value": 412.0,
+                "evidence_refs": [
+                    {
+                        "evidence_id": "ev1",
+                        "entity": "Apple",
+                        "citation": "10k.pdf#p1",
+                        "source_type": "rag",
+                        "text": "Apple revenue.",
+                        "chunk_id": "apple:p1:c0",
+                        "tenant_id": "tenant-b",
+                        "session_id": "lumenfin-sample",
+                    }
+                ],
+            }
+        ]
+        state["claims"] = state["verified_claims"]
+        finrun = export_finrun_state(state)
+        self.assertEqual(finrun["structured_answer"]["citation_validation"], CITATION_VALIDATION_FAILED)
+        self.assertEqual(finrun["structured_answer"]["citation_source"], "unavailable")
+        self.assertEqual(finrun["structured_answer"]["citations"], [])
 
     def test_export_finrun_script_writes_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

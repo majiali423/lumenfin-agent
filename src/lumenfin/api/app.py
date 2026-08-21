@@ -20,6 +20,7 @@ from ..market_data import MarketDataClient, probe_market_provider
 from ..provider_resilience import close_shared_http_clients, redact_provider_message
 from ..reporting import build_run_manifest, load_run_manifest
 from ..service import LumenFinAnalysisService
+from ..structured_answer import public_structured_answer_fields
 from .auth import AuthenticatedPrincipal, build_api_key_dependency, resolve_effective_tenant
 from .schemas import (
     AnalyzeDataRequest,
@@ -364,9 +365,7 @@ def create_app(
         }
 
     def _compact_state(result: dict) -> dict:
-        structured = result.get("structured_answer") or {}
-        citations = structured.get("citations") if isinstance(structured, dict) else None
-        return {
+        compact = {
             "run_id": result.get("run_id"),
             "thread_id": result.get("thread_id"),
             "companies": result.get("companies"),
@@ -375,13 +374,15 @@ def create_app(
             "data_mode": result.get("data_mode") or app_config.data_mode,
             "llm_backend": result.get("llm_backend"),
             "clarification_questions": result.get("clarification_questions", []),
-            "citations": list(citations or []),
-            "structured_answer_schema_version": (
-                structured.get("structured_answer_schema_version")
-                if isinstance(structured, dict)
-                else None
-            ),
         }
+        structured = public_structured_answer_fields(result)
+        if structured is not None:
+            compact["answer"] = structured["answer"]
+            compact["citations"] = structured["citations"]
+            compact["structured_answer_schema_version"] = structured[
+                "structured_answer_schema_version"
+            ]
+        return compact
 
     def _public_job(job: dict) -> dict:
         public = dict(job)
@@ -426,6 +427,7 @@ def create_app(
                 "created_at": checkpoint.get("created_at"),
                 "updated_at": checkpoint.get("updated_at"),
             }
+        structured = public_structured_answer_fields(result)
         return AnalyzeResponse(
             thread_id=payload["thread_id"],
             llm_backend=payload["llm_backend"],
@@ -445,10 +447,10 @@ def create_app(
             degraded=bool(payload.get("degraded")),
             provider_degraded=payload.get("provider_degraded"),
             provider_call_summary=payload.get("provider_call_summary"),
-            answer=result.get("final_report", ""),
-            citations=list((result.get("structured_answer") or {}).get("citations") or []),
+            answer=None if structured is None else structured["answer"],
+            citations=[] if structured is None else structured["citations"],
             structured_answer_schema_version=(
-                (result.get("structured_answer") or {}).get("structured_answer_schema_version")
+                None if structured is None else structured["structured_answer_schema_version"]
             ),
         )
 

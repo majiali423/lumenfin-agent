@@ -9,18 +9,24 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from lumenfin.api.schemas import AnalyzeResponse
-from lumenfin.claims.binding import _collect_evidence_pool
-from lumenfin.claims.models import Claim, EvidenceRef, filter_verified
 from lumenfin.structured_answer import (
     AllowedEvidence,
+    CITATION_SOURCE_LEGACY_STRUCTURED,
+    CITATION_SOURCE_LEGACY_TEXT,
     CITATION_SOURCE_UNAVAILABLE,
     STRUCTURED_ANSWER_SCHEMA_VERSION,
     StructuredAnswerError,
     build_structured_answer_from_state,
+    canonicalize_citation_source,
     map_display_markers_to_chunk_ids,
+    public_structured_answer_fields,
+    allowed_evidence_from_state,
     validate_structured_answer,
 )
+from lumenfin.api.schemas import AnalyzeResponse
+from lumenfin.claims.binding import _collect_evidence_pool
+from lumenfin.claims.models import Claim, EvidenceRef, filter_verified
+from lumenfin.finrun import FINRUN_SCHEMA_VERSION
 
 
 def _allowed(*chunk_ids: str, tenant: str = "tenant-a", session: str = "session-a") -> list[AllowedEvidence]:
@@ -92,6 +98,37 @@ class StructuredAnswerSchemaTests(unittest.TestCase):
                 },
                 allowed=_allowed("a"),
             )
+        with self.assertRaisesRegex(StructuredAnswerError, "unsupported"):
+            validate_structured_answer(
+                {
+                    "answer": "ok",
+                    "citations": ["a"],
+                    "schema_version": FINRUN_SCHEMA_VERSION,
+                },
+                allowed=_allowed("a"),
+                require_citation_for_factual=False,
+            )
+        self.assertNotEqual(
+            "structured_answer_schema_version",
+            "schema_version",
+        )
+
+    def test_legacy_text_alias_reads_as_legacy_structured(self) -> None:
+        self.assertEqual(
+            canonicalize_citation_source(CITATION_SOURCE_LEGACY_TEXT),
+            CITATION_SOURCE_LEGACY_STRUCTURED,
+        )
+        answer = validate_structured_answer(
+            {
+                "answer": "ok",
+                "citations": ["a"],
+                "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                "citation_source": CITATION_SOURCE_LEGACY_TEXT,
+            },
+            allowed=_allowed("a"),
+            require_citation_for_factual=False,
+        )
+        self.assertEqual(answer.citation_source, CITATION_SOURCE_LEGACY_STRUCTURED)
 
 
 class StructuredAnswerBindingTests(unittest.TestCase):
@@ -151,6 +188,59 @@ class StructuredAnswerBindingTests(unittest.TestCase):
                 require_citation_for_factual=False,
             )
 
+    def test_missing_tenant_or_session_does_not_match(self) -> None:
+        with self.assertRaisesRegex(StructuredAnswerError, "tenant"):
+            validate_structured_answer(
+                {
+                    "answer": "ok",
+                    "citations": ["a"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                },
+                allowed=[AllowedEvidence(chunk_id="a", tenant_id="", session_id="s", verified=True)],
+                expected_tenant_id="t",
+                expected_session_id="s",
+                require_citation_for_factual=False,
+            )
+        with self.assertRaisesRegex(StructuredAnswerError, "session"):
+            validate_structured_answer(
+                {
+                    "answer": "ok",
+                    "citations": ["a"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                },
+                allowed=[AllowedEvidence(chunk_id="a", tenant_id="t", session_id="", verified=True)],
+                expected_tenant_id="t",
+                expected_session_id="s",
+                require_citation_for_factual=False,
+            )
+
+    def test_default_verified_false_and_conflicting_metadata_fail(self) -> None:
+        with self.assertRaisesRegex(StructuredAnswerError, "unverified"):
+            validate_structured_answer(
+                {
+                    "answer": "ok",
+                    "citations": ["a"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                },
+                allowed=[AllowedEvidence(chunk_id="a", tenant_id="t", session_id="s")],
+                expected_tenant_id="t",
+                expected_session_id="s",
+                require_citation_for_factual=False,
+            )
+        with self.assertRaisesRegex(StructuredAnswerError, "conflicting metadata"):
+            validate_structured_answer(
+                {
+                    "answer": "ok",
+                    "citations": ["a"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                },
+                allowed=[
+                    AllowedEvidence(chunk_id="a", tenant_id="t1", session_id="s", verified=True),
+                    AllowedEvidence(chunk_id="a", tenant_id="t2", session_id="s", verified=True),
+                ],
+                require_citation_for_factual=False,
+            )
+
     def test_rag_pool_preserves_chunk_id(self) -> None:
         pool = _collect_evidence_pool(
             {
@@ -201,19 +291,34 @@ class StructuredAnswerPolicyTests(unittest.TestCase):
         )
         self.assertEqual(answer.citations, ())
 
-    def test_incomplete_data_cannot_carry_unsupported_ratio(self) -> None:
-        with self.assertRaisesRegex(StructuredAnswerError, "unsupported financial ratios"):
+    def test_incomplete_data_cannot_carry_verified_numeric_claims(self) -> None:
+        with self.assertRaisesRegex(StructuredAnswerError, "verified numeric claims"):
             validate_structured_answer(
                 {
-                    "answer": "EBITDA margin was 34% despite missing filings.",
+                    "answer": "No computable structured fundamentals were available.",
                     "citations": [],
-                    "structured_answer_schema_version": "1.0",
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
                     "workflow_status": "incomplete_data",
                     "citation_source": CITATION_SOURCE_UNAVAILABLE,
+                    "has_verified_numeric_claims": True,
                 },
                 allowed=[],
                 require_citation_for_factual=False,
             )
+
+    def test_incomplete_data_does_not_nlp_scan_prose_for_ratios(self) -> None:
+        answer = validate_structured_answer(
+            {
+                "answer": "AST-verifiable revenue/EBITDA inputs were missing; no EBITDA margin was invented.",
+                "citations": [],
+                "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                "workflow_status": "incomplete_data",
+                "citation_source": CITATION_SOURCE_UNAVAILABLE,
+            },
+            allowed=[],
+            require_citation_for_factual=False,
+        )
+        self.assertEqual(answer.citations, ())
 
     def test_display_markers_need_an_explicit_map_and_do_not_guess(self) -> None:
         mapped = map_display_markers_to_chunk_ids([1, 2, 1], {1: "a", 2: "b"})
@@ -272,6 +377,61 @@ class StructuredAnswerPolicyTests(unittest.TestCase):
         self.assertEqual(payload.citations, ("apple:p1:c0",))
         self.assertNotIn("apple:p2:c0", payload.citations)
 
+    def test_chunk_outside_final_allowlist_is_not_emitted(self) -> None:
+        state = {
+            "thread_id": "session-a",
+            "rag_tenant_id": "tenant-a",
+            "workflow_status": "completed",
+            "final_report": "Revenue was 412 billion.",
+            "rag_evidence": {
+                "Apple": [
+                    {
+                        "chunk_id": "apple:p1:c0",
+                        "tenant_id": "tenant-a",
+                        "session_id": "session-a",
+                    }
+                ]
+            },
+            "claims": [
+                Claim(
+                    claim_id="c1",
+                    entity="Apple",
+                    claim_type="numeric",
+                    statement="Apple revenue was 412.",
+                    value=412.0,
+                    verification="verified",
+                    evidence_refs=[
+                        EvidenceRef(
+                            evidence_id="ev1",
+                            entity="Apple",
+                            citation="10k.pdf#p1",
+                            source_type="rag",
+                            text="Revenue was 412 billion.",
+                            chunk_id="stale-repair:p9:c0",
+                            tenant_id="tenant-a",
+                            session_id="session-a",
+                        )
+                    ],
+                ).to_dict()
+            ],
+        }
+        state["verified_claims"] = list(state["claims"])
+        payload = build_structured_answer_from_state(state)
+        self.assertEqual(payload.citations, ())
+        self.assertEqual(payload.citation_source, CITATION_SOURCE_UNAVAILABLE)
+        with self.assertRaisesRegex(StructuredAnswerError, "unknown"):
+            validate_structured_answer(
+                {
+                    "answer": "Revenue was 412 billion.",
+                    "citations": ["stale-repair:p9:c0"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                },
+                allowed=allowed_evidence_from_state(state),
+                expected_tenant_id="tenant-a",
+                expected_session_id="session-a",
+                require_citation_for_factual=False,
+            )
+
     def test_filter_verified_still_requires_evidence_refs(self) -> None:
         claims = [
             Claim(
@@ -309,7 +469,53 @@ class StructuredAnswerPolicyTests(unittest.TestCase):
             state={},
         )
         self.assertEqual(legacy.final_report, "legacy only")
+        self.assertEqual(legacy.answer, None)
         self.assertEqual(legacy.citations, [])
+        self.assertIsNone(legacy.structured_answer_schema_version)
+
+    def test_api_triple_is_atomic_and_hides_failed_citations(self) -> None:
+        valid = public_structured_answer_fields(
+            {
+                "final_report": "Revenue was 10.",
+                "structured_answer": {
+                    "answer": "other text",
+                    "citations": ["doc:p1:c0"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                    "citation_validation": "passed",
+                },
+            }
+        )
+        self.assertEqual(
+            valid,
+            {
+                "answer": "Revenue was 10.",
+                "citations": ["doc:p1:c0"],
+                "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+            },
+        )
+        failed = public_structured_answer_fields(
+            {
+                "final_report": "Revenue was 10.",
+                "structured_answer": {
+                    "answer": "Revenue was 10.",
+                    "citations": ["invented-chunk"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                    "citation_validation": "failed",
+                    "validation_error": "citation refers to an unknown chunk",
+                },
+            }
+        )
+        self.assertIsNone(failed)
+        partial = public_structured_answer_fields(
+            {
+                "final_report": "Revenue was 10.",
+                "structured_answer": {
+                    "citations": ["doc:p1:c0"],
+                    "structured_answer_schema_version": STRUCTURED_ANSWER_SCHEMA_VERSION,
+                },
+            }
+        )
+        self.assertIsNone(partial)
 
 
 if __name__ == "__main__":
