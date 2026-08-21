@@ -14,7 +14,8 @@ Docker Compose · pytest
 
 最新已发布版本 **`0.1.0rc4`** / **`v0.1.0-rc.4`**。
 当前源码候选 **`0.1.0rc5`** / **`v0.1.0-rc.5`** — **尚未打标签、尚未发布**。
-FinRun schema `1.0` · FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · 受控 RC，边界见
+FinRun schema `1.0` · FinAgentBench 权威 pin **`v0.1.0-rc.3`** · required CI
+同时对已发布的 **`v0.1.0-rc.4`** fail-closed 兼容验证 · 受控 RC，边界见
 [局限说明](docs/PRODUCTION_LIMITATIONS.md)
 
 [文档](docs/README.md) · [架构](docs/ARCHITECTURE.md) ·
@@ -358,7 +359,8 @@ PDF / SEC / Yahoo / market providers
 | Provider unexpected failures | Scenario G | **0** |
 | **Benchmark reliability** | FinAgentBench 完成案例均分 | **92.97**（informational；在评测器 pin `v0.1.0-rc.1` 下测得） |
 | Core mutation detection | 错误实体 / 数值 / 引用 / 风险 | **4/4** |
-| **Evaluator compatibility** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.3` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
+| **Evaluator compatibility (frozen pin)** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.3` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
+| **Evaluator compatibility (latest published)** | Required CI 对 FinAgentBench `v0.1.0-rc.4` 的兼容 lane | fail-closed 兼容验证；不替换 rc3 pin |
 | **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback；**不是** FinanceBench） |
 | **FinanceBench confirmation-50** | 已消耗切分上的页级检索 | Hit@10 **0.62**；不是产品准确率；Phase 4 `NOT_RUN` |
 | **LEDGER public-dev** | 公开 KPI 检索 / packing / 生成 canary | **已封存并停止**；不是产品准确率；不要给 page-parent 索引做 embedding |
@@ -374,7 +376,9 @@ RC 验证中的 LumenFin 在 UID-10001 Linux 镜像内通过
 
 Benchmark 行仅供参考，是在更早的评测器 pin 下测得；**不是**已发布
 `v0.1.0-rc.3` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
-FinAgentBench `v0.1.0-rc.3` 接受并回放。
+FinAgentBench `v0.1.0-rc.3` 接受并回放。Required CI 另有一条对已发布
+FinAgentBench `v0.1.0-rc.4` 的 fail-closed 兼容 lane；它不替换 rc3 pin。
+FinAgentBench `master` 不是必选门禁。
 
 证据：[queue/worker](docs/QUEUE_WORKER_INTEGRATION.md) ·
 [provider resilience](docs/PROVIDER_RESILIENCE.md) ·

@@ -329,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         "finagentbench_root": str(fab),
         "lumenfin_commit": _git_revision(lumen),
         "finagentbench_requested_ref": os.environ.get("FINAGENTBENCH_REF", ""),
+        "finagentbench_lane": os.environ.get("FINAGENTBENCH_LANE", ""),
         "finagentbench_commit": _git_revision(fab),
         "finagentbench_package_version": _fab_package_version(fab),
         "lumenfin_unexpected_dirty": dirty,

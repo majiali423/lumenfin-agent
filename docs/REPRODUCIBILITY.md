@@ -8,7 +8,8 @@ FinAgentBench versioning (do not conflate):
 
 | Role | Version |
 |------|---------|
-| LumenFin CI **evaluator pin** | FinAgentBench tag `v0.1.0-rc.3` / package `0.1.0rc3` |
+| LumenFin CI **authoritative frozen pin** | FinAgentBench tag `v0.1.0-rc.3` / package `0.1.0rc3` |
+| LumenFin CI **latest published compatibility** | FinAgentBench tag `v0.1.0-rc.4` / package `0.1.0rc4` |
 | Current FinAgentBench **package tag** | `v0.1.0-rc.4` / `0.1.0rc4` (pins producer LumenFin `v0.1.0-rc.3`) |
 | FinRun schema | `1.0` |
 

@@ -1,8 +1,9 @@
 name: test
 
 # Extended gate (FinAgentBench checkout + cross-repo + RAG eval). Manual / optional.
-# Required PR CI is `.github/workflows/ci.yml` (offline suite + FinRun contract gate).
-# This workflow intentionally does not duplicate the offline unit suite on every PR.
+# Required PR CI is `.github/workflows/ci.yml` (offline suite + FinRun contract
+# matrix: FinAgentBench v0.1.0-rc.3 authoritative pin and v0.1.0-rc.4 compatibility).
+# This workflow defaults to the frozen pin and does not replace required CI.
 
 on:
   workflow_dispatch:

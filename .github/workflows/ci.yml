@@ -53,13 +53,24 @@ jobs:
             outputs/portfolio_demo/**
           if-no-files-found: ignore
 
-  # Lightweight FinRun contract gate: current LumenFin + pinned FinAgentBench.
-  # Does not re-run the offline unit suite (avoid duplicating ci.offline).
+  # Lightweight FinRun contract gate: current LumenFin + two published FinAgentBench
+  # tags. Does not re-run the offline unit suite (avoid duplicating ci.offline).
   # Full extended lane (RAG eval + this gate) remains workflow_dispatch in test.yml.
+  # authoritative-frozen = release-authority pin (do not silently replace).
+  # latest-published = compatibility with the newest published FinAgentBench tag.
+  # Neither lane uses FinAgentBench master. Fail closed if a tag is incompatible.
   finrun-contract:
-    name: FinRun contract gate
+    name: FinRun contract (${{ matrix.lane }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: authoritative-frozen
+            finagentbench_ref: v0.1.0-rc.3
+          - lane: latest-published
+            finagentbench_ref: v0.1.0-rc.4
     # Always on push/PR so FinRun/claims/graph exporter changes cannot skip the gate.
     # Path-only filters are insufficient when shared helpers change export shape.
     env:
@@ -69,7 +80,8 @@ jobs:
       MAS_REDIS_URL: ""
       DEEPSEEK_API_KEY: ""
       DASHSCOPE_API_KEY: ""
-      FINAGENTBENCH_REF: v0.1.0-rc.3
+      FINAGENTBENCH_LANE: ${{ matrix.lane }}
+      FINAGENTBENCH_REF: ${{ matrix.finagentbench_ref }}
       FINAGENTBENCH_PROFILE: ci
       LUMENFIN_ROOT: ${{ github.workspace }}/lumenfin-agent
       FINAGENTBENCH_DIR: ${{ github.workspace }}/finagentbench-demo
@@ -80,7 +92,7 @@ jobs:
         with:
           path: lumenfin-agent
 
-      - name: Checkout FinAgentBench (pinned)
+      - name: Checkout FinAgentBench (matrix ref)
         uses: actions/checkout@v4
         with:
           repository: ${{ format('{0}/finagentbench-demo', github.repository_owner) }}
@@ -100,6 +112,7 @@ jobs:
 
       - name: Record revisions
         run: |
+          echo "FINAGENTBENCH_LANE=${FINAGENTBENCH_LANE}"
           echo "FINAGENTBENCH_REF=${FINAGENTBENCH_REF}"
           echo "LUMENFIN_ROOT=${LUMENFIN_ROOT}"
           echo "FINAGENTBENCH_DIR=${FINAGENTBENCH_DIR}"
@@ -130,6 +143,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: finrun-contract-gate
+          name: finrun-contract-gate-${{ matrix.lane }}-${{ matrix.finagentbench_ref }}
           path: ${{ env.CROSS_REPO_OUT_DIR }}/
           if-no-files-found: ignore

@@ -112,11 +112,21 @@ an operator decision. See [QWEN3_RERANK.md](QWEN3_RERANK.md).
 |----------|---------|---------|
 | `FINAGENTBENCH_DIR` | sibling `finagentbench-demo` | Local repository discovery |
 | `LUMENFIN_ROOT` | sibling `lumenfin-agent` | Benchmark-side discovery |
-| `FINAGENTBENCH_REF` | `v0.1.0-rc.3` | Released benchmark tag/SHA |
+| `FINAGENTBENCH_REF` | `v0.1.0-rc.3` | Authoritative frozen benchmark tag/SHA |
+| `FINAGENTBENCH_LANE` | unset locally | CI matrix lane name (`authoritative-frozen` or `latest-published`) |
 | `FINAGENTBENCH_PROFILE` | `ci` | Deterministic benchmark profile |
 
-The GitHub workflow permits manual `FINAGENTBENCH_REF` override and records the
-resolved commit SHA. Normal push/PR validation uses the pinned release tag.
+Required GitHub CI runs **two fail-closed FinRun lanes** and records LumenFin
+commit, requested FinAgentBench ref, resolved commit, package version, case
+hash, FinRun schema, and mutation/gate results:
+
+- `authoritative-frozen`: FinAgentBench `v0.1.0-rc.3` (release-authority pin;
+  do not silently replace)
+- `latest-published`: FinAgentBench `v0.1.0-rc.4` (latest published
+  compatibility; not a pin replacement)
+
+The manual `test.yml` workflow may override `FINAGENTBENCH_REF` and still
+defaults to the frozen pin. FinAgentBench `master` is not a required gate.
 
 ## Production Compose
 

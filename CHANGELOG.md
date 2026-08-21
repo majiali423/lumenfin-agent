@@ -28,6 +28,13 @@ image has been created. Latest published LumenFin remains
   public-dev artifacts can be hash-checked as one provenance chain. Recommended
   annotated tag name `ledger-public-dev-chain-v1` is recorded but not created.
 
+### CI
+
+- Required FinRun contract gate now runs two fail-closed lanes: FinAgentBench
+  `v0.1.0-rc.3` (authoritative frozen pin) and published `v0.1.0-rc.4`
+  (latest-release compatibility). Artifact names include the lane and ref.
+  FinAgentBench `master` is not a required gate.
+
 ## 0.1.0rc4 — 2026-08-13
 
 Controlled release candidate for tenant authorization, upgrade safety, and

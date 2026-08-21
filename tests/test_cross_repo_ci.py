@@ -101,6 +101,21 @@ class CrossRepoCiTestCase(unittest.TestCase):
             dirty = cross.lumenfin_unexpected_dirty(ROOT)
         self.assertEqual(dirty, [" M README.md"])
 
+    def test_required_ci_validates_frozen_pin_and_latest_published_release(self) -> None:
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("lane: authoritative-frozen", ci)
+        self.assertIn("finagentbench_ref: v0.1.0-rc.3", ci)
+        self.assertIn("lane: latest-published", ci)
+        self.assertIn("finagentbench_ref: v0.1.0-rc.4", ci)
+        self.assertIn("finrun-contract-gate-${{ matrix.lane }}-${{ matrix.finagentbench_ref }}", ci)
+        self.assertIn("fail-fast: false", ci)
+        self.assertNotRegex(ci, r"(?m)^\s+ref:\s+master\s*$")
+        self.assertNotIn("ref: ${{ env.FINAGENTBENCH_REF || 'master' }}", ci)
+
+    def test_summary_records_requested_ref_and_lane(self) -> None:
+        self.assertIn("finagentbench_requested_ref", Path(cross.__file__).read_text(encoding="utf-8"))
+        self.assertIn("finagentbench_lane", Path(cross.__file__).read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

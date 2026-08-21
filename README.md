@@ -16,8 +16,9 @@ Docker Compose · pytest
 
 Latest published release **`0.1.0rc4`** / **`v0.1.0-rc.4`**.
 Current source candidate **`0.1.0rc5`** / **`v0.1.0-rc.5`** — **not tagged and
-not released**. FinRun schema `1.0` · FinAgentBench evaluator pin
-**`v0.1.0-rc.3`** · controlled RC under documented
+not released**. FinRun schema `1.0` · FinAgentBench authoritative pin
+**`v0.1.0-rc.3`** · required CI also fail-closes against published
+**`v0.1.0-rc.4`** · controlled RC under documented
 limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
 [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) ·
@@ -371,7 +372,8 @@ Do **not** merge these into one “accuracy” number.
 | Provider unexpected failures | Scenario G | **0** |
 | **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational; measured under evaluator pin `v0.1.0-rc.1`) |
 | Core mutation detection | Wrong entity / number / citation / risk | **4/4** |
-| **Evaluator compatibility** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.3` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
+| **Evaluator compatibility (frozen pin)** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.3` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
+| **Evaluator compatibility (latest published)** | Required CI lane against FinAgentBench `v0.1.0-rc.4` | fail-closed compatibility; does not replace the rc3 pin |
 | **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback; **not** FinanceBench) |
 | **FinanceBench confirmation-50** | Page-level retrieval on a consumed split | Hit@10 **0.62**; not product accuracy; Phase 4 `NOT_RUN` |
 | **LEDGER public-dev** | Public KPI retrieval / packing / generate canary | **Sealed / stopped**; not product accuracy; do not embed page-parent index |
@@ -389,7 +391,9 @@ so runner totals and snapshot boundaries must not be mixed.
 The benchmark row is informational and was produced with the earlier evaluator
 pin; it is **not** a score for the published `v0.1.0-rc.3` evaluator. What the
 current pin verifies is compatibility: the frozen FinRun export is accepted and
-replayed by FinAgentBench `v0.1.0-rc.3`.
+replayed by FinAgentBench `v0.1.0-rc.3`. Required CI also fail-closes a second
+lane against published FinAgentBench `v0.1.0-rc.4`; that lane is compatibility,
+not a silent pin replacement. FinAgentBench `master` is not a required gate.
 
 Evidence: [queue/worker](docs/QUEUE_WORKER_INTEGRATION.md) ·
 [provider resilience](docs/PROVIDER_RESILIENCE.md) ·

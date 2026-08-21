@@ -45,4 +45,5 @@ Target (historical): LumenFin + FinAgentBench `0.1.0rc1`
 | LumenFin tag | `v0.1.0-rc.4` published |
 | FinAgentBench package tag | `v0.1.0-rc.4` published |
 | LumenFin evaluator pin | FinAgentBench `v0.1.0-rc.3` |
+| FinAgentBench latest published compatibility | `v0.1.0-rc.4` required CI lane; does not replace the pin |
 | Public Docker image | **Not** published (AGPL/RSAL boundary) |
