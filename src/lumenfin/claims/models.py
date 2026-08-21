@@ -72,6 +72,9 @@ class EvidenceRef:
     period_alignment: str | None = None
     source_record_id: str | None = None
     citation_trusted: bool = False
+    chunk_id: str | None = None
+    tenant_id: str | None = None
+    session_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -153,6 +156,9 @@ def claims_from_state(state: dict[str, Any]) -> list[Claim]:
                         "period_alignment",
                         "source_record_id",
                         "citation_trusted",
+                        "chunk_id",
+                        "tenant_id",
+                        "session_id",
                     )
                     if key in ref
                 }

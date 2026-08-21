@@ -35,6 +35,12 @@ image has been created. Latest published LumenFin remains
   (latest-release compatibility). Artifact names include the lane and ref.
   FinAgentBench `master` is not a required gate.
 
+### Contract
+
+- Added structured answer citation schema `1.0` so verified `chunk_id` values
+  can be read by API, FinRun, and LEDGER without guessing IDs from prose.
+  This is a contract, not an accuracy claim. `public_holdout` stays closed.
+
 ## 0.1.0rc4 — 2026-08-13
 
 Controlled release candidate for tenant authorization, upgrade safety, and

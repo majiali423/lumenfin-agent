@@ -52,6 +52,9 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
         period_alignment: str | None = None,
         source_record_id: str | None = None,
         citation_trusted: bool = False,
+        chunk_id: str | None = None,
+        tenant_id: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         if not citation or evidence_id in seen:
             return
@@ -85,6 +88,9 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
                 period_alignment=period_alignment,
                 source_record_id=source_record_id,
                 citation_trusted=citation_trusted,
+                chunk_id=chunk_id or None,
+                tenant_id=tenant_id or None,
+                session_id=session_id or None,
             )
         )
 
@@ -96,6 +102,9 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
         hit_period_alignment = str(hit.get("period_alignment") or "") or None
         hit_record = str(hit.get("source_record_id") or hit.get("provider_record_id") or "") or None
         trusted_citation = bool(supplied_citation)
+        chunk_id = str(hit.get("chunk_id") or "").strip() or None
+        tenant_id = str(hit.get("tenant_id") or state.get("rag_tenant_id") or "") or None
+        session_id = str(hit.get("session_id") or state.get("thread_id") or "") or None
         if hit_period and not is_factual_period_provenance(
             period=hit_period,
             period_source=hit_period_source,
@@ -112,6 +121,9 @@ def _collect_evidence_pool(state: dict[str, Any], company: str) -> list[Evidence
             period_alignment=hit_period_alignment,
             source_record_id=hit_record,
             citation_trusted=trusted_citation,
+            chunk_id=chunk_id,
+            tenant_id=tenant_id,
+            session_id=session_id,
         )
 
     payload = (state.get("retrieved_docs") or {}).get(company) or {}

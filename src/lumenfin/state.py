@@ -85,3 +85,4 @@ class FinanceState(TypedDict, total=False):
     claims: list[dict[str, Any]]
     verified_claims: list[dict[str, Any]]
     claim_binding: dict[str, Any]
+    structured_answer: dict[str, Any]

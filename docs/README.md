@@ -46,6 +46,7 @@ release gate.
 | [evaluation_strategy.md](evaluation_strategy.md) | Internal evaluation strategy |
 | [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench RAG retrieval eval (test-100 exploratory; confirmation-50 consumed; A/B/C sealed; LEDGER public-dev sealed and stopped; Phase 4 `NOT_RUN`; not product accuracy) |
 | [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | LEDGER public-dev chain is sealed; do not embed page-parent index; production stays A; further work needs a new unseen holdout |
+| [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer + verified chunk-id citation protocol (`1.0`); not an accuracy claim |
 | [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
 | [README_zh.md](README_zh.md) | Legacy Chinese stub — prefer root [../README.zh-CN.md](../README.zh-CN.md) |
 
