@@ -108,3 +108,20 @@ public-dev metrics and is not an accuracy improvement.
 
 Validators raise short errors. Messages must not include API keys, provider
 payloads, tenant secrets, or full filing text.
+
+## Synthetic contract canary
+
+Offline, deterministic, synthetic-only. It proves the production citation
+path (`chunk_document` → binding → structured answer → API triple → FinRun
+→ LEDGER evaluator) fail-closes on illegal IDs. It is **not** product
+accuracy, RAG recall, FinanceBench, or a LEDGER benchmark.
+
+```powershell
+python scripts/run_structured_citation_canary.py --output-dir outputs/structured_citation_canary_v1
+```
+
+The CLI refuses `public_holdout`, `--allow-remote`, and non-empty output
+overwrite. Raw artifacts stay gitignored under
+`outputs/structured_citation_canary_v1/`. A slim tracked record may be sealed
+at `data/eval_rag/structured_citation_canary_result.json` after one clean
+worktree run. That file is not a FinanceBench or LEDGER aggregate.

@@ -43,6 +43,10 @@ image has been created. Latest published LumenFin remains
 - Fail-closed citation boundaries: illegal IDs degrade with explicit
   `citation_validation=failed`; `citation_source` write values are
   `structured` / `legacy_structured` / `unavailable`.
+- Added an offline synthetic structured-citation end-to-end canary
+  (`scripts/run_structured_citation_canary.py`). It is a contract check,
+  not product accuracy, FinanceBench, or a LEDGER score. `public_holdout`
+  stays closed.
 
 ## 0.1.0rc4 — 2026-08-13
 

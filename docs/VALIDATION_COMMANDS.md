@@ -184,3 +184,16 @@ the tracked manifest):
 ```powershell
 python -m unittest tests.test_ledger_public_benchmark tests.test_ledger_section_parent tests.test_ledger_parent_page_e2e tests.test_ledger_public_dev_chain_seal -v
 ```
+
+## 8b. Structured citation synthetic canary (offline)
+
+Contract-only. Not product accuracy, RAG recall, FinanceBench, or LEDGER
+benchmark. Refuses `public_holdout` and remote providers.
+
+```powershell
+python -m unittest tests.test_structured_citation_canary tests.test_structured_answer tests.test_claim_binding tests.test_finrun_export tests.test_ledger_e2e_canary -v
+python scripts/run_structured_citation_canary.py --output-dir outputs/structured_citation_canary_v1
+```
+
+Slim tracked record (after one clean-worktree run):
+`data/eval_rag/structured_citation_canary_result.json`.
