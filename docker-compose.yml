@@ -124,7 +124,7 @@ services:
       - milvus_v3_vector_data:/var/lib/milvus
 
   migrator:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc4}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc5}
     build: .
     environment:
       APP_ENV: production
@@ -139,7 +139,7 @@ services:
     restart: "no"
 
   lumenfin-api:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc4}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc5}
     build: .
     restart: unless-stopped
     # Analysis deadline is 120s; retain a buffer for request cleanup.
@@ -196,7 +196,7 @@ services:
       start_period: 20s
 
   lumenfin-worker:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc4}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc5}
     build: .
     restart: unless-stopped
     # Analysis deadline is 120s; retain a buffer for reservation cleanup.
@@ -238,7 +238,7 @@ services:
         condition: service_healthy
 
   lumenfin-index-worker:
-    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc4}
+    image: lumenfin-agent:${LUMENFIN_IMAGE_TAG:-0.1.0rc5}
     build: .
     restart: unless-stopped
     # Index-job deadline is 180s; retain a buffer for lease-safe cleanup.

@@ -12,8 +12,9 @@
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-当前已发布候选版本 **`0.1.0rc4`** / **`v0.1.0-rc.4`** · FinRun schema `1.0` ·
-FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · 受控 RC，边界见
+最新已发布版本 **`0.1.0rc4`** / **`v0.1.0-rc.4`**。
+当前源码候选 **`0.1.0rc5`** / **`v0.1.0-rc.5`** — **尚未打标签、尚未发布**。
+FinRun schema `1.0` · FinAgentBench 评测器 pin **`v0.1.0-rc.3`** · 受控 RC，边界见
 [局限说明](docs/PRODUCTION_LIMITATIONS.md)
 
 [文档](docs/README.md) · [架构](docs/ARCHITECTURE.md) ·
@@ -346,7 +347,7 @@ PDF / SEC / Yahoo / market providers
 | Gate | What it measures | Result |
 |------|------------------|--------|
 | **LumenFin RC 标签回归** | 冻结的 `v0.1.0-rc.3` Linux 镜像测试 | **495 passed, 2 skipped** |
-| **LumenFin 当前 main 回归** | 标签后的 Linux 镜像测试，2026-08-13 | **512 passed, 3 skipped** |
+| **LumenFin 2026-08-13 post-rc4 快照** | `v0.1.0-rc.4` 之后的有日期 Linux 镜像测试；不是无日期的“当前 main”计数 | **512 passed, 3 skipped** |
 | **FinAgentBench unit regression** | 全量 Python 测试 | **149 passed** |
 | **Infrastructure integration** | Queue/worker 多进程 Docker | **PASS**（`20260804T095357Z`） |
 | Worker-kill recovery | 被杀 worker 的任务是否需要人工重投？ | **否** — lease 过期 + attempt fencing 自动回收 |
@@ -364,8 +365,10 @@ PDF / SEC / Yahoo / market providers
 | **Compose hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
 
 **RC 标签**单元回归计数冻结于 2026-08-12 全量验证，并随
-`v0.1.0-rc.3` 发布；单列的当前 main 数据来自 2026-08-13 标签后的 Linux
-镜像 unittest discovery。RC 验证中的 LumenFin 在 UID-10001 Linux 镜像内通过
+`v0.1.0-rc.3` 发布；2026-08-13 post-rc4 快照是当天的 Linux 镜像 unittest
+discovery，不是当前 HEAD 的实时计数。HEAD 状态见
+[CI workflow](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)。
+RC 验证中的 LumenFin 在 UID-10001 Linux 镜像内通过
 `scripts/run_tests.py` 运行；FinAgentBench 使用 unittest discovery。直接调用
 `pytest` 可能按 subtest 产生不同计数，因此不能混用 runner 总数或快照边界。
 

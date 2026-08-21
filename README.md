@@ -14,8 +14,10 @@ what is verified.
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Current published candidate **`0.1.0rc4`** / **`v0.1.0-rc.4`** · FinRun schema `1.0` ·
-FinAgentBench evaluator pin **`v0.1.0-rc.3`** · controlled RC under documented
+Latest published release **`0.1.0rc4`** / **`v0.1.0-rc.4`**.
+Current source candidate **`0.1.0rc5`** / **`v0.1.0-rc.5`** — **not tagged and
+not released**. FinRun schema `1.0` · FinAgentBench evaluator pin
+**`v0.1.0-rc.3`** · controlled RC under documented
 limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
 [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) ·
@@ -358,7 +360,7 @@ Do **not** merge these into one “accuracy” number.
 | Gate | What it measures | Result |
 |------|------------------|--------|
 | **LumenFin RC-tag regression** | Frozen `v0.1.0-rc.3` Linux-image suite | **495 passed, 2 skipped** |
-| **LumenFin current-main regression** | Post-tag Linux-image suite, 2026-08-13 | **512 passed, 3 skipped** |
+| **LumenFin 2026-08-13 post-rc4 snapshot** | Dated Linux-image suite after `v0.1.0-rc.4`; not an undated “current main” count | **512 passed, 3 skipped** |
 | **FinAgentBench unit regression** | Full Python suite | **149 passed** |
 | **Infrastructure integration** | Queue/worker multi-process Docker | **PASS** (`20260804T095357Z`) |
 | Worker-kill recovery | Does a killed worker's job need human redelivery? | **no** — lease expiry + attempt fencing reclaim it |
@@ -376,8 +378,10 @@ Do **not** merge these into one “accuracy” number.
 | **Compose hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
 
 The **RC-tag** unit-regression counts were frozen during full validation on
-2026-08-12 and shipped in `v0.1.0-rc.3`. The separate current-main row is the
-post-tag Linux-image unittest discovery run from 2026-08-13. The RC validation
+2026-08-12 and shipped in `v0.1.0-rc.3`. The separate 2026-08-13 post-rc4
+snapshot is that day's Linux-image unittest discovery run, not a live HEAD
+count. HEAD status is the [CI workflow](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
+on the current commit. The RC validation
 used `scripts/run_tests.py` inside the UID-10001 Linux image; FinAgentBench used
 unittest discovery. Invoking `pytest` directly can count subtests differently,
 so runner totals and snapshot boundaries must not be mixed.

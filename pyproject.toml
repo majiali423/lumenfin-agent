@@ -1,6 +1,6 @@
 [project]
 name = "lumenfin-agent"
-version = "0.1.0rc4"
+version = "0.1.0rc5"
 description = "LumenFin: evidence-grounded financial diligence with LangGraph specialist nodes (planner–critic–repair)."
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

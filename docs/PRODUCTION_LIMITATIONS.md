@@ -41,8 +41,9 @@ are **not** a certification of unrestricted production readiness.
   2026-08-12; ordinary CI remains offline. The RC-tag two-repo validation
   summary (Linux image suite 495 passed / 2 skipped, FinAgentBench 149,
   FinRun mutations 11/11) is recorded below and shipped with `v0.1.0-rc.3`.
-  The post-tag `main` Linux-image regression on 2026-08-13 passed 512 tests
-  with 3 skipped; it is not evidence from the immutable RC tag
+  The post-tag Linux-image regression on 2026-08-13 passed 512 tests
+  with 3 skipped; that is a dated post-rc4 snapshot, not a live HEAD count
+  and not evidence from the immutable RC tag
 - No large-scale multi-day soak in the validated pack
 
 ### Validated integration evidence (controlled)
@@ -52,7 +53,7 @@ are **not** a certification of unrestricted production readiness.
 | Queue/worker multi-process Docker | PASS (`20260804T095357Z`) — worker-kill reclaim without manual redelivery; tenant leakage `0`; orphan chunks/vectors `0/0` | [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) |
 | Provider resilience dual-API Docker | PASS (`docker_20260804T100817Z`) — logical calls `20` → physical attempts `25` (1.25×); unexpected failures `0`; context leakage `0` | [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md) |
 | RC-tag two-repo full validation | PASS (2026-08-12) — LumenFin 495/2 skip; FinAgentBench 149; FinRun mutations 11/11 | this document + CI / `scripts/run_tests.py` + `scripts/run_cross_repo_ci.py` |
-| Post-tag LumenFin regression | PASS (2026-08-13) — current `main` Linux-image suite 512/3 skip | local closure run; not part of immutable `v0.1.0-rc.3` evidence |
+| Post-tag LumenFin regression | PASS (2026-08-13 snapshot) — Linux-image suite 512/3 skip; not a live HEAD count | local closure run; not part of immutable `v0.1.0-rc.3` evidence |
 
 Integration harnesses use deterministic embeddings / demo market providers and a
 deterministic provider stub for fault injection. Combined observed inflight

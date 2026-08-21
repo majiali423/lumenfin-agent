@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.1.0rc5 — candidate preparation (unpublished)
+
+This section records source-candidate identity for current `main`. It is **not**
+a published release: no `v0.1.0-rc.5` tag, GitHub Release, or public Docker
+image has been created. Latest published LumenFin remains
+`0.1.0rc4` / `v0.1.0-rc.4`.
+
+### Identity
+
+- Python package, API fallback version, and Compose default image tag:
+  `0.1.0rc5`
+- Intended annotated tag name (not created in this preparation): `v0.1.0-rc.5`
+
+### Documentation
+
+- Relabeled the 2026-08-13 Linux-image suite (**512 passed, 3 skipped**) as a
+  dated post-rc4 snapshot. It is not an undated “current main” count.
 
 ### Evaluation
 
