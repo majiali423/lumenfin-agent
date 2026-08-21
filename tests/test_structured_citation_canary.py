@@ -188,5 +188,27 @@ class StructuredCitationCanaryProductionPathTests(unittest.TestCase):
         self.assertGreaterEqual(calls["n"], 1)
 
 
+class StructuredCitationCanarySealTests(unittest.TestCase):
+    def test_sealed_result_provenance_is_synthetic_only(self) -> None:
+        path = ROOT / "data" / "eval_rag" / "structured_citation_canary_result.json"
+        self.assertTrue(path.is_file(), "sealed canary result is missing")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertTrue(payload["synthetic_contract_canary"])
+        self.assertFalse(payload["product_accuracy_claim"])
+        self.assertFalse(payload["retrieval_quality_claim"])
+        self.assertFalse(payload["public_holdout_used"])
+        self.assertFalse(payload["sealed_aggregate_modified"])
+        self.assertEqual(payload["config_hash"], config_hash())
+        self.assertEqual(payload["case_ids"], list(CASE_IDS))
+        self.assertEqual(payload["metrics"]["cases_failed"], 0)
+        self.assertEqual(payload["metrics"]["invalid_citations_missed"], 0)
+        self.assertEqual(payload["remote_request_count"], 0)
+        self.assertTrue(payload["gates_passed"])
+        self.assertEqual(payload["financebench_runs"], 0)
+        self.assertEqual(payload["public_holdout_reads"], 0)
+        self.assertEqual(payload["git"]["worktree_status"], "clean")
+        self.assertEqual(payload["git"]["lumenfin_commit"], "6cc08c4c1604f5b829776fac896f2955313e8cb4")
+
+
 if __name__ == "__main__":
     unittest.main()

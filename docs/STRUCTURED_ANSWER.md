@@ -122,6 +122,9 @@ python scripts/run_structured_citation_canary.py --output-dir outputs/structured
 
 The CLI refuses `public_holdout`, `--allow-remote`, and non-empty output
 overwrite. Raw artifacts stay gitignored under
-`outputs/structured_citation_canary_v1/`. A slim tracked record may be sealed
-at `data/eval_rag/structured_citation_canary_result.json` after one clean
-worktree run. That file is not a FinanceBench or LEDGER aggregate.
+`outputs/structured_citation_canary_v1/`. Slim tracked record:
+[`../data/eval_rag/structured_citation_canary_result.json`](../data/eval_rag/structured_citation_canary_result.json)
+(executed at `6cc08c4`, `config_hash`
+`6f85a617a16446afc17b940919bc57c10b397b588279466aa824e93e8536f2fa`,
+`cases_failed=0`, `remote_request_count=0`). That file is not a
+FinanceBench or LEDGER aggregate and is not a product-accuracy claim.

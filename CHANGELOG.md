@@ -46,7 +46,9 @@ image has been created. Latest published LumenFin remains
 - Added an offline synthetic structured-citation end-to-end canary
   (`scripts/run_structured_citation_canary.py`). It is a contract check,
   not product accuracy, FinanceBench, or a LEDGER score. `public_holdout`
-  stays closed.
+  stays closed. Sealed slim record:
+  `data/eval_rag/structured_citation_canary_result.json`
+  (`config_hash` `6f85a617a16446afc17b940919bc57c10b397b588279466aa824e93e8536f2fa`).
 
 ## 0.1.0rc4 — 2026-08-13
 

@@ -195,5 +195,7 @@ python -m unittest tests.test_structured_citation_canary tests.test_structured_a
 python scripts/run_structured_citation_canary.py --output-dir outputs/structured_citation_canary_v1
 ```
 
-Slim tracked record (after one clean-worktree run):
-`data/eval_rag/structured_citation_canary_result.json`.
+Slim tracked record:
+[`../data/eval_rag/structured_citation_canary_result.json`](../data/eval_rag/structured_citation_canary_result.json)
+(`config_hash` `6f85a617a16446afc17b940919bc57c10b397b588279466aa824e93e8536f2fa`;
+not product accuracy).
