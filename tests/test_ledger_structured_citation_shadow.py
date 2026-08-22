@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,10 +20,18 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     CANONICAL_SPLIT,
     CLI_SPLIT,
     DEFAULT_FROZEN_CONFIG_PATH,
+    DEFAULT_PREFLIGHT_OUTPUT_DIR,
     EVALUATION_MODE,
+    INCOMPLETE_AUDIT_CONFIG_HASH,
+    INCOMPLETE_V1_PREFLIGHT_SHA256,
+    LEGACY_PREFLIGHT_OUTPUT_DIR,
+    PREFLIGHT_OK,
+    PREFLIGHT_REQUIRED_FIELDS,
+    PREFLIGHT_SCHEMA_VERSION,
     PREVIOUS_UNUSED_CONFIG_HASH,
     PROTOCOL_COMMIT,
     RETIRED_BEFORE_PREFLIGHT_HASH,
+    RETIRED_CONFIG_HASHES,
     forbid_runtime_embedding_call,
     forbid_runtime_reranker_call,
     SEAL_TAG,
@@ -293,8 +303,27 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             loaded.payload["candidate_cache_generation"]["reranker"]["provider"],
             "lexical",
         )
+        self.assertEqual(loaded.payload["preflight_schema_version"], PREFLIGHT_SCHEMA_VERSION)
+        self.assertEqual(loaded.payload["output"]["preflight_dirname"], DEFAULT_PREFLIGHT_OUTPUT_DIR.name)
+        self.assertEqual(loaded.payload["output"]["legacy_preflight_dirname"], LEGACY_PREFLIGHT_OUTPUT_DIR.name)
+        self.assertEqual(loaded.payload["preflight_required_fields"], list(PREFLIGHT_REQUIRED_FIELDS))
+        self.assertEqual(loaded.payload["chat"]["model"], "deepseek-v4-flash")
+        self.assertEqual(loaded.payload["call_budget"]["remote_calls_expected"], 50)
+        self.assertEqual(
+            loaded.payload["candidate_cache"]["manifest_sha256"],
+            "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90",
+        )
+        self.assertEqual(
+            loaded.payload["predecessor_config"]["config_hash"],
+            INCOMPLETE_AUDIT_CONFIG_HASH,
+        )
+        self.assertEqual(loaded.payload["predecessor_config"]["preflight_executions"], 1)
+        self.assertEqual(loaded.payload["predecessor_config"]["accepted_preflights"], 0)
+        self.assertEqual(RETIRED_CONFIG_HASHES[INCOMPLETE_AUDIT_CONFIG_HASH]["accepted_preflights"], 0)
+        self.assertEqual(RETIRED_CONFIG_HASHES[INCOMPLETE_AUDIT_CONFIG_HASH]["preflight_executions"], 1)
         self.assertNotEqual(loaded.config_hash, PREVIOUS_UNUSED_CONFIG_HASH)
         self.assertNotEqual(loaded.config_hash, RETIRED_BEFORE_PREFLIGHT_HASH)
+        self.assertNotEqual(loaded.config_hash, INCOMPLETE_AUDIT_CONFIG_HASH)
         blob = path.read_text(encoding="utf-8")
         self.assertNotIn("sk-", blob)
         self.assertNotIn("Authorization", blob)
@@ -447,6 +476,15 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             self.assertTrue(report["not_live_production_retrieval"])
             self.assertTrue(report["candidate_cache"]["not_live_production_retrieval"])
             self.assertEqual(report["evaluation_mode"], EVALUATION_MODE)
+            self.assertEqual(report["status"], PREFLIGHT_OK)
+            self.assertEqual(report["preflight_schema_version"], PREFLIGHT_SCHEMA_VERSION)
+            self.assertEqual(report["exit_code"], 0)
+            self.assertIs(report["public_holdout_used"], False)
+            self.assertIs(report["sealed_aggregate_modified"], False)
+            self.assertIs(report["candidate_cache_modified"], False)
+            parsed_at = datetime.fromisoformat(str(report["executed_at"]).replace("Z", "+00:00"))
+            self.assertIsNotNone(parsed_at.tzinfo)
+            self.assertEqual(parsed_at.utcoffset().total_seconds(), 0)
             self.assertFalse(report["runtime_components"]["reranker"]["enabled"])
             self.assertFalse(report["runtime_components"]["embedding"]["enabled"])
             self.assertEqual(report["remote_calls_expected"], 2)
@@ -458,10 +496,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             blob = (preflight_dir / "preflight.json").read_text(encoding="utf-8")
             self.assertNotIn("sk-test-not-for-disk", blob)
             self.assertNotIn("Authorization", blob)
+            self.assertNotIn("https://", blob)
+            self.assertNotIn("C:\\\\", blob)
             creds = {item["key"]: item for item in report["credentials"]}
+            self.assertEqual(list(creds), ["DEEPSEEK_API_KEY"])
             self.assertTrue(creds["DEEPSEEK_API_KEY"]["present"])
             self.assertNotIn("length", creds["DEEPSEEK_API_KEY"])
             self.assertNotIn("value", creds["DEEPSEEK_API_KEY"])
+            self.assertNotIn("DASHSCOPE_API_KEY", blob)
 
     def test_resume_skips_complete_cases_and_counts_calls(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -944,7 +986,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                     frozen_config=config,
                     split=CLI_SPLIT,
                     output_dir=root / "outputs" / "ledger_structured_citation_shadow_v1" / "nested",
-                    preflight_output_dir=root / "outputs" / "ledger_structured_citation_shadow_preflight_v1",
+                    preflight_output_dir=root / "outputs" / "ledger_structured_citation_shadow_preflight_v2",
                     cases=cases,
                     strict_paths=True,
                     allowlist=["pd-1"],
@@ -1026,11 +1068,19 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             root = Path(tmp)
             config, _cases, _ = _mini_world(root, ["pd-1"])
             payload = json.loads((root / "frozen.json").read_text(encoding="utf-8"))
-            payload["config_hash"] = RETIRED_BEFORE_PREFLIGHT_HASH
-            retired = root / "retired.json"
-            retired.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ShadowError, "retired|does not match canonical"):
-                load_frozen_config(retired)
+            for retired_hash in (
+                RETIRED_BEFORE_PREFLIGHT_HASH,
+                INCOMPLETE_AUDIT_CONFIG_HASH,
+            ):
+                payload["config_hash"] = retired_hash
+                retired = root / "retired.json"
+                retired.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+                with self.assertRaisesRegex(ShadowError, "retired|does not match canonical"):
+                    load_frozen_config(retired)
+        self.assertEqual(
+            RETIRED_CONFIG_HASHES[INCOMPLETE_AUDIT_CONFIG_HASH]["retired_reason"],
+            "incomplete_preflight_audit_schema",
+        )
 
     def test_paired_helper_does_not_claim_accuracy(self) -> None:
         shadow = summarize_rows(
@@ -1067,6 +1117,178 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         paired = paired_descriptive_comparison(shadow, {"structured_answer_present": 0, "valid_citations": 0, "supported_claims": 0, "incomplete_or_degraded": 1})
         self.assertEqual(paired["structured_present_delta"], 1)
         self.assertFalse(paired["suitable_for_model_selection"])
+
+    def test_preflight_integrity_failures_do_not_write_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"])
+            official = root / "official"
+            preflight_dir = root / "preflight"
+            cache_path = root / "outputs" / "cache" / "candidates.jsonl"
+            baseline_path = root / config.field("sealed_baseline", "path")
+            original_cache = cache_path.read_bytes()
+            original_baseline = baseline_path.read_bytes()
+
+            real_verify = verify_candidate_cache
+
+            def mutate_cache(**kwargs):
+                report = real_verify(**kwargs)
+                cache_path.write_bytes(cache_path.read_bytes() + b" ")
+                return report
+
+            with patch(
+                "lumenfin.eval.ledger_structured_citation_shadow.verify_candidate_cache",
+                side_effect=mutate_cache,
+            ):
+                with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test-not-for-disk"}):
+                    with self.assertRaisesRegex(ShadowError, "hash changed"):
+                        run_shadow(
+                            repo_root=root,
+                            frozen_config=config,
+                            split=CLI_SPLIT,
+                            confirm_exposed_shadow=True,
+                            output_dir=official,
+                            preflight_output_dir=preflight_dir,
+                            preflight_only=True,
+                            verify_tag=False,
+                            require_clean=False,
+                            verify_runtime=False,
+                        )
+            self.assertFalse((preflight_dir / "preflight.json").exists())
+            cache_path.write_bytes(original_cache)
+
+            real_baseline = read_sealed_baseline_readonly
+
+            def mutate_baseline(**kwargs):
+                report = real_baseline(**kwargs)
+                baseline_path.write_bytes(baseline_path.read_bytes() + b" ")
+                return report
+
+            with patch(
+                "lumenfin.eval.ledger_structured_citation_shadow.read_sealed_baseline_readonly",
+                side_effect=mutate_baseline,
+            ):
+                with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test-not-for-disk"}):
+                    with self.assertRaisesRegex(ShadowError, "hash changed"):
+                        run_shadow(
+                            repo_root=root,
+                            frozen_config=config,
+                            split=CLI_SPLIT,
+                            confirm_exposed_shadow=True,
+                            output_dir=official,
+                            preflight_output_dir=root / "preflight-baseline",
+                            preflight_only=True,
+                            verify_tag=False,
+                            require_clean=False,
+                            verify_runtime=False,
+                        )
+            self.assertFalse((root / "preflight-baseline" / "preflight.json").exists())
+            baseline_path.write_bytes(original_baseline)
+
+            from lumenfin.eval.ledger_structured_citation_shadow import InputAccessAudit
+
+            original_prove = InputAccessAudit.prove_holdout_unused
+
+            def mark_holdout(self, **kwargs):
+                self.mark_holdout_loader()
+                return original_prove(self, **kwargs)
+
+            with patch.object(InputAccessAudit, "prove_holdout_unused", mark_holdout):
+                with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test-not-for-disk"}):
+                    with self.assertRaisesRegex(ShadowError, "public holdout access"):
+                        run_shadow(
+                            repo_root=root,
+                            frozen_config=config,
+                            split=CLI_SPLIT,
+                            confirm_exposed_shadow=True,
+                            output_dir=official,
+                            preflight_output_dir=root / "preflight-holdout",
+                            preflight_only=True,
+                            verify_tag=False,
+                            require_clean=False,
+                            verify_runtime=False,
+                        )
+            self.assertFalse((root / "preflight-holdout" / "preflight.json").exists())
+
+    def test_preflight_atomic_write_failure_leaves_no_success_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"])
+            preflight_dir = root / "preflight"
+
+            def boom(*_args, **_kwargs):
+                raise OSError("disk full")
+
+            with patch("lumenfin.eval.ledger_structured_citation_shadow.os.replace", boom):
+                with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test-not-for-disk"}):
+                    with self.assertRaises(OSError):
+                        run_shadow(
+                            repo_root=root,
+                            frozen_config=config,
+                            split=CLI_SPLIT,
+                            confirm_exposed_shadow=True,
+                            output_dir=root / "official",
+                            preflight_output_dir=preflight_dir,
+                            preflight_only=True,
+                            verify_tag=False,
+                            require_clean=False,
+                            verify_runtime=False,
+                        )
+            self.assertFalse((preflight_dir / "preflight.json").exists())
+            self.assertFalse(any(preflight_dir.glob("*.tmp")) if preflight_dir.exists() else True)
+
+    def test_preflight_directory_isolation_and_legacy_v1_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1"])
+            with self.assertRaisesRegex(ShadowError, "exact frozen output directory"):
+                _authorized_run(
+                    lambda _case: _structured_payload(1),
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / DEFAULT_PREFLIGHT_OUTPUT_DIR,
+                    preflight_output_dir=root / LEGACY_PREFLIGHT_OUTPUT_DIR,
+                    cases=cases,
+                    strict_paths=True,
+                    allowlist=["pd-1"],
+                )
+            with self.assertRaisesRegex(ShadowError, "exact frozen output directory"):
+                _authorized_run(
+                    lambda _case: _structured_payload(1),
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "outputs" / "ledger_structured_citation_shadow_v1",
+                    preflight_output_dir=root
+                    / "outputs"
+                    / "ledger_structured_citation_shadow_preflight_v2-extra",
+                    cases=cases,
+                    strict_paths=True,
+                    allowlist=["pd-1"],
+                )
+        v1 = ROOT / LEGACY_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+        digest = hashlib.sha256(v1.read_bytes()).hexdigest()
+        self.assertEqual(digest, INCOMPLETE_V1_PREFLIGHT_SHA256)
+        self.assertEqual(v1.stat().st_size, 3920)
+        self.assertFalse((ROOT / "outputs" / "ledger_structured_citation_shadow_v1").exists())
+
+    def test_cli_returns_zero_after_successful_preflight_write(self) -> None:
+        cli = _load_cli()
+        with patch.object(cli, "run_shadow", return_value={"status": PREFLIGHT_OK, "exit_code": 0}):
+            self.assertEqual(
+                cli.main(
+                    [
+                        "--split",
+                        "public-dev",
+                        "--frozen-config",
+                        str(DEFAULT_FROZEN_CONFIG_PATH),
+                        "--confirm-exposed-shadow",
+                        "--preflight-only",
+                    ]
+                ),
+                0,
+            )
 
 
 if __name__ == "__main__":

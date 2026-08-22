@@ -4,8 +4,9 @@
 Exposed public/dev shadow only. Not held-out, not product accuracy, not a
 LEDGER benchmark, and not rc5. Formal scoring requires both
 --confirm-exposed-shadow and --allow-remote. Preflight refuses remote
-authorization and makes no provider calls. This stage does not run the paid
-public/dev shadow.
+authorization and makes no provider calls. Official preflight writes only
+outputs/ledger_structured_citation_shadow_preflight_v2/. This stage does not
+run the paid public/dev shadow.
 """
 from __future__ import annotations
 

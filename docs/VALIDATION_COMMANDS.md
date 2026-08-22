@@ -212,7 +212,12 @@ Frozen config:
 [`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
 Cache identity:
 [`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
-Retired hashes `3e834f0e…` and `ef497e8b…` never produced results.
+The v1 official preflight artifact is immutable
+`INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA` (sha256 `755a7f60…`; not accepted for
+shadow execution). Next official preflight directory:
+`outputs/ledger_structured_citation_shadow_preflight_v2/`. Retired hashes
+`3e834f0e…` and `ef497e8b…` never produced results; `4dd7519e…` recorded one
+incomplete official preflight. This is a governance-schema fix, not a retune.
 
 ```powershell
 python -m unittest tests.test_ledger_structured_citation_shadow tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v

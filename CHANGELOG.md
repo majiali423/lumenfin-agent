@@ -70,6 +70,18 @@ image has been created. Latest published LumenFin remains
   `retired_before_successful_preflight` (`executions=0`, `results=0`).
   Current hash is
   `4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac`.
+- Completed the official preflight audit schema. Success artifacts now
+  self-contain `status=PREFLIGHT_OK`, UTC `executed_at`, `exit_code=0`,
+  and evidenced `public_holdout_used` / `sealed_aggregate_modified` /
+  `candidate_cache_modified` fields. This is a governance-schema fix, not
+  a retrieval or model retune. Hash `4dd7519e…` recorded one incomplete
+  official preflight (`accepted_preflights=0`, `shadow_executions=0`).
+  The immutable v1 artifact stays
+  `outputs/ledger_structured_citation_shadow_preflight_v1/preflight.json`
+  (`sha256` `755a7f60…`, `INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA`). The next
+  official preflight directory is
+  `outputs/ledger_structured_citation_shadow_preflight_v2/`. Current hash is
+  `49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf`.
 
 ## 0.1.0rc4 — 2026-08-13
 

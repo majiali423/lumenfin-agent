@@ -18,7 +18,9 @@ import re
 import socket
 import subprocess
 import time
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -63,7 +65,8 @@ DEFAULT_CACHE_MANIFEST_PATH = (
     Path("data") / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
 )
 DEFAULT_OFFICIAL_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_v1"
-DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v1"
+LEGACY_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v1"
+DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v2"
 CACHE_MANIFEST_SCHEMA = "lumenfin_ledger_structured_citation_shadow_cache.v1"
 PREVIOUS_UNUSED_CONFIG_HASH = (
     "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
@@ -71,19 +74,59 @@ PREVIOUS_UNUSED_CONFIG_HASH = (
 RETIRED_BEFORE_PREFLIGHT_HASH = (
     "ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e"
 )
+INCOMPLETE_AUDIT_CONFIG_HASH = (
+    "4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac"
+)
+INCOMPLETE_V1_PREFLIGHT_SHA256 = (
+    "755a7f60a40e7b35f6181e210bf4a708cef5c63331d8cdf7aaf42cb3b4eefc81"
+)
 RETIRED_CONFIG_HASHES = {
     PREVIOUS_UNUSED_CONFIG_HASH: {
         "status": "never_executed",
         "executions": 0,
         "results": 0,
+        "preflight_executions": 0,
+        "accepted_preflights": 0,
+        "shadow_executions": 0,
     },
     RETIRED_BEFORE_PREFLIGHT_HASH: {
         "status": "retired_before_successful_preflight",
         "executions": 0,
         "results": 0,
+        "preflight_executions": 0,
+        "accepted_preflights": 0,
+        "shadow_executions": 0,
+    },
+    INCOMPLETE_AUDIT_CONFIG_HASH: {
+        "status": "incomplete_preflight_audit_schema",
+        "retired_reason": "incomplete_preflight_audit_schema",
+        "preflight_executions": 1,
+        "accepted_preflights": 0,
+        "shadow_executions": 0,
+        "results": 0,
+        "artifact_status": "INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA",
+        "artifact_sha256": INCOMPLETE_V1_PREFLIGHT_SHA256,
+        "accepted_for_shadow_execution": False,
+        "cli_exit_code": 0,
+        "shadow_results": 0,
     },
 }
 EVALUATION_MODE = "sealed_candidate_replay_shadow"
+PREFLIGHT_SCHEMA_VERSION = "1.0"
+PREFLIGHT_OK = "PREFLIGHT_OK"
+PREFLIGHT_REQUIRED_FIELDS = (
+    "kind",
+    "preflight_schema_version",
+    "status",
+    "executed_at",
+    "exit_code",
+    "evaluation_mode",
+    "cases_executed",
+    "remote_request_count",
+    "public_holdout_used",
+    "sealed_aggregate_modified",
+    "candidate_cache_modified",
+)
 CHAT_CREDENTIAL_KEY = "DEEPSEEK_API_KEY"
 CHAIN_SEAL_RELATIVE = Path("data") / "eval_rag" / "holdout" / "ledger_public_dev_chain_seal.json"
 SPLIT_MANIFEST_RELATIVE = Path("data") / "eval_rag" / "holdout" / "ledger_public_manifest.json"
@@ -107,7 +150,11 @@ FORBIDDEN_SPLIT_TOKENS = frozenset(
     }
 )
 HOLDOUT_PATH_TOKENS = ("public_holdout", "public-holdout")
-CREDENTIAL_KEYS = ("DEEPSEEK_API_KEY", "DASHSCOPE_API_KEY")
+REQUIRED_CREDENTIAL_KEYS = (CHAT_CREDENTIAL_KEY,)
+_ACCESS_AUDIT: ContextVar["InputAccessAudit | None"] = ContextVar(
+    "ledger_shadow_access_audit",
+    default=None,
+)
 _ABS_PATH_RE = re.compile(r"(?i)([A-Z]:[\\/]|\\\\|/home/|/Users/|/tmp/|/var/)")
 _HTTP_RE = re.compile(r"https?://[^\s\"']+", re.IGNORECASE)
 _SK_RE = re.compile(r"(?i)\bsk-[A-Za-z0-9_-]+")
@@ -164,6 +211,51 @@ class RuntimeSnapshot:
 
 class ShadowError(ValueError):
     """Fail-closed structured-citation shadow error. No secrets, no holdout text."""
+
+
+@dataclass
+class InputAccessAudit:
+    """Records input-path access without storing secrets or holdout contents."""
+
+    accessed_fields: list[str] = field(default_factory=list)
+    holdout_path_observed: bool = False
+    holdout_loader_called: bool = False
+    path_guard_passed: bool = False
+
+    def record_safe(self, field_name: str) -> None:
+        self.accessed_fields.append(field_name)
+        self.path_guard_passed = True
+
+    def observe_holdout(self, field_name: str) -> None:
+        self.accessed_fields.append(field_name)
+        self.holdout_path_observed = True
+
+    def mark_holdout_loader(self) -> None:
+        self.holdout_loader_called = True
+
+    def prove_holdout_unused(
+        self,
+        *,
+        split: str,
+        case_ids_in_sealed_allowlist: bool,
+    ) -> dict[str, Any]:
+        if split != CANONICAL_SPLIT:
+            raise ShadowError("public holdout unused cannot be proven: split is not public_dev")
+        if self.holdout_loader_called or self.holdout_path_observed:
+            raise ShadowError("public holdout access was recorded")
+        if not self.path_guard_passed:
+            raise ShadowError("public holdout path guard did not pass")
+        if not case_ids_in_sealed_allowlist:
+            raise ShadowError("case ids are not the sealed allowlist")
+        return {
+            "used": False,
+            "split": split,
+            "path_guard_passed": True,
+            "holdout_loader_called": False,
+            "holdout_path_observed": False,
+            "case_ids_in_sealed_allowlist": True,
+            "accessed_fields": list(self.accessed_fields),
+        }
 
 
 def canonical_dumps(payload: Any) -> str:
@@ -522,14 +614,21 @@ def _path_has_holdout_token(path: Path) -> bool:
 
 def assert_safe_input_path(path: str | Path, *, field: str) -> Path:
     target = Path(path)
+    audit = _ACCESS_AUDIT.get()
     if _path_has_holdout_token(target):
+        if audit is not None:
+            audit.observe_holdout(field)
         raise ShadowError(f"{field} resolved path is forbidden")
     try:
         resolved = target if not target.exists() else target.resolve()
     except OSError as exc:
         raise ShadowError(f"{field} resolved path is forbidden") from exc
     if _path_has_holdout_token(resolved):
+        if audit is not None:
+            audit.observe_holdout(field)
         raise ShadowError(f"{field} resolved path is forbidden")
+    if audit is not None:
+        audit.record_safe(field)
     return target
 
 
@@ -549,8 +648,13 @@ def read_json_object(path: Path, *, field: str) -> dict[str, Any]:
 def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
 
 
 def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -630,6 +734,21 @@ def published_frozen_config_fields() -> dict[str, Any]:
         "lumenfin_protocol_commit": PROTOCOL_COMMIT,
         "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
         "evaluation_mode": EVALUATION_MODE,
+        "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
+        "preflight_required_fields": list(PREFLIGHT_REQUIRED_FIELDS),
+        "predecessor_config": {
+            "config_hash": INCOMPLETE_AUDIT_CONFIG_HASH,
+            "preflight_executions": 1,
+            "accepted_preflights": 0,
+            "shadow_executions": 0,
+            "results": 0,
+            "retired_reason": "incomplete_preflight_audit_schema",
+            "artifact_status": "INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA",
+            "artifact_sha256": INCOMPLETE_V1_PREFLIGHT_SHA256,
+            "accepted_for_shadow_execution": False,
+            "cli_exit_code": 0,
+            "shadow_results": 0,
+        },
         "not_live_production_retrieval": True,
         "candidate_cache_generation": {
             "retrieval": "hybrid_rrf_top20",
@@ -760,6 +879,8 @@ def published_frozen_config_fields() -> dict[str, Any]:
             "schema_version": SCHEMA_VERSION,
             "official_dirname": DEFAULT_OFFICIAL_OUTPUT_DIR.name,
             "preflight_dirname": DEFAULT_PREFLIGHT_OUTPUT_DIR.name,
+            "legacy_preflight_dirname": LEGACY_PREFLIGHT_OUTPUT_DIR.name,
+            "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         },
         "call_budget": {
             "cases_total": 50,
@@ -879,6 +1000,15 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
         raise ShadowError("frozen config must disable runtime embedding")
     if payload.get("runtime_reranker_enabled") is not False:
         raise ShadowError("frozen config must disable runtime reranker")
+    if payload.get("preflight_schema_version") != PREFLIGHT_SCHEMA_VERSION:
+        raise ShadowError("frozen config preflight_schema_version mismatch")
+    if list(payload.get("preflight_required_fields") or []) != list(PREFLIGHT_REQUIRED_FIELDS):
+        raise ShadowError("frozen config preflight required fields mismatch")
+    output = payload.get("output") or {}
+    if output.get("preflight_dirname") != DEFAULT_PREFLIGHT_OUTPUT_DIR.name:
+        raise ShadowError("frozen config preflight directory must be v2")
+    if output.get("official_dirname") != DEFAULT_OFFICIAL_OUTPUT_DIR.name:
+        raise ShadowError("frozen config official directory mismatch")
     if payload.get("config_hash") in RETIRED_CONFIG_HASHES:
         raise ShadowError("retired shadow config hash is not executable")
     cache = payload.get("candidate_cache") or {}
@@ -902,7 +1032,7 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
 
 def credential_presence(*, repo_root: Path) -> list[dict[str, Any]]:
     reports = []
-    for item in describe_credential_sources(root=repo_root, keys=CREDENTIAL_KEYS):
+    for item in describe_credential_sources(root=repo_root, keys=REQUIRED_CREDENTIAL_KEYS):
         reports.append(
             {
                 "key": item.key,
@@ -1539,6 +1669,63 @@ def render_results_md(summary: Mapping[str, Any], *, preflight: bool = False) ->
     return "\n".join(lines)
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _readonly_artifact_hashes(
+    *,
+    repo_root: Path,
+    config: FrozenShadowConfig,
+) -> dict[str, str]:
+    manifest_rel = Path(str(config.field("candidate_cache", "manifest_path") or DEFAULT_CACHE_MANIFEST_PATH))
+    manifest_path = assert_safe_input_path(repo_root / manifest_rel, field="cache-manifest")
+    if not manifest_path.is_file():
+        raise ShadowError("candidate cache manifest is missing")
+    manifest = read_json_object(manifest_path, field="cache-manifest")
+    cache_rel = Path(str(manifest.get("source_path_identity") or ""))
+    cache_path = assert_safe_input_path(repo_root / cache_rel, field="candidate-cache")
+    if not cache_path.is_file():
+        raise ShadowError("frozen candidate cache is missing")
+    baseline_rel = Path(str(config.field("sealed_baseline", "path")))
+    baseline_path = assert_safe_input_path(repo_root / baseline_rel, field="sealed-baseline")
+    if not baseline_path.is_file():
+        raise ShadowError("sealed baseline is missing")
+    return {
+        "manifest_sha256": sha256_normalized_file(manifest_path),
+        "cache_file_sha256": sha256_raw_file(cache_path),
+        "sealed_baseline_sha256": sha256_normalized_file(baseline_path),
+    }
+
+
+def _assert_preflight_success_contract(report: Mapping[str, Any]) -> None:
+    missing = [key for key in PREFLIGHT_REQUIRED_FIELDS if key not in report]
+    if missing:
+        raise ShadowError("preflight report is missing required audit fields")
+    if report.get("kind") != "preflight":
+        raise ShadowError("preflight report kind is invalid")
+    if report.get("preflight_schema_version") != PREFLIGHT_SCHEMA_VERSION:
+        raise ShadowError("preflight schema version is invalid")
+    if report.get("status") != PREFLIGHT_OK:
+        raise ShadowError("preflight status is not PREFLIGHT_OK")
+    if report.get("exit_code") != 0:
+        raise ShadowError("preflight success report must set exit_code 0")
+    if report.get("cases_executed") != 0 or report.get("remote_request_count") != 0:
+        raise ShadowError("preflight success cannot record cases or remote calls")
+    if report.get("public_holdout_used") is not False:
+        raise ShadowError("preflight success cannot record public_holdout use")
+    if report.get("sealed_aggregate_modified") is not False:
+        raise ShadowError("preflight success cannot record sealed aggregate mutation")
+    if report.get("candidate_cache_modified") is not False:
+        raise ShadowError("preflight success cannot record candidate cache mutation")
+    executed_at = str(report.get("executed_at") or "")
+    parsed = datetime.fromisoformat(executed_at.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ShadowError("preflight executed_at must be timezone-aware UTC")
+    if parsed.utcoffset().total_seconds() != 0:
+        raise ShadowError("preflight executed_at must be UTC")
+
+
 def run_preflight(
     *,
     repo_root: Path,
@@ -1551,67 +1738,113 @@ def run_preflight(
     verify_runtime: bool = True,
     require_chat_key: bool = True,
 ) -> dict[str, Any]:
-    canonical_split(split)
-    git = git_snapshot(repo_root)
-    if require_clean and git["worktree_dirty"]:
-        raise ShadowError("structured citation shadow requires a clean worktree")
-    if require_clean:
-        require_protocol_ancestor(repo_root, str(frozen_config.field("lumenfin_protocol_commit")))
-    bind = bind_chain_seal(repo_root=repo_root, config=frozen_config, verify_tag=verify_tag)
-    snapshot = None
-    if verify_runtime:
-        snapshot = verify_runtime_matches_frozen(frozen_config)
-    cache = verify_candidate_cache(repo_root=repo_root, config=frozen_config)
-    if official_output_dir.exists() and any(official_output_dir.iterdir()):
-        raise ShadowError("official shadow output directory already exists")
-    if require_chat_key:
-        require_chat_credential(repo_root=repo_root)
-    credentials = credential_presence(repo_root=repo_root)
-    expected_calls = int(frozen_config.field("call_budget", "remote_calls_expected") or 0)
-    report = {
-        "schema_version": SCHEMA_VERSION,
-        "kind": "preflight",
-        "suite": SUITE,
-        "split": CANONICAL_SPLIT,
-        "protocol_ancestor": str(frozen_config.field("lumenfin_protocol_commit")),
-        "execution_commit": git["execution_commit"],
-        "lumenfin_commit": git["execution_commit"],
-        "worktree_status": git["worktree_status"],
-        "config_hash": frozen_config.config_hash,
-        "seal": bind,
-        "candidate_cache": {
-            key: value
-            for key, value in cache.items()
-            if key != "prefix_case_ids"
-        },
-        "runtime": None if snapshot is None else snapshot.public_dict(),
-        "cases_executed": 0,
-        "remote_request_count": 0,
-        "remote_calls_expected": expected_calls,
-        "official_output_dir_exists": official_output_dir.exists(),
-        "credentials": credentials,
-        "held_out": False,
-        "product_accuracy_claim": False,
-        "benchmark_claim": False,
-        "exposed_public_dev_shadow": True,
-        "evaluation_mode": EVALUATION_MODE,
-        "not_live_production_retrieval": True,
-        "candidate_cache_generation": frozen_config.field("candidate_cache_generation"),
-        "runtime_components": frozen_config.field("runtime_components"),
-        "billing_semantics": BILLING_SEMANTICS,
-        "exactly_once": False,
-    }
-    if preflight_output_dir.exists() and any(
-        item.name != "preflight.json" for item in preflight_output_dir.iterdir()
-    ):
-        raise ShadowError("preflight output directory contains non-preflight artifacts")
-    atomic_write_json(preflight_output_dir / "preflight.json", report)
-    leftover = [item.name for item in preflight_output_dir.iterdir() if item.name != "preflight.json"]
-    if leftover:
-        raise ShadowError("preflight wrote unexpected artifacts")
-    if official_output_dir.exists():
-        raise ShadowError("preflight must not create the official output directory")
-    return report
+    audit = InputAccessAudit()
+    token = _ACCESS_AUDIT.set(audit)
+    try:
+        resolved_split = canonical_split(split)
+        git = git_snapshot(repo_root)
+        if require_clean and git["worktree_dirty"]:
+            raise ShadowError("structured citation shadow requires a clean worktree")
+        if require_clean:
+            require_protocol_ancestor(repo_root, str(frozen_config.field("lumenfin_protocol_commit")))
+        hashes_before = _readonly_artifact_hashes(repo_root=repo_root, config=frozen_config)
+        bind = bind_chain_seal(repo_root=repo_root, config=frozen_config, verify_tag=verify_tag)
+        snapshot = None
+        if verify_runtime:
+            snapshot = verify_runtime_matches_frozen(frozen_config)
+        cache = verify_candidate_cache(repo_root=repo_root, config=frozen_config)
+        read_sealed_baseline_readonly(repo_root=repo_root, config=frozen_config)
+        hashes_after = _readonly_artifact_hashes(repo_root=repo_root, config=frozen_config)
+        if hashes_before != hashes_after:
+            raise ShadowError("readonly artifact hash changed during preflight")
+        expected_manifest = str(frozen_config.field("candidate_cache", "manifest_sha256") or "")
+        expected_baseline = str(frozen_config.field("sealed_baseline", "sha256") or "")
+        if hashes_after["cache_file_sha256"] != str(cache.get("cache_file_sha256") or ""):
+            raise ShadowError("candidate cache file hash mismatch")
+        if hashes_after["manifest_sha256"] != expected_manifest:
+            raise ShadowError("candidate cache manifest hash mismatch")
+        if hashes_after["sealed_baseline_sha256"] != expected_baseline:
+            raise ShadowError("sealed baseline hash mismatch")
+        prefix_hash = str(cache.get("case_ids_sha256") or "")
+        sealed_hash = str(frozen_config.field("case_selection", "query_ids_sha256") or "")
+        case_ids_in_sealed_allowlist = bool(prefix_hash) and prefix_hash == sealed_hash
+        holdout = audit.prove_holdout_unused(
+            split=resolved_split,
+            case_ids_in_sealed_allowlist=case_ids_in_sealed_allowlist,
+        )
+        if official_output_dir.exists():
+            raise ShadowError("official shadow output directory already exists")
+        if require_chat_key:
+            require_chat_credential(repo_root=repo_root)
+        credentials = credential_presence(repo_root=repo_root)
+        expected_calls = int(frozen_config.field("call_budget", "remote_calls_expected") or 0)
+        if preflight_output_dir.exists():
+            leftover = [item.name for item in preflight_output_dir.iterdir()]
+            if leftover:
+                raise ShadowError("preflight output directory already exists")
+        report = {
+            "schema_version": SCHEMA_VERSION,
+            "kind": "preflight",
+            "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
+            "status": PREFLIGHT_OK,
+            "executed_at": _utc_now(),
+            "exit_code": 0,
+            "suite": SUITE,
+            "split": resolved_split,
+            "protocol_ancestor": str(frozen_config.field("lumenfin_protocol_commit")),
+            "execution_commit": git["execution_commit"],
+            "lumenfin_commit": git["execution_commit"],
+            "worktree_status": git["worktree_status"],
+            "config_hash": frozen_config.config_hash,
+            "seal": bind,
+            "candidate_cache": {
+                key: value
+                for key, value in cache.items()
+                if key != "prefix_case_ids"
+            },
+            "runtime": None if snapshot is None else snapshot.public_dict(),
+            "cases_executed": 0,
+            "remote_request_count": 0,
+            "remote_calls_expected": expected_calls,
+            "official_output_dir_exists": False,
+            "credentials": credentials,
+            "held_out": False,
+            "public_holdout_used": holdout["used"],
+            "sealed_aggregate_modified": False,
+            "candidate_cache_modified": False,
+            "product_accuracy_claim": False,
+            "benchmark_claim": False,
+            "exposed_public_dev_shadow": True,
+            "evaluation_mode": EVALUATION_MODE,
+            "not_live_production_retrieval": True,
+            "candidate_cache_generation": frozen_config.field("candidate_cache_generation"),
+            "runtime_components": frozen_config.field("runtime_components"),
+            "billing_semantics": BILLING_SEMANTICS,
+            "exactly_once": False,
+            "integrity": {
+                "public_holdout": holdout,
+                "sealed_baseline": {
+                    "sha256_before": hashes_before["sealed_baseline_sha256"],
+                    "sha256_after": hashes_after["sealed_baseline_sha256"],
+                    "readonly": True,
+                    "modified": False,
+                },
+                "candidate_cache": {
+                    "cache_file_sha256_before": hashes_before["cache_file_sha256"],
+                    "cache_file_sha256_after": hashes_after["cache_file_sha256"],
+                    "manifest_sha256_before": hashes_before["manifest_sha256"],
+                    "manifest_sha256_after": hashes_after["manifest_sha256"],
+                    "rebuild": False,
+                    "modified": False,
+                },
+            },
+        }
+        _assert_preflight_success_contract(report)
+        dest = preflight_output_dir / "preflight.json"
+        atomic_write_json(dest, report)
+        return report
+    finally:
+        _ACCESS_AUDIT.reset(token)
 
 
 def _write_run_artifacts(

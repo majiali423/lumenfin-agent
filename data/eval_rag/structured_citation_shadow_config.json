@@ -22,6 +22,33 @@
   "lumenfin_protocol_commit": "78a719e2b744777aee5353acc24b9b88c410066e",
   "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
   "evaluation_mode": "sealed_candidate_replay_shadow",
+  "preflight_schema_version": "1.0",
+  "preflight_required_fields": [
+    "kind",
+    "preflight_schema_version",
+    "status",
+    "executed_at",
+    "exit_code",
+    "evaluation_mode",
+    "cases_executed",
+    "remote_request_count",
+    "public_holdout_used",
+    "sealed_aggregate_modified",
+    "candidate_cache_modified"
+  ],
+  "predecessor_config": {
+    "config_hash": "4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac",
+    "preflight_executions": 1,
+    "accepted_preflights": 0,
+    "shadow_executions": 0,
+    "results": 0,
+    "retired_reason": "incomplete_preflight_audit_schema",
+    "artifact_status": "INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA",
+    "artifact_sha256": "755a7f60a40e7b35f6181e210bf4a708cef5c63331d8cdf7aaf42cb3b4eefc81",
+    "accepted_for_shadow_execution": false,
+    "cli_exit_code": 0,
+    "shadow_results": 0
+  },
   "not_live_production_retrieval": true,
   "candidate_cache_generation": {
     "retrieval": "hybrid_rrf_top20",
@@ -151,7 +178,9 @@
   "output": {
     "schema_version": "lumenfin_ledger_structured_citation_shadow.v1",
     "official_dirname": "ledger_structured_citation_shadow_v1",
-    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v1"
+    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v2",
+    "legacy_preflight_dirname": "ledger_structured_citation_shadow_preflight_v1",
+    "preflight_schema_version": "1.0"
   },
   "call_budget": {
     "cases_total": 50,
@@ -210,5 +239,5 @@
       "config_hash"
     ]
   },
-  "config_hash": "4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac"
+  "config_hash": "49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf"
 }

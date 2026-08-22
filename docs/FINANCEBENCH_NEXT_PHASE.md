@@ -18,7 +18,10 @@ and is not authorized to run in this stage. Runtime embedding/reranker stay
 disabled. A future paid run requires `--confirm-exposed-shadow` and
 `--allow-remote` together with the frozen candidate cache and a present
 `DEEPSEEK_API_KEY`. Do not open `public_holdout`. Do not retune from exposed
-public/dev.
+public/dev. The existing v1 official preflight is an incomplete audit-schema
+artifact and is not accepted for shadow execution. The next official
+preflight, when separately approved, writes only
+`outputs/ledger_structured_citation_shadow_preflight_v2/`.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.
