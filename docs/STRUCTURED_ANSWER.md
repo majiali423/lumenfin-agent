@@ -136,8 +136,10 @@ Recorded **exposed public/dev** `sealed_candidate_replay_shadow` at
 [`../data/eval_rag/ledger_structured_citation_shadow_result.json`](../data/eval_rag/ledger_structured_citation_shadow_result.json).
 Raw official files stay gitignored under
 `outputs/ledger_structured_citation_shadow_v1/`. The raw JSON has no
-`status` field; the ledger records `seal_status=RECORDED_COMPLETE` from
-exit 0 and 50/50 completed cases. Execution gate passed.
+`status` or `executed_at` field; the ledger records
+`seal_status=RECORDED_COMPLETE` from exit 0 and 50/50 completed cases.
+`execution_time` is an inferred `summary.json` mtime and is not
+authoritative. Execution gate passed.
 Structured-citation quality gate failed: 22/50 structured answers, 18/29
 unknown citations, and 11 valid citations that did not form a
 gold-supported claim. This is not held-out, not product accuracy, not

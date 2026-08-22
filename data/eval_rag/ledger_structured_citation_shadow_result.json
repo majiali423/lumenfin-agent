@@ -42,8 +42,12 @@
     "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
     "sealed_baseline_sha256": "a7b4868da2694118e31aad62a840453f5acf44dbb5a8e7593b0e3197db3d2b21",
     "raw_executed_at_field": "MISSING",
-    "executed_at": "2026-08-22T19:46:35Z",
-    "executed_at_source": "official_summary_json_mtime_utc",
+    "execution_time": {
+      "value": "2026-08-22T19:46:35Z",
+      "source": "summary_json_file_mtime",
+      "inferred": true,
+      "authoritative": false
+    },
     "worktree_clean": true,
     "official_output_dir": "outputs/ledger_structured_citation_shadow_v1"
   },

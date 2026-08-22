@@ -102,6 +102,9 @@ image has been created. Latest published LumenFin remains
   Execution gate passed; structured-citation quality gate failed. This is
   not held-out, not product accuracy, not a live retrieval benchmark, and
   not an rc5 citation claim. Do not retune from the exposed result.
+- Hardened the shadow result seal so CI verifies the tracked ledger
+  without the gitignored raw output directory. File mtime is stored as
+  inferred, non-authoritative `execution_time`.
 
 ## 0.1.0rc4 — 2026-08-13
 

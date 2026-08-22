@@ -216,7 +216,9 @@ Cache identity:
 [`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
 Raw outputs stay gitignored under
 `outputs/ledger_structured_citation_shadow_v1/`. The raw JSON has no
-`status` field; the ledger uses `seal_status=RECORDED_COMPLETE`.
+`status` or `executed_at` field; the ledger uses
+`seal_status=RECORDED_COMPLETE`. `execution_time` is inferred from
+`summary.json` mtime and is not authoritative.
 22/50 structured answers, 18/29 unknown citations, and 11 valid
 citations without a gold-supported claim. rc5 must not claim reliable
 structured citations from this run.

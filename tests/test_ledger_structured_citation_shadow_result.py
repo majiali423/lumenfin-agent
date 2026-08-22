@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -39,14 +40,57 @@ OFFICIAL_DIR = ROOT / DEFAULT_OFFICIAL_OUTPUT_DIR
 EXPECTED_CONFIG_HASH = "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05"
 EXPECTED_EXECUTION_COMMIT = "fc77288d39c349b182ce94c0540237ef9d172ec0"
 EXPECTED_V3_PREFLIGHT = "b49a3e705b94b01fcf4dbe926d34642db18f8ad39c7adcf62d0f415bea5074eb"
+RAW_NOT_PRESENT = "NOT_PRESENT"
+RAW_PRESENT = "PRESENT"
 
 
 def _load_result() -> dict:
     return json.loads(RESULT_PATH.read_text(encoding="utf-8"))
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def inspect_raw_official_outputs(
+    output_dir: Path,
+    expected: dict[str, dict[str, object]],
+) -> dict[str, object]:
+    if not output_dir.is_dir():
+        return {
+            "status": RAW_NOT_PRESENT,
+            "raw_bytes_reverified": False,
+            "files": {},
+            "extra_files": [],
+            "missing_files": list(expected),
+        }
+    files: dict[str, dict[str, object]] = {}
+    for name, spec in expected.items():
+        path = output_dir / name
+        if not path.is_file():
+            files[name] = {
+                "status": RAW_NOT_PRESENT,
+                "raw_bytes_reverified": False,
+            }
+            continue
+        digest = sha256_raw_file(path)
+        files[name] = {
+            "status": RAW_PRESENT,
+            "raw_bytes_reverified": True,
+            "sha256": digest,
+            "size": path.stat().st_size,
+            "matches_recorded": digest == spec["sha256"] and path.stat().st_size == spec["size"],
+        }
+    extra = sorted(item.name for item in output_dir.iterdir() if item.is_file() and item.name not in expected)
+    missing = [name for name, info in files.items() if info["status"] == RAW_NOT_PRESENT]
+    reverified = (
+        not extra
+        and not missing
+        and all(bool(info.get("matches_recorded")) for info in files.values())
+    )
+    return {
+        "status": RAW_PRESENT,
+        "raw_bytes_reverified": reverified,
+        "files": files,
+        "extra_files": extra,
+        "missing_files": missing,
+    }
 
 
 def _execution_gate(payload: dict) -> bool:
@@ -101,6 +145,12 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertEqual(provenance["case_count"], 50)
         self.assertEqual(provenance["gold_identity_sha256"], GOLD_IDENTITY_SHA256)
         self.assertEqual(provenance["raw_executed_at_field"], "MISSING")
+        self.assertNotIn("executed_at", provenance)
+        execution_time = provenance["execution_time"]
+        self.assertEqual(execution_time["value"], "2026-08-22T19:46:35Z")
+        self.assertEqual(execution_time["source"], "summary_json_file_mtime")
+        self.assertIs(execution_time["inferred"], True)
+        self.assertIs(execution_time["authoritative"], False)
         self.assertTrue(provenance["worktree_clean"])
         evidence = payload["completion_evidence"]
         self.assertEqual(evidence["cli_exit_code"], 0)
@@ -158,6 +208,11 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertEqual(outcomes["failed"], 0)
         self.assertIs(payload["paired_vs_sealed"]["post_hoc_exposed_comparison"], True)
         self.assertIs(payload["paired_vs_sealed"]["retuning_allowed"], False)
+        artifacts = payload["official_artifacts"]
+        self.assertEqual(len(artifacts), 9)
+        for name, spec in artifacts.items():
+            self.assertRegex(str(spec["sha256"]), r"^[0-9a-f]{64}$", name)
+            self.assertGreaterEqual(int(spec["size"]), 0, name)
 
     def test_quality_gate_fails_on_recorded_metrics(self) -> None:
         payload = _load_result()
@@ -206,16 +261,51 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         )
         self.assertNotEqual(tracked.returncode, 0)
 
-    def test_official_artifact_hashes_match_when_local_outputs_exist(self) -> None:
+    def test_raw_outputs_absent_reports_not_present(self) -> None:
         payload = _load_result()
-        if not OFFICIAL_DIR.is_dir():
-            self.skipTest("official shadow output directory is not in this checkout")
-        names = sorted(item.name for item in OFFICIAL_DIR.iterdir() if item.is_file())
-        self.assertEqual(names, sorted(payload["official_artifacts"]))
-        for name, expected in payload["official_artifacts"].items():
-            path = OFFICIAL_DIR / name
-            self.assertEqual(path.stat().st_size, expected["size"], name)
-            self.assertEqual(_sha256(path), expected["sha256"], name)
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / DEFAULT_OFFICIAL_OUTPUT_DIR
+            report = inspect_raw_official_outputs(missing, payload["official_artifacts"])
+        self.assertEqual(report["status"], RAW_NOT_PRESENT)
+        self.assertIs(report["raw_bytes_reverified"], False)
+        self.assertEqual(report["files"], {})
+        self.assertEqual(sorted(report["missing_files"]), sorted(payload["official_artifacts"]))
+        self.assertNotEqual(report["status"], RAW_PRESENT)
+
+    def test_hash_algorithm_and_directory_inspect_use_temp_fixture(self) -> None:
+        payload = b'{"fixture":true}\n'
+        expected_digest = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            official = root / DEFAULT_OFFICIAL_OUTPUT_DIR
+            official.mkdir(parents=True)
+            expected: dict[str, dict[str, object]] = {}
+            for name in _load_result()["official_artifacts"]:
+                path = official / name
+                path.write_bytes(payload)
+                expected[name] = {"sha256": expected_digest, "size": len(payload)}
+            self.assertEqual(sha256_raw_file(official / "summary.json"), expected_digest)
+            report = inspect_raw_official_outputs(official, expected)
+            self.assertEqual(report["status"], RAW_PRESENT)
+            self.assertIs(report["raw_bytes_reverified"], True)
+            extra = official / "bonus.json"
+            extra.write_bytes(payload)
+            dirty = inspect_raw_official_outputs(official, expected)
+            self.assertEqual(dirty["status"], RAW_PRESENT)
+            self.assertIs(dirty["raw_bytes_reverified"], False)
+            self.assertEqual(dirty["extra_files"], ["bonus.json"])
+
+    def test_local_raw_outputs_reverify_or_record_not_present(self) -> None:
+        payload = _load_result()
+        report = inspect_raw_official_outputs(OFFICIAL_DIR, payload["official_artifacts"])
+        if report["status"] == RAW_NOT_PRESENT:
+            self.assertIs(report["raw_bytes_reverified"], False)
+            self.assertEqual(report["files"], {})
+            return
+        self.assertEqual(report["status"], RAW_PRESENT)
+        self.assertIs(report["raw_bytes_reverified"], True)
+        self.assertEqual(report["extra_files"], [])
+        self.assertEqual(report["missing_files"], [])
         summary = json.loads((OFFICIAL_DIR / "summary.json").read_text(encoding="utf-8"))
         manifest = json.loads((OFFICIAL_DIR / "manifest.json").read_text(encoding="utf-8"))
         checkpoint = json.loads((OFFICIAL_DIR / "checkpoint.json").read_text(encoding="utf-8"))
@@ -225,6 +315,7 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
             if line.strip()
         ]
         self.assertIsNone(summary.get("status"))
+        self.assertIsNone(summary.get("executed_at"))
         self.assertIsNone(manifest.get("status"))
         self.assertEqual([row["case_id"] for row in rows], manifest["completed_case_ids"])
         self.assertEqual(manifest["completed_case_ids"], checkpoint["completed_case_ids"])
@@ -239,40 +330,53 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         ]
         self.assertEqual(leftover, ["BWA_capex_2017"])
 
-    def test_readonly_input_hashes_match_when_local_artifacts_exist(self) -> None:
+    def test_tracked_input_hashes_always_and_optional_raw_inputs(self) -> None:
         payload = _load_result()
         provenance = payload["provenance"]
         config = load_frozen_config(ROOT / DEFAULT_FROZEN_CONFIG_PATH, require_published=True)
         self.assertEqual(config.config_hash, provenance["config_hash"])
-        v3 = ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-        if v3.is_file():
-            self.assertEqual(sha256_raw_file(v3), provenance["preflight_sha256"])
-        v1 = ROOT / LEGACY_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-        if v1.is_file():
-            self.assertEqual(sha256_raw_file(v1), INCOMPLETE_V1_PREFLIGHT_SHA256)
-        v2 = ROOT / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-        if v2.is_file():
-            self.assertEqual(sha256_raw_file(v2), V2_PREFLIGHT_SHA256)
-        cache = ROOT / "outputs" / "ledger_public_dev_qwen3_paired_5x50_v3" / "candidates.jsonl"
-        if cache.is_file():
-            self.assertEqual(sha256_raw_file(cache), provenance["cache_file_sha256"])
         manifest = ROOT / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
         self.assertEqual(sha256_normalized_file(manifest), provenance["cache_manifest_sha256"])
         baseline = ROOT / str(config.field("sealed_baseline", "path"))
         self.assertEqual(sha256_normalized_file(baseline), provenance["sealed_baseline_sha256"])
-        snapshot = ROOT / public_dev_snapshot_relative(config)
-        if snapshot.exists():
-            self.assertEqual(ledger_snapshot_sha256(snapshot), provenance["snapshot_source_artifact_sha256"])
+        optional = {
+            "v3_preflight": ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json",
+            "v1_preflight": ROOT / LEGACY_PREFLIGHT_OUTPUT_DIR / "preflight.json",
+            "v2_preflight": ROOT / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json",
+            "cache_file": ROOT / "outputs" / "ledger_public_dev_qwen3_paired_5x50_v3" / "candidates.jsonl",
+            "snapshot": ROOT / public_dev_snapshot_relative(config),
+        }
+        expected_hash = {
+            "v3_preflight": provenance["preflight_sha256"],
+            "v1_preflight": INCOMPLETE_V1_PREFLIGHT_SHA256,
+            "v2_preflight": V2_PREFLIGHT_SHA256,
+            "cache_file": provenance["cache_file_sha256"],
+            "snapshot": provenance["snapshot_source_artifact_sha256"],
+        }
+        optional_status = {}
+        for name, path in optional.items():
+            present = path.is_file() if name != "snapshot" else path.exists()
+            if not present:
+                optional_status[name] = {
+                    "status": RAW_NOT_PRESENT,
+                    "raw_bytes_reverified": False,
+                }
+                continue
+            digest = ledger_snapshot_sha256(path) if name == "snapshot" else sha256_raw_file(path)
+            self.assertEqual(digest, expected_hash[name], name)
+            optional_status[name] = {
+                "status": RAW_PRESENT,
+                "raw_bytes_reverified": True,
+            }
+        if not any(item["raw_bytes_reverified"] for item in optional_status.values()):
+            self.assertTrue(all(item["status"] == RAW_NOT_PRESENT for item in optional_status.values()))
 
     def test_hashing_official_artifacts_makes_no_remote_calls(self) -> None:
         probe = NetworkProbe()
         probe.install()
         try:
-            _load_result()
-            if OFFICIAL_DIR.is_dir():
-                for path in OFFICIAL_DIR.iterdir():
-                    if path.is_file():
-                        path.read_bytes()
+            payload = _load_result()
+            inspect_raw_official_outputs(OFFICIAL_DIR, payload["official_artifacts"])
         finally:
             probe.remove()
         self.assertEqual(probe.remote_request_count, 0)
