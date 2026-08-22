@@ -22,7 +22,7 @@
   "lumenfin_protocol_commit": "78a719e2b744777aee5353acc24b9b88c410066e",
   "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
   "evaluation_mode": "sealed_candidate_replay_shadow",
-  "preflight_schema_version": "1.0",
+  "preflight_schema_version": "1.1",
   "preflight_required_fields": [
     "kind",
     "preflight_schema_version",
@@ -34,17 +34,26 @@
     "remote_request_count",
     "public_holdout_used",
     "sealed_aggregate_modified",
-    "candidate_cache_modified"
+    "candidate_cache_modified",
+    "case_binding_verified",
+    "case_count",
+    "query_ids_sha256",
+    "query_texts_sha256",
+    "gold_identity_sha256",
+    "snapshot_identity",
+    "gold_not_exposed_to_generator"
   ],
   "predecessor_config": {
-    "config_hash": "4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac",
+    "config_hash": "49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf",
     "preflight_executions": 1,
-    "accepted_preflights": 0,
+    "accepted_preflights": 1,
     "shadow_executions": 0,
     "results": 0,
-    "retired_reason": "incomplete_preflight_audit_schema",
-    "artifact_status": "INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA",
-    "artifact_sha256": "755a7f60a40e7b35f6181e210bf4a708cef5c63331d8cdf7aaf42cb3b4eefc81",
+    "retired_reason": "execution_code_changed",
+    "grant_status": "SUPERSEDED_BEFORE_SHADOW",
+    "accepted_at_execution_commit": "f69f1338fc1469779000e08efd24af9dd088c544",
+    "artifact_status": "PREFLIGHT_OK",
+    "artifact_sha256": "f3179e05ee6b726f4fb192e1e50152b1fb8ae287e612b1398efd483124c5e2f3",
     "accepted_for_shadow_execution": false,
     "cli_exit_code": 0,
     "shadow_results": 0
@@ -101,7 +110,8 @@
     "cases_per_company": 10,
     "query_count": 50,
     "query_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
-    "parent_query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044"
+    "parent_query_ids_sha256": "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044",
+    "gold_identity_sha256": "990a7ff71234a0a9b3e2c021b972fbb2e93c71da6e747e6f647e25b8c51238a2"
   },
   "sealed_baseline": {
     "path": "data/eval_rag/holdout/ledger_public_dev_e2e_canary_5x10.json",
@@ -115,7 +125,10 @@
     "dataset_id": "artefactory/ledger-long-context-KPI-QA",
     "dataset_revision": "b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619",
     "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
-    "source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad"
+    "source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad",
+    "snapshot_path_identity": "data/external/ledger-long-context-KPI-QA/b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619/eval-test",
+    "download_forbidden": true,
+    "rebuild_forbidden": true
   },
   "chat": {
     "provider": "deepseek",
@@ -178,9 +191,10 @@
   "output": {
     "schema_version": "lumenfin_ledger_structured_citation_shadow.v1",
     "official_dirname": "ledger_structured_citation_shadow_v1",
-    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v2",
+    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v3",
     "legacy_preflight_dirname": "ledger_structured_citation_shadow_preflight_v1",
-    "preflight_schema_version": "1.0"
+    "superseded_preflight_dirname": "ledger_structured_citation_shadow_preflight_v2",
+    "preflight_schema_version": "1.1"
   },
   "call_budget": {
     "cases_total": 50,
@@ -239,5 +253,5 @@
       "config_hash"
     ]
   },
-  "config_hash": "49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf"
+  "config_hash": "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05"
 }

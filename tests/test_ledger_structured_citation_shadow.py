@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import sys
@@ -10,6 +11,8 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+
+from lumenfin.eval.holdout.ledger_e2e import build_generation_prompt
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -22,6 +25,7 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     DEFAULT_FROZEN_CONFIG_PATH,
     DEFAULT_PREFLIGHT_OUTPUT_DIR,
     EVALUATION_MODE,
+    GOLD_IDENTITY_SHA256,
     INCOMPLETE_AUDIT_CONFIG_HASH,
     INCOMPLETE_V1_PREFLIGHT_SHA256,
     LEGACY_PREFLIGHT_OUTPUT_DIR,
@@ -32,6 +36,10 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     PROTOCOL_COMMIT,
     RETIRED_BEFORE_PREFLIGHT_HASH,
     RETIRED_CONFIG_HASHES,
+    SUPERSEDED_PREFLIGHT_OUTPUT_DIR,
+    SUPERSEDED_V2_CONFIG_HASH,
+    V2_PREFLIGHT_EXECUTION_COMMIT,
+    V2_PREFLIGHT_SHA256,
     forbid_runtime_embedding_call,
     forbid_runtime_reranker_call,
     SEAL_TAG,
@@ -46,8 +54,13 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     chunk_ids_sha256,
     compute_config_hash,
     ids_sha256,
+    assert_preflight_authorizes_shadow,
+    bind_cases_from_verified_cache,
+    build_live_generate,
+    generation_case_view,
     load_case_fixture,
     load_frozen_config,
+    public_dev_snapshot_relative,
     paired_descriptive_comparison,
     parse_cli_guard,
     peel_seal_tag,
@@ -168,7 +181,12 @@ def _structured_payload(index: int, *, source: str = "structured") -> str:
     )
 
 
-def _mini_world(tmp: Path, case_ids: list[str]) -> tuple[FrozenShadowConfig, list[dict], Path]:
+def _mini_world(
+    tmp: Path,
+    case_ids: list[str],
+    *,
+    cache_query_text: bool = True,
+) -> tuple[FrozenShadowConfig, list[dict], Path]:
     seal_dir = tmp / "data" / "eval_rag" / "holdout"
     seal = {
         "schema_version": "lumenfin_ledger_public_dev_chain_seal.v1",
@@ -195,20 +213,26 @@ def _mini_world(tmp: Path, case_ids: list[str]) -> tuple[FrozenShadowConfig, lis
     cases = [_case(case_id, index + 1) for index, case_id in enumerate(case_ids)]
     cache_rows = []
     for case in cases:
-        cache_rows.append(
-            {
-                "query_id": case["case_id"],
-                "company_key_sha256": "company-a",
-                "hits": [
-                    {
-                        "chunk_id": hit["chunk_id"],
-                        "document_id": hit["document_id"],
-                        "text": hit["text"],
-                    }
-                    for hit in case["hits"]
-                ],
-            }
-        )
+        row = {
+            "query_id": case["case_id"],
+            "company_key_sha256": "company-a",
+            "hits": [
+                {
+                    "chunk_id": hit["chunk_id"],
+                    "document_id": hit["document_id"],
+                    "text": hit["text"],
+                }
+                for hit in case["hits"]
+            ],
+        }
+        if cache_query_text:
+            row["query_text"] = case["query_text"]
+            row["query_text_sha256"] = hashlib.sha256(
+                str(case["query_text"]).encode("utf-8")
+            ).hexdigest()
+            row["gold_value"] = case["gold_value"]
+            row["qrels"] = case["qrels"]
+        cache_rows.append(row)
     cache_rel = Path("outputs") / "cache" / "candidates.jsonl"
     cache_path = tmp / cache_rel
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -315,15 +339,31 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.payload["predecessor_config"]["config_hash"],
-            INCOMPLETE_AUDIT_CONFIG_HASH,
+            SUPERSEDED_V2_CONFIG_HASH,
         )
         self.assertEqual(loaded.payload["predecessor_config"]["preflight_executions"], 1)
-        self.assertEqual(loaded.payload["predecessor_config"]["accepted_preflights"], 0)
+        self.assertEqual(loaded.payload["predecessor_config"]["accepted_preflights"], 1)
+        self.assertEqual(
+            loaded.payload["predecessor_config"]["grant_status"],
+            "SUPERSEDED_BEFORE_SHADOW",
+        )
+        self.assertEqual(
+            loaded.payload["predecessor_config"]["accepted_at_execution_commit"],
+            V2_PREFLIGHT_EXECUTION_COMMIT,
+        )
+        self.assertEqual(loaded.payload["predecessor_config"]["artifact_sha256"], V2_PREFLIGHT_SHA256)
+        self.assertIs(loaded.payload["predecessor_config"]["accepted_for_shadow_execution"], False)
+        self.assertEqual(RETIRED_CONFIG_HASHES[SUPERSEDED_V2_CONFIG_HASH]["shadow_executions"], 0)
         self.assertEqual(RETIRED_CONFIG_HASHES[INCOMPLETE_AUDIT_CONFIG_HASH]["accepted_preflights"], 0)
-        self.assertEqual(RETIRED_CONFIG_HASHES[INCOMPLETE_AUDIT_CONFIG_HASH]["preflight_executions"], 1)
+        self.assertEqual(
+            loaded.payload["output"]["superseded_preflight_dirname"],
+            SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name,
+        )
+        self.assertEqual(loaded.payload["case_selection"]["gold_identity_sha256"], GOLD_IDENTITY_SHA256)
         self.assertNotEqual(loaded.config_hash, PREVIOUS_UNUSED_CONFIG_HASH)
         self.assertNotEqual(loaded.config_hash, RETIRED_BEFORE_PREFLIGHT_HASH)
         self.assertNotEqual(loaded.config_hash, INCOMPLETE_AUDIT_CONFIG_HASH)
+        self.assertNotEqual(loaded.config_hash, SUPERSEDED_V2_CONFIG_HASH)
         blob = path.read_text(encoding="utf-8")
         self.assertNotIn("sk-", blob)
         self.assertNotIn("Authorization", blob)
@@ -358,6 +398,10 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertEqual(before, config.field("sealed_baseline", "sha256"))
         self.assertIs(payload["readonly"], True)
         self.assertEqual(payload["structured_answer_present"], 0)
+        self.assertEqual(
+            payload["selection"]["gold_identity_sha256"],
+            "990a7ff71234a0a9b3e2c021b972fbb2e93c71da6e747e6f647e25b8c51238a2",
+        )
 
     def test_split_and_holdout_path_rejected_before_read(self) -> None:
         with self.assertRaisesRegex(ShadowError, "split"):
@@ -472,6 +516,11 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 )
             self.assertEqual(report["remote_request_count"], 0)
             self.assertEqual(report["cases_executed"], 0)
+            self.assertIs(report["case_binding_verified"], True)
+            self.assertEqual(report["case_count"], 2)
+            self.assertTrue(report["query_ids_sha256"])
+            self.assertTrue(report["query_texts_sha256"])
+            self.assertIs(report["gold_not_exposed_to_generator"], True)
             self.assertEqual(report["protocol_ancestor"], PROTOCOL_COMMIT)
             self.assertTrue(report["not_live_production_retrieval"])
             self.assertTrue(report["candidate_cache"]["not_live_production_retrieval"])
@@ -785,6 +834,8 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             ),
             2,
         )
+        with self.assertRaisesRegex(ShadowError, "runtime parameter"):
+            parse_cli_guard(["--cases-path", "cases.json"])
 
     def test_dual_key_and_env_cannot_bypass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -975,6 +1026,174 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             self.assertEqual(generate_calls["n"], 0)
             self.assertFalse((root / "out").exists())
 
+    def test_live_path_binds_cases_from_verified_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1", "pd-2"], cache_query_text=True)
+            seen: list[str] = []
+
+            def generate(case: dict) -> str:
+                seen.append(str(case["case_id"]))
+                self.assertTrue(str(case.get("query_text") or "").strip())
+                self.assertTrue(case["hits"][0]["chunk_id"])
+                return _structured_payload(int(str(case["case_id"]).split("-")[1]))
+
+            with patch(
+                "lumenfin.eval.holdout.ledger.iter_ledger_parquet_rows",
+                side_effect=AssertionError("parquet must not be read"),
+            ):
+                result = _authorized_run(
+                    generate,
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    allowlist=["pd-1", "pd-2"],
+                )
+            self.assertEqual(seen, ["pd-1", "pd-2"])
+            self.assertEqual(result["identity"]["cases_total"], 2)
+            bound = bind_cases_from_verified_cache(
+                repo_root=root,
+                config=config,
+                cache_report=verify_candidate_cache(repo_root=root, config=config),
+                allowlist=["pd-1", "pd-2"],
+            )
+            self.assertEqual([item["case_id"] for item in bound], ["pd-1", "pd-2"])
+            self.assertEqual(bound[0]["query_text"], cases[0]["query_text"])
+            self.assertEqual(bound[0]["hits"][0]["chunk_id"], cases[0]["hits"][0]["chunk_id"])
+
+    def test_live_bind_without_query_text_or_snapshot_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            generate_calls = {"n": 0}
+
+            def generate(_case: dict) -> str:
+                generate_calls["n"] += 1
+                raise AssertionError("generate must not run")
+
+            with self.assertRaisesRegex(ShadowError, "not auto-fetched"):
+                _authorized_run(
+                    generate,
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    allowlist=["pd-1"],
+                )
+            self.assertEqual(generate_calls["n"], 0)
+            self.assertFalse((root / "out").exists())
+
+    def test_live_bind_missing_cache_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"], cache_query_text=True)
+            (root / "outputs" / "cache" / "candidates.jsonl").unlink()
+            with self.assertRaisesRegex(ShadowError, "missing"):
+                _authorized_run(
+                    lambda _case: (_ for _ in ()).throw(AssertionError("generate must not run")),
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    allowlist=["pd-1"],
+                )
+            self.assertFalse((root / "out").exists())
+
+    def test_live_bind_query_text_hash_mismatch_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"], cache_query_text=True)
+            cache_path = root / "outputs" / "cache" / "candidates.jsonl"
+            row = json.loads(cache_path.read_text(encoding="utf-8").splitlines()[0])
+            row["query_text"] = "mutated query"
+            cache_path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+            manifest_path = root / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["cache_file_sha256"] = sha256_raw_file(cache_path)
+            manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            fields = json.loads((root / "frozen.json").read_text(encoding="utf-8"))
+            fields["candidate_cache"]["manifest_sha256"] = sha256_normalized_file(manifest_path)
+            fields["config_hash"] = compute_config_hash(fields)
+            (root / "frozen.json").write_text(json.dumps(fields, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            mutated = load_frozen_config(root / "frozen.json")
+            with self.assertRaisesRegex(ShadowError, "query text"):
+                bind_cases_from_verified_cache(
+                    repo_root=root,
+                    config=mutated,
+                    cache_report=verify_candidate_cache(repo_root=root, config=mutated),
+                    allowlist=["pd-1"],
+                )
+            self.assertFalse((root / "out").exists())
+
+    def test_live_bind_joins_allowlisted_public_dev_snapshot(self) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        from lumenfin.eval.holdout.ledger import ledger_snapshot_sha256
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            snapshot = root / public_dev_snapshot_relative(config)
+            snapshot.mkdir(parents=True)
+            table = pa.table(
+                {
+                    "query_id": ["pd-1", "holdout-secret"],
+                    "query_text": [cases[0]["query_text"], "DO-NOT-BIND"],
+                    "value": [cases[0]["gold_value"], 99.0],
+                    "mmd_text": ["unused-dev", "unused-holdout"],
+                }
+            )
+            pq.write_table(table, snapshot / "0000.parquet")
+            cache_path = root / "outputs" / "cache" / "candidates.jsonl"
+            row = json.loads(cache_path.read_text(encoding="utf-8").splitlines()[0])
+            row["query_text_sha256"] = hashlib.sha256(
+                str(cases[0]["query_text"]).encode("utf-8")
+            ).hexdigest()
+            cache_path.write_text(json.dumps(row, ensure_ascii=False) + "\n", encoding="utf-8")
+            manifest_path = root / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["cache_file_sha256"] = sha256_raw_file(cache_path)
+            manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            fields = json.loads((root / "frozen.json").read_text(encoding="utf-8"))
+            fields["dataset"]["source_artifact_sha256"] = ledger_snapshot_sha256(snapshot)
+            fields["candidate_cache"]["manifest_sha256"] = sha256_normalized_file(manifest_path)
+            fields["config_hash"] = compute_config_hash(fields)
+            (root / "frozen.json").write_text(json.dumps(fields, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            joined_config = load_frozen_config(root / "frozen.json")
+            bound = bind_cases_from_verified_cache(
+                repo_root=root,
+                config=joined_config,
+                cache_report=verify_candidate_cache(repo_root=root, config=joined_config),
+                allowlist=["pd-1"],
+            )
+            self.assertEqual(bound[0]["case_id"], "pd-1")
+            self.assertEqual(bound[0]["query_text"], cases[0]["query_text"])
+            self.assertEqual(bound[0]["gold_value"], cases[0]["gold_value"])
+            self.assertNotIn("DO-NOT-BIND", json.dumps(bound))
+
+    def test_live_bind_refuses_holdout_snapshot_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            forbidden = root / "data" / "public_holdout" / "eval-test"
+            forbidden.mkdir(parents=True)
+            with patch(
+                "lumenfin.eval.ledger_structured_citation_shadow.public_dev_snapshot_relative",
+                return_value=Path("data") / "public_holdout" / "eval-test",
+            ):
+                with self.assertRaisesRegex(ShadowError, "forbidden"):
+                    bind_cases_from_verified_cache(
+                        repo_root=root,
+                        config=config,
+                        cache_report=verify_candidate_cache(repo_root=root, config=config),
+                        allowlist=["pd-1"],
+                    )
+            self.assertFalse((root / "out").exists())
+
     def test_strict_output_path_rejects_subdirectory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1071,6 +1290,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             for retired_hash in (
                 RETIRED_BEFORE_PREFLIGHT_HASH,
                 INCOMPLETE_AUDIT_CONFIG_HASH,
+                SUPERSEDED_V2_CONFIG_HASH,
             ):
                 payload["config_hash"] = retired_hash
                 retired = root / "retired.json"
@@ -1141,7 +1361,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 side_effect=mutate_cache,
             ):
                 with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test-not-for-disk"}):
-                    with self.assertRaisesRegex(ShadowError, "hash changed"):
+                    with self.assertRaisesRegex(ShadowError, "hash changed|changed after verification"):
                         run_shadow(
                             repo_root=root,
                             frozen_config=config,
@@ -1276,9 +1496,10 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertEqual(ledger["accepted_preflights"], 0)
         self.assertIs(ledger["accepted_for_shadow_execution"], False)
         fields = published_frozen_config_fields()
-        self.assertEqual(fields["predecessor_config"]["artifact_sha256"], INCOMPLETE_V1_PREFLIGHT_SHA256)
+        self.assertEqual(fields["predecessor_config"]["artifact_sha256"], V2_PREFLIGHT_SHA256)
         self.assertEqual(fields["output"]["preflight_dirname"], DEFAULT_PREFLIGHT_OUTPUT_DIR.name)
         self.assertEqual(fields["output"]["legacy_preflight_dirname"], LEGACY_PREFLIGHT_OUTPUT_DIR.name)
+        self.assertEqual(fields["output"]["superseded_preflight_dirname"], SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name)
         v1 = ROOT / LEGACY_PREFLIGHT_OUTPUT_DIR / "preflight.json"
         if v1.is_file():
             digest = hashlib.sha256(v1.read_bytes()).hexdigest()
@@ -1301,6 +1522,191 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 ),
                 0,
             )
+
+    def test_official_cli_has_no_cases_path_flag(self) -> None:
+        cli = _load_cli()
+        flags = [action.option_strings for action in cli.build_parser()._actions]
+        flat = {item for group in flags for item in group}
+        self.assertNotIn("--cases-path", flat)
+
+    def test_gold_sentinel_never_enters_provider_request(self) -> None:
+        sentinel = 555666777.888
+        label = "SENTINEL_GOLD_LABEL_ZX9"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1", "pd-2"])
+            cases[0]["gold_value"] = sentinel
+            cases[0]["gold_label"] = label
+            cases[1]["gold_value"] = sentinel + 1
+            captured: list[str] = []
+
+            def generate(case: dict) -> str:
+                prompt = build_generation_prompt(
+                    query_text=str(case.get("query_text") or ""),
+                    hits=list(case.get("hits") or []),
+                    max_document_chars=4000,
+                )
+                request = json.dumps(
+                    {
+                        "system": "shadow",
+                        "user": prompt,
+                        "case": case,
+                    },
+                    ensure_ascii=False,
+                )
+                captured.append(request)
+                self.assertNotIn(str(sentinel), request)
+                self.assertNotIn(label, request)
+                self.assertNotIn("gold_value", request.casefold())
+                self.assertNotIn("expected_answer", request.casefold())
+                generation_case_view(case)
+                return _structured_payload(int(str(case["case_id"]).split("-")[1]))
+
+            result = _authorized_run(
+                generate,
+                repo_root=root,
+                frozen_config=config,
+                split=CLI_SPLIT,
+                output_dir=root / "out",
+                preflight_output_dir=root / "preflight",
+                cases=cases,
+                allowlist=["pd-1", "pd-2"],
+            )
+            self.assertEqual(len(captured), 2)
+            self.assertNotIn(str(sentinel), "".join(captured))
+            self.assertGreaterEqual(result["summary"]["cases_succeeded"], 0)
+            params = inspect.signature(build_generation_prompt).parameters
+            self.assertNotIn("gold_value", params)
+            self.assertNotIn("gold", params)
+            self.assertNotIn("expected_answer", params)
+
+    def test_snapshot_duplicate_allowlist_id_fails_closed(self) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        from lumenfin.eval.holdout.ledger import ledger_snapshot_sha256
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            snapshot = root / public_dev_snapshot_relative(config)
+            snapshot.mkdir(parents=True)
+            table = pa.table(
+                {
+                    "query_id": ["pd-1", "pd-1"],
+                    "query_text": [cases[0]["query_text"], cases[0]["query_text"]],
+                    "value": [cases[0]["gold_value"], cases[0]["gold_value"]],
+                }
+            )
+            pq.write_table(table, snapshot / "0000.parquet")
+            fields = json.loads((root / "frozen.json").read_text(encoding="utf-8"))
+            fields["dataset"]["source_artifact_sha256"] = ledger_snapshot_sha256(snapshot)
+            fields["config_hash"] = compute_config_hash(fields)
+            (root / "frozen.json").write_text(json.dumps(fields, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            mutated = load_frozen_config(root / "frozen.json")
+            with self.assertRaisesRegex(ShadowError, "duplicate"):
+                bind_cases_from_verified_cache(
+                    repo_root=root,
+                    config=mutated,
+                    cache_report=verify_candidate_cache(repo_root=root, config=mutated),
+                    allowlist=["pd-1"],
+                )
+            self.assertFalse((root / "out").exists())
+
+    def test_gold_identity_mismatch_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1"])
+            sealed = {
+                "selection": {"gold_identity_sha256": "0" * 64},
+            }
+            with self.assertRaisesRegex(ShadowError, "gold identity"):
+                bind_cases_from_verified_cache(
+                    repo_root=root,
+                    config=config,
+                    cache_report=verify_candidate_cache(repo_root=root, config=config),
+                    allowlist=["pd-1"],
+                    sealed=sealed,
+                )
+
+    def test_v2_preflight_cannot_authorize_new_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            v2 = root / SUPERSEDED_PREFLIGHT_OUTPUT_DIR
+            v2.mkdir(parents=True)
+            (v2 / "preflight.json").write_text(
+                json.dumps(
+                    {
+                        "kind": "preflight",
+                        "status": PREFLIGHT_OK,
+                        "execution_commit": V2_PREFLIGHT_EXECUTION_COMMIT,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ShadowError, "v2 preflight cannot authorize"):
+                assert_preflight_authorizes_shadow(
+                    repo_root=root,
+                    execution_commit="deadbeef" * 5,
+                )
+            self.assertFalse((root / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
+            self.assertFalse((root / "outputs" / "ledger_structured_citation_shadow_v1").exists())
+
+    def test_v3_directory_is_fixed_and_preflight_binds_without_remote(self) -> None:
+        self.assertEqual(
+            DEFAULT_PREFLIGHT_OUTPUT_DIR.name,
+            "ledger_structured_citation_shadow_preflight_v3",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1", "pd-2"])
+            official = root / "outputs" / "ledger_structured_citation_shadow_v1"
+            preflight_dir = root / DEFAULT_PREFLIGHT_OUTPUT_DIR
+            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test-not-for-disk"}, clear=False):
+                report = run_shadow(
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    confirm_exposed_shadow=True,
+                    output_dir=official,
+                    preflight_output_dir=preflight_dir,
+                    preflight_only=True,
+                    verify_tag=False,
+                    require_clean=False,
+                    verify_runtime=False,
+                    strict_paths=True,
+                )
+            self.assertEqual(report["cases_executed"], 0)
+            self.assertEqual(report["remote_request_count"], 0)
+            self.assertIs(report["case_binding_verified"], True)
+            self.assertEqual(report["case_count"], 2)
+            self.assertIs(report["gold_not_exposed_to_generator"], True)
+            self.assertFalse(official.exists())
+            self.assertEqual(sorted(item.name for item in preflight_dir.iterdir()), ["preflight.json"])
+
+    def test_official_prefix_binds_fifty_when_local_artifacts_present(self) -> None:
+        cache = ROOT / "outputs" / "ledger_public_dev_qwen3_paired_5x50_v3" / "candidates.jsonl"
+        snapshot = ROOT / public_dev_snapshot_relative(
+            load_frozen_config(ROOT / DEFAULT_FROZEN_CONFIG_PATH, require_published=True)
+        )
+        if not cache.is_file() or not snapshot.exists():
+            self.skipTest("local sealed cache or public/dev snapshot is not in this checkout")
+        config = load_frozen_config(ROOT / DEFAULT_FROZEN_CONFIG_PATH, require_published=True)
+        sealed = read_sealed_baseline_readonly(repo_root=ROOT, config=config)
+        bound = bind_cases_from_verified_cache(
+            repo_root=ROOT,
+            config=config,
+            cache_report=verify_candidate_cache(repo_root=ROOT, config=config),
+            allowlist=None,
+            sealed=sealed,
+        )
+        self.assertEqual(len(bound), 50)
+        self.assertEqual(ids_sha256([item["case_id"] for item in bound]), config.field("case_selection", "query_ids_sha256"))
+        views = [generation_case_view(item) for item in bound]
+        blob = json.dumps(views, ensure_ascii=False)
+        self.assertNotIn("gold_value", blob)
+        self.assertNotIn("qrels", blob)
 
 
 if __name__ == "__main__":

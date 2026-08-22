@@ -3,10 +3,13 @@
 
 Exposed public/dev shadow only. Not held-out, not product accuracy, not a
 LEDGER benchmark, and not rc5. Formal scoring requires both
---confirm-exposed-shadow and --allow-remote. Preflight refuses remote
-authorization and makes no provider calls. Official preflight writes only
-outputs/ledger_structured_citation_shadow_preflight_v2/. This stage does not
-run the paid public/dev shadow.
+--confirm-exposed-shadow and --allow-remote. Official live scoring binds the
+verified candidate-cache prefix; it does not rebuild the cache and does not
+open public_holdout. Preflight refuses remote authorization and makes no
+provider calls. Official preflight writes only
+outputs/ledger_structured_citation_shadow_preflight_v3/. The accepted v2
+preflight cannot authorize a later execution commit. This stage does not
+run official preflight or the paid public/dev shadow.
 """
 from __future__ import annotations
 
@@ -69,11 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_PREFLIGHT_OUTPUT_DIR),
         help="Preflight directory; separate from official scores",
     )
-    parser.add_argument(
-        "--cases-path",
-        default="",
-        help="Optional fixture path for offline tests. Not a split override.",
-    )
     return parser
 
 
@@ -103,7 +101,6 @@ def main(argv: list[str] | None = None) -> int:
             confirm_exposed_shadow=bool(args.confirm_exposed_shadow),
             output_dir=Path(args.output_dir),
             preflight_output_dir=Path(args.preflight_dir),
-            cases_path=Path(args.cases_path) if args.cases_path else None,
             allow_remote=bool(args.allow_remote),
             preflight_only=bool(args.preflight_only),
             resume=bool(args.resume),

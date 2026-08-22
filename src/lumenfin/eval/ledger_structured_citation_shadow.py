@@ -5,8 +5,9 @@ rewrite sealed aggregates, and does not retune production retrieval.
 
 A future official run is an exposed public/dev shadow only:
 held_out=false, not a product-accuracy claim, not a LEDGER benchmark, and
-not rc5. This module implements tools, preflight, and resume. It does not
-itself authorize a paid remote run.
+not rc5. Official live scoring binds the verified candidate-cache prefix
+and never opens public_holdout. This module implements tools, preflight,
+and resume. It does not itself authorize a paid remote run.
 """
 
 from __future__ import annotations
@@ -66,7 +67,8 @@ DEFAULT_CACHE_MANIFEST_PATH = (
 )
 DEFAULT_OFFICIAL_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_v1"
 LEGACY_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v1"
-DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v2"
+SUPERSEDED_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v2"
+DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v3"
 CACHE_MANIFEST_SCHEMA = "lumenfin_ledger_structured_citation_shadow_cache.v1"
 PREVIOUS_UNUSED_CONFIG_HASH = (
     "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
@@ -77,8 +79,30 @@ RETIRED_BEFORE_PREFLIGHT_HASH = (
 INCOMPLETE_AUDIT_CONFIG_HASH = (
     "4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac"
 )
+SUPERSEDED_V2_CONFIG_HASH = (
+    "49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf"
+)
 INCOMPLETE_V1_PREFLIGHT_SHA256 = (
     "755a7f60a40e7b35f6181e210bf4a708cef5c63331d8cdf7aaf42cb3b4eefc81"
+)
+V2_PREFLIGHT_SHA256 = (
+    "f3179e05ee6b726f4fb192e1e50152b1fb8ae287e612b1398efd483124c5e2f3"
+)
+V2_PREFLIGHT_EXECUTION_COMMIT = (
+    "f69f1338fc1469779000e08efd24af9dd088c544"
+)
+GOLD_IDENTITY_SHA256 = (
+    "990a7ff71234a0a9b3e2c021b972fbb2e93c71da6e747e6f647e25b8c51238a2"
+)
+DATASET_REVISION = "b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619"
+DATASET_SOURCE_ARTIFACT_SHA256 = (
+    "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad"
+)
+DATASET_SNAPSHOT_SHA256 = (
+    "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea"
+)
+PUBLIC_DEV_SNAPSHOT_RELATIVE = (
+    Path("data") / "external" / "ledger-long-context-KPI-QA" / DATASET_REVISION / "eval-test"
 )
 RETIRED_CONFIG_HASHES = {
     PREVIOUS_UNUSED_CONFIG_HASH: {
@@ -110,9 +134,24 @@ RETIRED_CONFIG_HASHES = {
         "cli_exit_code": 0,
         "shadow_results": 0,
     },
+    SUPERSEDED_V2_CONFIG_HASH: {
+        "status": "superseded_before_shadow",
+        "authorization_status": "SUPERSEDED_BEFORE_SHADOW",
+        "retired_reason": "execution_code_changed",
+        "accepted_at_execution_commit": V2_PREFLIGHT_EXECUTION_COMMIT,
+        "preflight_executions": 1,
+        "accepted_preflights": 1,
+        "shadow_executions": 0,
+        "results": 0,
+        "artifact_status": "PREFLIGHT_OK",
+        "artifact_sha256": V2_PREFLIGHT_SHA256,
+        "accepted_for_shadow_execution": False,
+        "cli_exit_code": 0,
+        "shadow_results": 0,
+    },
 }
 EVALUATION_MODE = "sealed_candidate_replay_shadow"
-PREFLIGHT_SCHEMA_VERSION = "1.0"
+PREFLIGHT_SCHEMA_VERSION = "1.1"
 PREFLIGHT_OK = "PREFLIGHT_OK"
 PREFLIGHT_REQUIRED_FIELDS = (
     "kind",
@@ -126,6 +165,25 @@ PREFLIGHT_REQUIRED_FIELDS = (
     "public_holdout_used",
     "sealed_aggregate_modified",
     "candidate_cache_modified",
+    "case_binding_verified",
+    "case_count",
+    "query_ids_sha256",
+    "query_texts_sha256",
+    "gold_identity_sha256",
+    "snapshot_identity",
+    "gold_not_exposed_to_generator",
+)
+GENERATOR_FORBIDDEN_KEYS = frozenset(
+    {
+        "gold",
+        "gold_value",
+        "gold_label",
+        "expected",
+        "expected_answer",
+        "label",
+        "qrels",
+        "value",
+    }
 )
 CHAT_CREDENTIAL_KEY = "DEEPSEEK_API_KEY"
 CHAIN_SEAL_RELATIVE = Path("data") / "eval_rag" / "holdout" / "ledger_public_dev_chain_seal.json"
@@ -737,14 +795,16 @@ def published_frozen_config_fields() -> dict[str, Any]:
         "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         "preflight_required_fields": list(PREFLIGHT_REQUIRED_FIELDS),
         "predecessor_config": {
-            "config_hash": INCOMPLETE_AUDIT_CONFIG_HASH,
+            "config_hash": SUPERSEDED_V2_CONFIG_HASH,
             "preflight_executions": 1,
-            "accepted_preflights": 0,
+            "accepted_preflights": 1,
             "shadow_executions": 0,
             "results": 0,
-            "retired_reason": "incomplete_preflight_audit_schema",
-            "artifact_status": "INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA",
-            "artifact_sha256": INCOMPLETE_V1_PREFLIGHT_SHA256,
+            "retired_reason": "execution_code_changed",
+            "grant_status": "SUPERSEDED_BEFORE_SHADOW",
+            "accepted_at_execution_commit": V2_PREFLIGHT_EXECUTION_COMMIT,
+            "artifact_status": "PREFLIGHT_OK",
+            "artifact_sha256": V2_PREFLIGHT_SHA256,
             "accepted_for_shadow_execution": False,
             "cli_exit_code": 0,
             "shadow_results": 0,
@@ -798,6 +858,7 @@ def published_frozen_config_fields() -> dict[str, Any]:
             "parent_query_ids_sha256": (
                 "cb1654a41dec7ae04efd6666dd5ddfbcf29862631b1d0acbad884fb0402de044"
             ),
+            "gold_identity_sha256": GOLD_IDENTITY_SHA256,
         },
         "sealed_baseline": {
             "path": SEALED_BASELINE_RELATIVE.as_posix(),
@@ -809,13 +870,12 @@ def published_frozen_config_fields() -> dict[str, Any]:
         },
         "dataset": {
             "dataset_id": "artefactory/ledger-long-context-KPI-QA",
-            "dataset_revision": "b7085dc6cb16b3ec8149a9baf6dd2d3416cf7619",
-            "dataset_snapshot_sha256": (
-                "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea"
-            ),
-            "source_artifact_sha256": (
-                "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad"
-            ),
+            "dataset_revision": DATASET_REVISION,
+            "dataset_snapshot_sha256": DATASET_SNAPSHOT_SHA256,
+            "source_artifact_sha256": DATASET_SOURCE_ARTIFACT_SHA256,
+            "snapshot_path_identity": PUBLIC_DEV_SNAPSHOT_RELATIVE.as_posix(),
+            "download_forbidden": True,
+            "rebuild_forbidden": True,
         },
         "chat": {
             "provider": "deepseek",
@@ -880,6 +940,7 @@ def published_frozen_config_fields() -> dict[str, Any]:
             "official_dirname": DEFAULT_OFFICIAL_OUTPUT_DIR.name,
             "preflight_dirname": DEFAULT_PREFLIGHT_OUTPUT_DIR.name,
             "legacy_preflight_dirname": LEGACY_PREFLIGHT_OUTPUT_DIR.name,
+            "superseded_preflight_dirname": SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name,
             "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         },
         "call_budget": {
@@ -1006,7 +1067,16 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
         raise ShadowError("frozen config preflight required fields mismatch")
     output = payload.get("output") or {}
     if output.get("preflight_dirname") != DEFAULT_PREFLIGHT_OUTPUT_DIR.name:
-        raise ShadowError("frozen config preflight directory must be v2")
+        raise ShadowError("frozen config preflight directory must be v3")
+    if output.get("superseded_preflight_dirname") != SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name:
+        raise ShadowError("frozen config superseded preflight directory must be v2")
+    if str(payload.get("case_selection", {}).get("gold_identity_sha256") or "") != GOLD_IDENTITY_SHA256:
+        raise ShadowError("frozen config gold identity mismatch")
+    dataset = payload.get("dataset") or {}
+    if str(dataset.get("snapshot_path_identity") or "") != PUBLIC_DEV_SNAPSHOT_RELATIVE.as_posix():
+        raise ShadowError("frozen config snapshot path identity mismatch")
+    if dataset.get("download_forbidden") is not True:
+        raise ShadowError("frozen config must forbid snapshot download")
     if output.get("official_dirname") != DEFAULT_OFFICIAL_OUTPUT_DIR.name:
         raise ShadowError("frozen config official directory mismatch")
     if payload.get("config_hash") in RETIRED_CONFIG_HASHES:
@@ -1100,12 +1170,16 @@ def bind_chain_seal(
         raise ShadowError("sealed case id hash mismatch")
     if int(baseline.get("cases") or 0) != int(config.field("case_selection", "query_count")):
         raise ShadowError("sealed case count mismatch")
+    gold_hash = str(selection.get("gold_identity_sha256") or "")
+    if gold_hash and gold_hash != str(config.field("case_selection", "gold_identity_sha256") or ""):
+        raise ShadowError("sealed gold identity does not match frozen config")
     return {
         "seal_tag": SEAL_TAG,
         "seal_commit": SEAL_TARGET_COMMIT,
         "split_manifest_sha256": actual_manifest_hash,
         "sealed_baseline_sha256": actual_baseline_hash,
         "query_ids_sha256": str(selection.get("query_ids_sha256") or ""),
+        "gold_identity_sha256": gold_hash,
         "baseline_readonly": True,
     }
 
@@ -1129,7 +1203,8 @@ def read_sealed_baseline_readonly(
     cases = int(payload.get("cases") or 0)
     support_rate = float(arm.get("citation_support_rate") or 0.0)
     abstain_rate = float(arm.get("abstain_rate") or 0.0)
-    return {
+    gold_hash = str((payload.get("selection") or {}).get("gold_identity_sha256") or "")
+    report = {
         "cases": cases,
         "structured_answer_present": 0,
         "valid_citations": 0,
@@ -1140,6 +1215,9 @@ def read_sealed_baseline_readonly(
         "readonly": True,
         "product_accuracy_claim": False,
     }
+    if gold_hash:
+        report["selection"] = {"gold_identity_sha256": gold_hash}
+    return report
 
 
 def assert_case_ids(
@@ -1194,6 +1272,286 @@ def load_case_fixture(path: str | Path, *, allowlist: list[str], expected_hash: 
             }
         )
     return normalized
+
+
+def public_dev_snapshot_relative(config: FrozenShadowConfig) -> Path:
+    configured = str(config.field("dataset", "snapshot_path_identity") or "").strip()
+    if configured:
+        path = Path(configured)
+        if path != PUBLIC_DEV_SNAPSHOT_RELATIVE:
+            raise ShadowError("public/dev snapshot path is not the sealed identity")
+        return path
+    revision = str(config.field("dataset", "dataset_revision") or "").strip()
+    if not revision:
+        raise ShadowError("frozen dataset revision is missing")
+    path = Path("data") / "external" / "ledger-long-context-KPI-QA" / revision / "eval-test"
+    if path != PUBLIC_DEV_SNAPSHOT_RELATIVE:
+        raise ShadowError("public/dev snapshot path is not the sealed identity")
+    return path
+
+
+def query_texts_sha256(cases: list[Mapping[str, Any]]) -> str:
+    payload = [
+        {
+            "case_id": str(item.get("case_id") or ""),
+            "query_text_sha256": sha256_text(str(item.get("query_text") or "")),
+        }
+        for item in cases
+    ]
+    return sha256_text(canonical_dumps(payload))
+
+
+def generation_case_view(case: Mapping[str, Any]) -> dict[str, Any]:
+    view = {
+        "case_id": str(case.get("case_id") or ""),
+        "query_text": str(case.get("query_text") or ""),
+        "hits": list(case.get("hits") or []),
+        "tenant_id": str(case.get("tenant_id") or "default"),
+        "session_id": str(case.get("session_id") or "shadow"),
+    }
+    assert_generation_case_has_no_gold(view)
+    return view
+
+
+def assert_generation_case_has_no_gold(case: Mapping[str, Any]) -> None:
+    for key in case:
+        lowered = str(key).casefold()
+        if lowered in GENERATOR_FORBIDDEN_KEYS or "gold" in lowered:
+            raise ShadowError("generator case carries evaluator-only gold")
+    blob = json.dumps(sanitize_payload(dict(case)), ensure_ascii=False).casefold()
+    for token in ("gold_value", "gold_label", "expected_answer"):
+        if token in blob:
+            raise ShadowError("generator case carries evaluator-only gold")
+
+
+def case_binding_report(
+    cases: list[Mapping[str, Any]],
+    *,
+    snapshot_hash: str,
+    snapshot_path: str,
+) -> dict[str, Any]:
+    return {
+        "case_binding_verified": True,
+        "case_count": len(cases),
+        "query_ids_sha256": ids_sha256([str(item["case_id"]) for item in cases]),
+        "query_texts_sha256": query_texts_sha256(cases),
+        "gold_identity_sha256": gold_identity_sha256(
+            {str(item["case_id"]): float(item["gold_value"]) for item in cases}
+        ),
+        "snapshot_identity": {
+            "path_identity": snapshot_path,
+            "source_artifact_sha256": snapshot_hash,
+            "download_forbidden": True,
+        },
+        "gold_not_exposed_to_generator": True,
+    }
+
+
+def gold_identity_sha256(values: Mapping[str, float]) -> str:
+    payload = [
+        {"query_id": query_id, "value": values[query_id]}
+        for query_id in sorted(values)
+    ]
+    return sha256_text(canonical_dumps(payload))
+
+
+def load_verified_cache_prefix(
+    *,
+    repo_root: Path,
+    config: FrozenShadowConfig,
+    cache_report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    rel = Path(str(config.field("candidate_cache", "manifest_path") or DEFAULT_CACHE_MANIFEST_PATH))
+    manifest = read_json_object(
+        assert_safe_input_path(repo_root / rel, field="cache-manifest"),
+        field="cache-manifest",
+    )
+    cache_rel = Path(str(manifest.get("source_path_identity") or ""))
+    cache_path = assert_safe_input_path(repo_root / cache_rel, field="candidate-cache")
+    before = sha256_raw_file(cache_path)
+    if before != str(cache_report.get("cache_file_sha256") or ""):
+        raise ShadowError("candidate cache changed after verification")
+    rows = load_cache_rows(cache_path)
+    after = sha256_raw_file(cache_path)
+    if after != before:
+        raise ShadowError("candidate cache changed during prefix bind")
+    prefix = select_prefix_rows(
+        rows,
+        cases_per_company=int(config.field("case_selection", "cases_per_company") or 10),
+    )
+    prefix_ids = [str(row.get("query_id") or "") for row in prefix]
+    if prefix_ids != list(cache_report.get("prefix_case_ids") or []):
+        raise ShadowError("verified cache prefix order changed during bind")
+    if ids_sha256(prefix_ids) != str(config.field("case_selection", "query_ids_sha256") or ""):
+        raise ShadowError("candidate cache prefix does not match frozen case selection")
+    return [dict(row) for row in prefix]
+
+
+def cases_from_verified_cache_rows(
+    rows: list[Mapping[str, Any]],
+    *,
+    expected_ids: list[str],
+    expected_hash: str,
+) -> list[dict[str, Any]]:
+    case_ids = [str(item.get("query_id") or item.get("case_id") or "") for item in rows]
+    if any(not item for item in case_ids):
+        raise ShadowError("verified cache row is missing case id")
+    assert_case_ids(case_ids, expected_ids=expected_ids, expected_hash=expected_hash)
+    normalized: list[dict[str, Any]] = []
+    for item, case_id in zip(rows, case_ids):
+        hits = list(item.get("hits") or [])
+        if not hits:
+            raise ShadowError("verified cache row is missing hits")
+        if any(not str(hit.get("chunk_id") or "").strip() for hit in hits):
+            raise ShadowError("verified cache hit is missing chunk_id")
+        qrels = item.get("qrels") or {}
+        if isinstance(qrels, list):
+            qrels = {str(row.get("doc_id") or ""): int(row.get("relevance") or 0) for row in qrels}
+        gold_raw = item.get("gold_value", item.get("value", 0.0))
+        normalized.append(
+            {
+                "case_id": case_id,
+                "query_text": str(item.get("query_text") or ""),
+                "gold_value": float(gold_raw or 0.0),
+                "hits": hits,
+                "qrels": {str(key): int(value) for key, value in dict(qrels).items()},
+                "tenant_id": str(item.get("tenant_id") or "default"),
+                "session_id": str(item.get("session_id") or "shadow"),
+            }
+        )
+    return normalized
+
+
+def _verify_bound_query_text_hashes(
+    cases: list[Mapping[str, Any]],
+    cache_rows: list[Mapping[str, Any]],
+) -> None:
+    by_id = {str(row.get("query_id") or ""): row for row in cache_rows}
+    for case in cases:
+        expected = str(by_id.get(str(case["case_id"]), {}).get("query_text_sha256") or "")
+        if not expected:
+            continue
+        actual = sha256_text(str(case.get("query_text") or ""))
+        if actual != expected:
+            raise ShadowError("bound query text does not match verified cache hash")
+
+
+def load_allowlisted_public_dev_query_payloads(
+    *,
+    repo_root: Path,
+    config: FrozenShadowConfig,
+    query_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    wanted = [str(item) for item in query_ids]
+    if not wanted or any(not item for item in wanted):
+        raise ShadowError("public/dev query payload allowlist is empty")
+    wanted_set = set(wanted)
+    snapshot = assert_safe_input_path(
+        repo_root / public_dev_snapshot_relative(config),
+        field="public-dev-snapshot",
+    )
+    if not snapshot.exists():
+        raise ShadowError(
+            "verified cache is missing query text; public/dev query payloads "
+            "are not auto-fetched and cache rebuild is forbidden"
+        )
+    from .holdout.ledger import ledger_snapshot_sha256
+
+    actual_hash = ledger_snapshot_sha256(snapshot)
+    expected_hash = str(config.field("dataset", "source_artifact_sha256") or "")
+    if actual_hash != expected_hash:
+        raise ShadowError("public/dev snapshot hash does not match frozen dataset")
+    try:
+        import pyarrow.parquet as parquet
+    except ImportError as exc:
+        raise ShadowError("pyarrow is required to read the local public/dev snapshot") from exc
+    found: dict[str, dict[str, Any]] = {}
+    files = sorted(snapshot.rglob("*.parquet")) if snapshot.is_dir() else [snapshot]
+    if not files or any(not item.is_file() for item in files):
+        raise ShadowError("local public/dev snapshot is missing")
+    for file_path in files:
+        assert_safe_input_path(file_path, field="public-dev-snapshot")
+        try:
+            parquet_file = parquet.ParquetFile(file_path)
+            for batch in parquet_file.iter_batches(
+                batch_size=64,
+                columns=["query_id", "query_text", "value"],
+            ):
+                for row in batch.to_pylist():
+                    query_id = str(row.get("query_id") or "")
+                    if query_id not in wanted_set:
+                        continue
+                    if query_id in found:
+                        raise ShadowError("public/dev query payload contains duplicate case ids")
+                    query_text = str(row.get("query_text") or "").strip()
+                    if not query_text:
+                        raise ShadowError("public/dev query payload is missing query text")
+                    found[query_id] = {
+                        "query_text": query_text,
+                        "gold_value": float(row.get("value") or 0.0),
+                    }
+        except ShadowError:
+            raise
+        except Exception as exc:
+            raise ShadowError("cannot read local public/dev snapshot") from exc
+    extra = set(found) - wanted_set
+    if extra:
+        raise ShadowError("public/dev query payload contains extra case ids")
+    missing = [item for item in wanted if item not in found]
+    if missing:
+        raise ShadowError("public/dev query payloads are incomplete for the sealed prefix")
+    return {"payloads": found, "source_artifact_sha256": actual_hash}
+
+
+def bind_cases_from_verified_cache(
+    *,
+    repo_root: Path,
+    config: FrozenShadowConfig,
+    cache_report: Mapping[str, Any],
+    allowlist: list[str] | None,
+    sealed: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    prefix = load_verified_cache_prefix(
+        repo_root=repo_root,
+        config=config,
+        cache_report=cache_report,
+    )
+    expected_ids = list(cache_report.get("prefix_case_ids") or [])
+    if allowlist is not None and list(allowlist) != expected_ids:
+        raise ShadowError("case ids do not match verified candidate cache prefix")
+    cases = cases_from_verified_cache_rows(
+        prefix,
+        expected_ids=expected_ids,
+        expected_hash=str(config.field("case_selection", "query_ids_sha256")),
+    )
+    if any(not str(case.get("query_text") or "").strip() for case in cases):
+        loaded = load_allowlisted_public_dev_query_payloads(
+            repo_root=repo_root,
+            config=config,
+            query_ids=[str(case["case_id"]) for case in cases],
+        )
+        payloads = loaded["payloads"]
+        extra = set(payloads) - {str(case["case_id"]) for case in cases}
+        if extra:
+            raise ShadowError("public/dev query payload contains extra case ids")
+        for case in cases:
+            if str(case.get("query_text") or "").strip():
+                continue
+            payload = payloads[str(case["case_id"])]
+            case["query_text"] = payload["query_text"]
+            if float(case.get("gold_value") or 0.0) == 0.0:
+                case["gold_value"] = float(payload["gold_value"])
+    if any(not str(case.get("query_text") or "").strip() for case in cases):
+        raise ShadowError("live shadow cases are missing query text")
+    bound_ids = [str(case["case_id"]) for case in cases]
+    if bound_ids != expected_ids:
+        raise ShadowError("bound case ids do not match verified candidate cache prefix")
+    _verify_bound_query_text_hashes(cases, prefix)
+    gold = {str(case["case_id"]): float(case["gold_value"]) for case in cases}
+    gold_expected = str(((sealed or {}).get("selection") or {}).get("gold_identity_sha256") or "")
+    if gold_expected and gold_identity_sha256(gold) != gold_expected:
+        raise ShadowError("bound gold identity does not match sealed baseline")
+    return cases
 
 
 def rank_hits(hits: list[dict[str, Any]], *, query_text: str, final_k: int) -> list[dict[str, Any]]:
@@ -1718,12 +2076,47 @@ def _assert_preflight_success_contract(report: Mapping[str, Any]) -> None:
         raise ShadowError("preflight success cannot record sealed aggregate mutation")
     if report.get("candidate_cache_modified") is not False:
         raise ShadowError("preflight success cannot record candidate cache mutation")
+    if report.get("case_binding_verified") is not True:
+        raise ShadowError("preflight success must verify case binding")
+    if int(report.get("case_count") or 0) <= 0:
+        raise ShadowError("preflight success must record bound case count")
+    if not str(report.get("query_ids_sha256") or ""):
+        raise ShadowError("preflight success must record query id hash")
+    if not str(report.get("query_texts_sha256") or ""):
+        raise ShadowError("preflight success must record query text hash")
+    if report.get("gold_not_exposed_to_generator") is not True:
+        raise ShadowError("preflight success must prove gold was not sent to the generator")
     executed_at = str(report.get("executed_at") or "")
     parsed = datetime.fromisoformat(executed_at.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ShadowError("preflight executed_at must be timezone-aware UTC")
     if parsed.utcoffset().total_seconds() != 0:
         raise ShadowError("preflight executed_at must be UTC")
+
+
+def assert_preflight_authorizes_shadow(
+    *,
+    repo_root: Path,
+    execution_commit: str,
+) -> None:
+    v2 = repo_root / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    v3 = repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    if v2.is_file() and not v3.is_file():
+        raise ShadowError("v2 preflight cannot authorize a later execution commit")
+    if v2.is_file():
+        v2_payload = read_json_object(v2, field="superseded-preflight")
+        if str(v2_payload.get("execution_commit") or "") != execution_commit:
+            if not v3.is_file():
+                raise ShadowError("v2 preflight cannot authorize a later execution commit")
+    if not v3.is_file():
+        raise ShadowError("official shadow requires an accepted v3 preflight")
+    report = read_json_object(v3, field="preflight")
+    if str(report.get("execution_commit") or "") != execution_commit:
+        raise ShadowError("v3 preflight cannot authorize a different execution commit")
+    if report.get("case_binding_verified") is not True:
+        raise ShadowError("v3 preflight did not verify case binding")
+    if report.get("authorization_status") == "SUPERSEDED_BEFORE_SHADOW":
+        raise ShadowError("superseded preflight cannot authorize shadow execution")
 
 
 def run_preflight(
@@ -1753,7 +2146,19 @@ def run_preflight(
         if verify_runtime:
             snapshot = verify_runtime_matches_frozen(frozen_config)
         cache = verify_candidate_cache(repo_root=repo_root, config=frozen_config)
-        read_sealed_baseline_readonly(repo_root=repo_root, config=frozen_config)
+        sealed = read_sealed_baseline_readonly(repo_root=repo_root, config=frozen_config)
+        bound_cases = bind_cases_from_verified_cache(
+            repo_root=repo_root,
+            config=frozen_config,
+            cache_report=cache,
+            allowlist=list(cache.get("prefix_case_ids") or []),
+            sealed=sealed,
+        )
+        binding = case_binding_report(
+            bound_cases,
+            snapshot_hash=str(frozen_config.field("dataset", "source_artifact_sha256") or ""),
+            snapshot_path=public_dev_snapshot_relative(frozen_config).as_posix(),
+        )
         hashes_after = _readonly_artifact_hashes(repo_root=repo_root, config=frozen_config)
         if hashes_before != hashes_after:
             raise ShadowError("readonly artifact hash changed during preflight")
@@ -1816,6 +2221,13 @@ def run_preflight(
             "benchmark_claim": False,
             "exposed_public_dev_shadow": True,
             "evaluation_mode": EVALUATION_MODE,
+            "case_binding_verified": binding["case_binding_verified"],
+            "case_count": binding["case_count"],
+            "query_ids_sha256": binding["query_ids_sha256"],
+            "query_texts_sha256": binding["query_texts_sha256"],
+            "gold_identity_sha256": binding["gold_identity_sha256"],
+            "snapshot_identity": binding["snapshot_identity"],
+            "gold_not_exposed_to_generator": True,
             "not_live_production_retrieval": True,
             "candidate_cache_generation": frozen_config.field("candidate_cache_generation"),
             "runtime_components": frozen_config.field("runtime_components"),
@@ -1899,11 +2311,21 @@ def build_live_generate(snapshot: RuntimeSnapshot) -> GenerateFn:
     client = DeepSeekChatClient(settings)
 
     def generate(case: Mapping[str, Any]) -> str:
+        safe = generation_case_view(case)
         user_prompt = build_generation_prompt(
-            query_text=str(case.get("query_text") or ""),
-            hits=list(case.get("hits") or []),
+            query_text=str(safe.get("query_text") or ""),
+            hits=list(safe.get("hits") or []),
             max_document_chars=4000,
         )
+        request = {
+            "system": snapshot.prompt,
+            "user": user_prompt,
+            "case": safe,
+        }
+        assert_generation_case_has_no_gold(safe)
+        blob = json.dumps(sanitize_payload(request), ensure_ascii=False).casefold()
+        if "gold_value" in blob or "gold_label" in blob or "expected_answer" in blob:
+            raise ShadowError("provider request contains evaluator-only gold")
         return client.chat(
             snapshot.prompt,
             user_prompt,
@@ -2000,6 +2422,11 @@ def run_shadow(
     git = git_snapshot(repo_root)
     if require_clean and git["worktree_dirty"]:
         raise ShadowError("structured citation shadow requires a clean worktree")
+    if live_generate and strict_paths:
+        assert_preflight_authorizes_shadow(
+            repo_root=repo_root,
+            execution_commit=str(git["execution_commit"]),
+        )
     protocol_ancestor = str(frozen_config.field("lumenfin_protocol_commit"))
     if require_clean:
         require_protocol_ancestor(repo_root, protocol_ancestor)
@@ -2015,18 +2442,20 @@ def run_shadow(
     expected_hash = str(frozen_config.field("case_selection", "query_ids_sha256"))
     if cases is None:
         if cases_path is None:
-            if live_generate:
-                raise ShadowError(
-                    "live shadow requires bound case payloads; parquet/query text "
-                    "is not auto-fetched and cache rebuild is forbidden"
-                )
-            raise ShadowError("shadow cases fixture is required")
-        expected_ids = allowlist or []
-        cases = load_case_fixture(
-            cases_path,
-            allowlist=expected_ids,
-            expected_hash=expected_hash,
-        )
+            cases = bind_cases_from_verified_cache(
+                repo_root=repo_root,
+                config=frozen_config,
+                cache_report=cache,
+                allowlist=allowlist,
+                sealed=sealed,
+            )
+        else:
+            expected_ids = allowlist or []
+            cases = load_case_fixture(
+                cases_path,
+                allowlist=expected_ids,
+                expected_hash=expected_hash,
+            )
     else:
         assert_case_ids(
             [str(item["case_id"]) for item in cases],
@@ -2079,7 +2508,7 @@ def run_shadow(
             started = time.perf_counter()
             remote_before = active_probe.remote_request_count
             try:
-                raw = active_generate(case)
+                raw = active_generate(generation_case_view(case))
                 latency_ms = (time.perf_counter() - started) * 1000.0
                 remote_delta = active_probe.remote_request_count - remote_before
                 if block_network and remote_delta:
@@ -2167,6 +2596,12 @@ def run_shadow(
         "held_out": False,
         "product_accuracy_claim": False,
         "not_live_production_retrieval": True,
+        "case_binding": case_binding_report(
+            cases,
+            snapshot_hash=str(frozen_config.field("dataset", "source_artifact_sha256") or ""),
+            snapshot_path=public_dev_snapshot_relative(frozen_config).as_posix(),
+        ),
+        "gold_not_exposed_to_generator": True,
     }
     _write_run_artifacts(
         output_dir=output_dir,
@@ -2207,6 +2642,10 @@ def parse_cli_guard(argv: list[str] | None = None) -> dict[str, Any]:
         "--timeout",
         "--retry",
         "--seed",
+        "--cases-path",
+        "--cases_path",
+        "--parquet-path",
+        "--snapshot",
     }
     for item in args:
         key = item.split("=", 1)[0]
