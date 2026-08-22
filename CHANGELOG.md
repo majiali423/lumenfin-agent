@@ -82,6 +82,8 @@ image has been created. Latest published LumenFin remains
   official preflight directory is
   `outputs/ledger_structured_citation_shadow_preflight_v2/`. Current hash is
   `49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf`.
+- Offline CI no longer requires the gitignored local v1 preflight file;
+  the immutable v1 identity is asserted from the published ledger.
 
 ## 0.1.0rc4 — 2026-08-13
 

@@ -1267,11 +1267,23 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                     strict_paths=True,
                     allowlist=["pd-1"],
                 )
+            self.assertFalse((root / "outputs" / "ledger_structured_citation_shadow_v1").exists())
+            self.assertFalse((root / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
+        ledger = RETIRED_CONFIG_HASHES[INCOMPLETE_AUDIT_CONFIG_HASH]
+        self.assertEqual(ledger["artifact_sha256"], INCOMPLETE_V1_PREFLIGHT_SHA256)
+        self.assertEqual(ledger["artifact_status"], "INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA")
+        self.assertEqual(ledger["preflight_executions"], 1)
+        self.assertEqual(ledger["accepted_preflights"], 0)
+        self.assertIs(ledger["accepted_for_shadow_execution"], False)
+        fields = published_frozen_config_fields()
+        self.assertEqual(fields["predecessor_config"]["artifact_sha256"], INCOMPLETE_V1_PREFLIGHT_SHA256)
+        self.assertEqual(fields["output"]["preflight_dirname"], DEFAULT_PREFLIGHT_OUTPUT_DIR.name)
+        self.assertEqual(fields["output"]["legacy_preflight_dirname"], LEGACY_PREFLIGHT_OUTPUT_DIR.name)
         v1 = ROOT / LEGACY_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-        digest = hashlib.sha256(v1.read_bytes()).hexdigest()
-        self.assertEqual(digest, INCOMPLETE_V1_PREFLIGHT_SHA256)
-        self.assertEqual(v1.stat().st_size, 3920)
-        self.assertFalse((ROOT / "outputs" / "ledger_structured_citation_shadow_v1").exists())
+        if v1.is_file():
+            digest = hashlib.sha256(v1.read_bytes()).hexdigest()
+            self.assertEqual(digest, INCOMPLETE_V1_PREFLIGHT_SHA256)
+            self.assertEqual(v1.stat().st_size, 3920)
 
     def test_cli_returns_zero_after_successful_preflight_write(self) -> None:
         cli = _load_cli()
