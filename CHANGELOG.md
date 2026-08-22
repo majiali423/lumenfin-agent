@@ -84,6 +84,19 @@ image has been created. Latest published LumenFin remains
   `49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf`.
 - Offline CI no longer requires the gitignored local v1 preflight file;
   the immutable v1 identity is asserted from the published ledger.
+- Official live scoring now binds the verified Hybrid candidate-cache
+  prefix. Query text is taken from the cache when present, otherwise from
+  the local allowlisted public/dev snapshot only. Gold values stay on the
+  scoring object and never enter the generator prompt. Cache rebuild,
+  Hugging Face fetch, and `public_holdout` stay forbidden.
+- The accepted v2 preflight (`f3179e05…` at `f69f133…`) is
+  `SUPERSEDED_BEFORE_SHADOW`. It cannot authorize a later execution
+  commit. The next official preflight directory is
+  `outputs/ledger_structured_citation_shadow_preflight_v3/` with schema
+  `1.1` case-binding fields. Hash `49e4f63f…` recorded one accepted
+  preflight and zero shadow results. Current hash is
+  `54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05`.
+  Do not run v3 preflight or the paid shadow in this stage.
 
 ## 0.1.0rc4 — 2026-08-13
 

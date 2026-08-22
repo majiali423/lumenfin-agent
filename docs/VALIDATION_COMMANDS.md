@@ -214,17 +214,24 @@ Cache identity:
 [`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
 The v1 official preflight artifact is immutable
 `INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA` (sha256 `755a7f60…`; not accepted for
-shadow execution). Next official preflight directory:
-`outputs/ledger_structured_citation_shadow_preflight_v2/`. Retired hashes
-`3e834f0e…` and `ef497e8b…` never produced results; `4dd7519e…` recorded one
-incomplete official preflight. This is a governance-schema fix, not a retune.
+shadow execution). The accepted v2 preflight (`f3179e05…`) is
+`SUPERSEDED_BEFORE_SHADOW` and cannot authorize a later execution. Next
+official preflight directory:
+`outputs/ledger_structured_citation_shadow_preflight_v3/`. Do not run v3
+or the paid shadow in this stage. Retired hashes `3e834f0e…` and
+`ef497e8b…` never produced results; `4dd7519e…` recorded one incomplete
+official preflight; `49e4f63f…` recorded one accepted v2 preflight and
+zero shadow results.
 
 ```powershell
 python -m unittest tests.test_ledger_structured_citation_shadow tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
 ```
 
-Future official CLI (do not execute yet). Dual key: `--confirm-exposed-shadow`
-AND `--allow-remote`. Preflight must omit `--allow-remote`.
+Official live scoring binds the verified candidate-cache prefix and does
+not take `--cases-path`. Dual key: `--confirm-exposed-shadow` AND
+`--allow-remote`. Do not rerun v2 and do not run v3 preflight until a
+later approval. Paid official shadow still requires a matching v3
+preflight, a clean worktree, and a separate execution approval.
 
 ```powershell
 python scripts/run_ledger_structured_citation_shadow.py `
