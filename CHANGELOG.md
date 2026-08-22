@@ -96,7 +96,12 @@ image has been created. Latest published LumenFin remains
   `1.1` case-binding fields. Hash `49e4f63f…` recorded one accepted
   preflight and zero shadow results. Current hash is
   `54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05`.
-  Do not run v3 preflight or the paid shadow in this stage.
+- Sealed the exposed public/dev structured-citation shadow as
+  `RECORDED_COMPLETE` in
+  `data/eval_rag/ledger_structured_citation_shadow_result.json`.
+  Execution gate passed; structured-citation quality gate failed. This is
+  not held-out, not product accuracy, not a live retrieval benchmark, and
+  not an rc5 citation claim. Do not retune from the exposed result.
 
 ## 0.1.0rc4 — 2026-08-13
 

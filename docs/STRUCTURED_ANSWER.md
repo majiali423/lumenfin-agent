@@ -129,36 +129,30 @@ overwrite. Raw artifacts stay gitignored under
 `cases_failed=0`, `remote_request_count=0`). That file is not a
 FinanceBench or LEDGER aggregate and is not a product-accuracy claim.
 
-## LEDGER public/dev structured-citation shadow (tools only)
+## LEDGER public/dev structured-citation shadow (recorded)
 
-Frozen harness for a future **exposed public/dev**
-`sealed_candidate_replay_shadow`. It evaluates current structured-answer
-generation and citation validation against a sealed Hybrid candidate pool. It
-is not current live production retrieval, not held-out, not product accuracy,
-not a new LEDGER benchmark, and not rc5. `public_holdout` stays closed.
-Production RAG A is unchanged.
+Recorded **exposed public/dev** `sealed_candidate_replay_shadow` at
+`fc77288…`. Slim tracked ledger:
+[`../data/eval_rag/ledger_structured_citation_shadow_result.json`](../data/eval_rag/ledger_structured_citation_shadow_result.json).
+Raw official files stay gitignored under
+`outputs/ledger_structured_citation_shadow_v1/`. The raw JSON has no
+`status` field; the ledger records `seal_status=RECORDED_COMPLETE` from
+exit 0 and 50/50 completed cases. Execution gate passed.
+Structured-citation quality gate failed: 22/50 structured answers, 18/29
+unknown citations, and 11 valid citations that did not form a
+gold-supported claim. This is not held-out, not product accuracy, not
+live retrieval, not a LEDGER benchmark, and not rc5. Do not retune
+prompt or RAG from this exposed result. Possible follow-up audits
+(free-form chunk IDs, evaluator strictness, candidate/gold mismatch,
+claim-citation binding) are hypotheses only.
 
 Frozen config:
 [`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
 Candidate-cache identity:
 [`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
 CLI: `scripts/run_ledger_structured_citation_shadow.py`.
-Runtime embedding and reranker are disabled. Cache-generation lexical
-provenance stays immutable and is not compared to `MAS_RAG_RERANK_PROVIDER`.
-A future paid run requires both `--confirm-exposed-shadow` and
-`--allow-remote`, a verified frozen candidate cache, bound public/dev case
-payloads from that cache (query text from the cache or the local
-allowlisted snapshot only), a present `DEEPSEEK_API_KEY`, a clean
-worktree, and the exact official output directory. The official CLI does not take `--cases-path` and does not rebuild the
-cache. Gold values never enter the generator prompt. The accepted v2
-preflight (`f3179e05…` at `f69f133…`) is `SUPERSEDED_BEFORE_SHADOW` and
-must not authorize a later execution. Do not delete or rewrite it. The
-next official preflight directory is
-`outputs/ledger_structured_citation_shadow_preflight_v3/`. Do not run v3
-preflight or the paid shadow until a later explicit approval. The v1
+Runtime embedding and reranker stay disabled. Gold values never enter the
+generator prompt. The accepted v2 preflight (`f3179e05…` at `f69f133…`)
+is `SUPERSEDED_BEFORE_SHADOW`. Do not rerun or resume this shadow. The v1
 official preflight artifact is `INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA`
-(`cli_exit_code=0`, `accepted_for_shadow_execution=false`,
-`shadow_results=0`, sha256 `755a7f60…`). Retired hashes `3e834f0e…` and
-`ef497e8b…` never produced results; `4dd7519e…` recorded one incomplete
-official preflight; `49e4f63f…` recorded one accepted v2 preflight and
-zero shadow results.
+(sha256 `755a7f60…`). Current config hash is `54f6e300…`.

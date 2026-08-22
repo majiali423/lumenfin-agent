@@ -1,0 +1,179 @@
+{
+  "schema_version": "lumenfin_ledger_structured_citation_shadow_result.v1",
+  "kind": "sealed_result_ledger",
+  "suite": "ledger_structured_citation_shadow",
+  "seal_status": "RECORDED_COMPLETE",
+  "raw_result_status_field": "MISSING",
+  "evaluation_mode": "sealed_candidate_replay_shadow",
+  "exposed_public_dev_shadow": true,
+  "held_out": false,
+  "product_accuracy_claim": false,
+  "benchmark_claim": false,
+  "live_retrieval_claim": false,
+  "suitable_for_model_selection": false,
+  "retuning_allowed": false,
+  "retuning_on_public_dev_forbidden": true,
+  "reliable_citation_claim_authorized": false,
+  "production_change_authorized": false,
+  "public_holdout_used": false,
+  "sealed_aggregate_modified": false,
+  "candidate_cache_modified": false,
+  "not_live_production_retrieval": true,
+  "gold_not_exposed_to_generator": true,
+  "provenance": {
+    "execution_commit": "fc77288d39c349b182ce94c0540237ef9d172ec0",
+    "protocol_ancestor": "78a719e2b744777aee5353acc24b9b88c410066e",
+    "config_hash": "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05",
+    "frozen_config_path": "data/eval_rag/structured_citation_shadow_config.json",
+    "preflight_path": "outputs/ledger_structured_citation_shadow_preflight_v3/preflight.json",
+    "preflight_sha256": "b49a3e705b94b01fcf4dbe926d34642db18f8ad39c7adcf62d0f415bea5074eb",
+    "preflight_schema_version": "1.1",
+    "preflight_status": "PREFLIGHT_OK",
+    "preflight_case_binding_verified": true,
+    "seal_tag": "ledger-public-dev-chain-v1",
+    "seal_commit": "ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c",
+    "case_count": 50,
+    "query_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
+    "query_texts_sha256": "cf8dc53a50abfa49f9b006ec64f0d1934f0dcc790e6cadb6ed7f2840c95dd580",
+    "gold_identity_sha256": "990a7ff71234a0a9b3e2c021b972fbb2e93c71da6e747e6f647e25b8c51238a2",
+    "cache_file_sha256": "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a",
+    "cache_manifest_sha256": "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90",
+    "snapshot_source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad",
+    "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
+    "sealed_baseline_sha256": "a7b4868da2694118e31aad62a840453f5acf44dbb5a8e7593b0e3197db3d2b21",
+    "raw_executed_at_field": "MISSING",
+    "executed_at": "2026-08-22T19:46:35Z",
+    "executed_at_source": "official_summary_json_mtime_utc",
+    "worktree_clean": true,
+    "official_output_dir": "outputs/ledger_structured_citation_shadow_v1"
+  },
+  "completion_evidence": {
+    "cli_exit_code": 0,
+    "cases_total": 50,
+    "cases_remaining": 0,
+    "cases_succeeded": 50,
+    "cases_failed": 0,
+    "manifest_checkpoint_per_case_ids_match": true
+  },
+  "calls": {
+    "logical_generate_calls": 50,
+    "recorded_remote_calls": 50,
+    "recorded_generate_attempts": 50,
+    "provider_errors": 0,
+    "embedding_calls": 0,
+    "runtime_rerank_calls": 0,
+    "billing_semantics": "at_least_once",
+    "exactly_once": false,
+    "unobserved_inflight_remote_calls_possible": true,
+    "http_attempts_not_separately_persisted": true
+  },
+  "citations": {
+    "structured_answer_present": 22,
+    "structured_emission_rate": 0.44,
+    "citation_source": {
+      "structured": 22,
+      "unavailable": 28
+    },
+    "answers_with_citations": 22,
+    "citations_total": 29,
+    "valid_citations": 11,
+    "unknown_citations": 18,
+    "unverified_citations": 0,
+    "cross_scope_citations": 0,
+    "stale_citations": 0,
+    "citation_validation_failed": 11
+  },
+  "claims": {
+    "claims_total": 23,
+    "supported_claims": 0,
+    "unsupported_claims": 22,
+    "citation_support_rate": 0.0,
+    "fully_supported_answers": 0,
+    "partially_supported_answers": 0,
+    "unsupported_answers": 22,
+    "unclassified_as_supported_or_unsupported": 1,
+    "residual": {
+      "count": 1,
+      "case_id": "BWA_capex_2017",
+      "claim_support": "unavailable",
+      "outcome": "incomplete_data",
+      "structured_answer_present": false,
+      "citations_total": 0,
+      "formal_class": "claim_counted_without_citations"
+    }
+  },
+  "outcomes": {
+    "complete": 0,
+    "incomplete_data": 28,
+    "degraded": 22,
+    "failed": 0
+  },
+  "paired_vs_sealed": {
+    "post_hoc_exposed_comparison": true,
+    "comparison_kind": "post-hoc exposed comparison",
+    "retuning_allowed": false,
+    "held_out": false,
+    "suitable_for_model_selection": false,
+    "writes_sealed_aggregate": false,
+    "structured_present_delta": 22,
+    "valid_citation_delta": 11,
+    "supported_claim_delta": 0,
+    "incomplete_or_degraded_delta": 13
+  },
+  "gates": {
+    "execution_gate_passed": true,
+    "structured_citation_quality_gate_passed": false,
+    "reliable_citation_claim_authorized": false,
+    "production_change_authorized": false,
+    "retuning_on_public_dev_forbidden": true
+  },
+  "official_artifacts": {
+    "manifest.json": {
+      "sha256": "56fc10a7ec42afcfccbbca6c409e8d24eaa1a78edfbe3b15316b54ee22d54c93",
+      "size": 3095
+    },
+    "checkpoint.json": {
+      "sha256": "56fc10a7ec42afcfccbbca6c409e8d24eaa1a78edfbe3b15316b54ee22d54c93",
+      "size": 3095
+    },
+    "environment.json": {
+      "sha256": "7501e73e4f17a969bbf55f132b79958d0080a2d9b4273e8c1f8f6a93f29c3f75",
+      "size": 2335
+    },
+    "per_case.jsonl": {
+      "sha256": "83da31fbfff5648869c5f8f1d9c972ba31d21b81c3272cabcc68ca34c17e82de",
+      "size": 56273
+    },
+    "summary.json": {
+      "sha256": "0bc10c1e6872388cbf76c1df71fca084399244416cc7a0bf16af466d6ea71af1",
+      "size": 1715
+    },
+    "citation_accounting.json": {
+      "sha256": "91e26017e1809207d9964c2306d12a341a1df437fb803fb53d5206defe28ed43",
+      "size": 377
+    },
+    "paired_vs_sealed.json": {
+      "sha256": "31e11077d3922dc0842dfeabae4ba56725e79a27e7312bcb7360da0839365f64",
+      "size": 385
+    },
+    "failures.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    "results.md": {
+      "sha256": "fe9cfb45b70ed5c6124b979bbad6b97caf36a1a3c495bb3bacf27a71d42b9416",
+      "size": 397
+    }
+  },
+  "risks_untested": [
+    "22 of 50 cases emitted a structured answer",
+    "18 of 29 citations were unknown",
+    "11 valid citations did not form a gold-supported claim",
+    "model or adapter may still emit free-form chunk IDs or hit mapping-boundary failures; that needs a separate code audit",
+    "evaluator support scoring may be stricter than the generation contract",
+    "sealed candidates may not contain gold-corresponding evidence",
+    "claim extraction may be mis-bound to citations",
+    "these are audit hypotheses only; do not retune prompt or RAG from this exposed public/dev result",
+    "rc5 must not claim reliable structured citations from this result"
+  ]
+}

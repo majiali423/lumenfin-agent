@@ -201,42 +201,26 @@ Slim tracked record:
 (`config_hash` `6f85a617a16446afc17b940919bc57c10b397b588279466aa824e93e8536f2fa`;
 not product accuracy).
 
-## 8c. LEDGER structured-citation public/dev shadow (tools only)
+## 8c. LEDGER structured-citation public/dev shadow (recorded)
 
-Exposed public/dev `sealed_candidate_replay_shadow`. Not live production
-retrieval, not held-out, not product accuracy, not a LEDGER benchmark, not
-rc5. Refuses `public_holdout`. Runtime embedding/reranker stay disabled. Do
-**not** run official preflight or the paid public/dev shadow in this stage.
+Exposed public/dev `sealed_candidate_replay_shadow` is recorded. Not live
+production retrieval, not held-out, not product accuracy, not a LEDGER
+benchmark, not rc5. Execution gate passed; structured-citation quality
+gate failed. Do not rerun or resume. Do not retune from this result.
 
+Tracked ledger:
+[`../data/eval_rag/ledger_structured_citation_shadow_result.json`](../data/eval_rag/ledger_structured_citation_shadow_result.json).
 Frozen config:
 [`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
 Cache identity:
 [`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
-The v1 official preflight artifact is immutable
-`INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA` (sha256 `755a7f60…`; not accepted for
-shadow execution). The accepted v2 preflight (`f3179e05…`) is
-`SUPERSEDED_BEFORE_SHADOW` and cannot authorize a later execution. Next
-official preflight directory:
-`outputs/ledger_structured_citation_shadow_preflight_v3/`. Do not run v3
-or the paid shadow in this stage. Retired hashes `3e834f0e…` and
-`ef497e8b…` never produced results; `4dd7519e…` recorded one incomplete
-official preflight; `49e4f63f…` recorded one accepted v2 preflight and
-zero shadow results.
+Raw outputs stay gitignored under
+`outputs/ledger_structured_citation_shadow_v1/`. The raw JSON has no
+`status` field; the ledger uses `seal_status=RECORDED_COMPLETE`.
+22/50 structured answers, 18/29 unknown citations, and 11 valid
+citations without a gold-supported claim. rc5 must not claim reliable
+structured citations from this run.
 
 ```powershell
-python -m unittest tests.test_ledger_structured_citation_shadow tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
-```
-
-Official live scoring binds the verified candidate-cache prefix and does
-not take `--cases-path`. Dual key: `--confirm-exposed-shadow` AND
-`--allow-remote`. Do not rerun v2 and do not run v3 preflight until a
-later approval. Paid official shadow still requires a matching v3
-preflight, a clean worktree, and a separate execution approval.
-
-```powershell
-python scripts/run_ledger_structured_citation_shadow.py `
-  --split public-dev `
-  --frozen-config data/eval_rag/structured_citation_shadow_config.json `
-  --confirm-exposed-shadow `
-  --preflight-only
+python -m unittest tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_result tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
 ```

@@ -364,6 +364,7 @@ PDF / SEC / Yahoo / market providers
 | **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback；**不是** FinanceBench） |
 | **FinanceBench confirmation-50** | 已消耗切分上的页级检索 | Hit@10 **0.62**；不是产品准确率；Phase 4 `NOT_RUN` |
 | **LEDGER public-dev** | 公开 KPI 检索 / packing / 生成 canary | **已封存并停止**；不是产品准确率；不要给 page-parent 索引做 embedding |
+| **LEDGER structured-citation shadow** | 暴露的 public/dev sealed-candidate replay | 已记录；执行门禁通过、引用质量门禁未通过；不是产品准确率 |
 | **Compose hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
 
 **RC 标签**单元回归计数冻结于 2026-08-12 全量验证，并随

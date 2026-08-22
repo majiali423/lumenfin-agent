@@ -377,6 +377,7 @@ Do **not** merge these into one “accuracy” number.
 | **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback; **not** FinanceBench) |
 | **FinanceBench confirmation-50** | Page-level retrieval on a consumed split | Hit@10 **0.62**; not product accuracy; Phase 4 `NOT_RUN` |
 | **LEDGER public-dev** | Public KPI retrieval / packing / generate canary | **Sealed / stopped**; not product accuracy; do not embed page-parent index |
+| **LEDGER structured-citation shadow** | Exposed public/dev sealed-candidate replay | Recorded; execution passed, citation quality failed; not product accuracy |
 | **Compose hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
 
 The **RC-tag** unit-regression counts were frozen during full validation on

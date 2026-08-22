@@ -10,18 +10,16 @@ Do not embed a page-parent index. Do not rescore the frozen 5×50 suffix.
 FinanceBench Phase 4 remains `NOT_RUN`. Production RAG defaults unchanged.
 
 A structured-citation **public/dev** `sealed_candidate_replay_shadow` is
-frozen under `data/eval_rag/structured_citation_shadow_config.json` and
-`data/eval_rag/structured_citation_shadow_cache_manifest.json`. It replays a
-sealed Hybrid candidate pool through current structured-answer generation. It
-is not a live retrieval benchmark, not a new LEDGER benchmark, not held-out,
-and is not authorized to run in this stage. Runtime embedding/reranker stay
-disabled. A future paid run requires `--confirm-exposed-shadow` and
-`--allow-remote` together with the frozen candidate cache and a present
-`DEEPSEEK_API_KEY`. Do not open `public_holdout`. Do not retune from exposed
-public/dev. The existing v1 official preflight is an incomplete audit-schema
-artifact and is not accepted for shadow execution. The next official
-preflight, when separately approved, writes only
-`outputs/ledger_structured_citation_shadow_preflight_v2/`.
+recorded in
+`data/eval_rag/ledger_structured_citation_shadow_result.json`. It replayed a
+sealed Hybrid candidate pool through current structured-answer generation.
+Execution gate passed; structured-citation quality gate failed. It is not a
+live retrieval benchmark, not a new LEDGER benchmark, not held-out, and not
+an rc5 citation claim. Runtime embedding/reranker stay disabled. Do not
+rerun or resume. Do not open `public_holdout`. Do not retune from this
+exposed public/dev result. The accepted v2 preflight is
+`SUPERSEDED_BEFORE_SHADOW`. Official raw files stay under
+`outputs/ledger_structured_citation_shadow_v1/`.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.
