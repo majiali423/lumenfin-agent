@@ -21,6 +21,40 @@
   },
   "lumenfin_protocol_commit": "78a719e2b744777aee5353acc24b9b88c410066e",
   "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
+  "evaluation_mode": "sealed_candidate_replay_shadow",
+  "not_live_production_retrieval": true,
+  "candidate_cache_generation": {
+    "retrieval": "hybrid_rrf_top20",
+    "embedding": {
+      "provider": "dashscope",
+      "model": "text-embedding-v4",
+      "dimension": 1024
+    },
+    "reranker": {
+      "provider": "lexical",
+      "model": "lexical"
+    },
+    "source_commit": "ec4d9e40d45a536ec00cbdd8fbdadf6e051e4e8c",
+    "cache_file_sha256": "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a",
+    "manifest_sha256": "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90"
+  },
+  "runtime_components": {
+    "embedding": {
+      "enabled": false,
+      "status": "disabled"
+    },
+    "reranker": {
+      "enabled": false,
+      "status": "not_applicable"
+    },
+    "chat": {
+      "enabled": true,
+      "provider": "deepseek"
+    },
+    "scoring_pool_ranker": "lexical_local"
+  },
+  "runtime_embedding_enabled": false,
+  "runtime_reranker_enabled": false,
   "candidate_cache": {
     "manifest_path": "data/eval_rag/structured_citation_shadow_cache_manifest.json",
     "manifest_sha256": "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90",
@@ -76,6 +110,7 @@
   "reranker": {
     "provider": "lexical",
     "model": "lexical",
+    "used_in_runtime": false,
     "instruct": "Given a financial due diligence query, retrieve passages that directly answer it. Prefer the correct company, reporting period, metric, scope, and filing context over merely topical passages.",
     "timeout_seconds": 12.0,
     "max_attempts": 2,
@@ -175,5 +210,5 @@
       "config_hash"
     ]
   },
-  "config_hash": "ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e"
+  "config_hash": "4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac"
 }

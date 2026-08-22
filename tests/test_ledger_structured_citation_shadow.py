@@ -18,8 +18,12 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     CANONICAL_SPLIT,
     CLI_SPLIT,
     DEFAULT_FROZEN_CONFIG_PATH,
+    EVALUATION_MODE,
     PREVIOUS_UNUSED_CONFIG_HASH,
     PROTOCOL_COMMIT,
+    RETIRED_BEFORE_PREFLIGHT_HASH,
+    forbid_runtime_embedding_call,
+    forbid_runtime_reranker_call,
     SEAL_TAG,
     SEAL_TARGET_COMMIT,
     SUITE,
@@ -282,10 +286,15 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertIs(loaded.payload["product_accuracy_claim"], False)
         self.assertIs(loaded.payload["benchmark_claim"], False)
         self.assertTrue(loaded.payload["candidate_cache"]["not_live_production_retrieval"])
-        self.assertNotEqual(
-            loaded.config_hash,
-            PREVIOUS_UNUSED_CONFIG_HASH,
+        self.assertEqual(loaded.payload["evaluation_mode"], EVALUATION_MODE)
+        self.assertIs(loaded.payload["runtime_embedding_enabled"], False)
+        self.assertIs(loaded.payload["runtime_reranker_enabled"], False)
+        self.assertEqual(
+            loaded.payload["candidate_cache_generation"]["reranker"]["provider"],
+            "lexical",
         )
+        self.assertNotEqual(loaded.config_hash, PREVIOUS_UNUSED_CONFIG_HASH)
+        self.assertNotEqual(loaded.config_hash, RETIRED_BEFORE_PREFLIGHT_HASH)
         blob = path.read_text(encoding="utf-8")
         self.assertNotIn("sk-", blob)
         self.assertNotIn("Authorization", blob)
@@ -437,6 +446,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             self.assertEqual(report["protocol_ancestor"], PROTOCOL_COMMIT)
             self.assertTrue(report["not_live_production_retrieval"])
             self.assertTrue(report["candidate_cache"]["not_live_production_retrieval"])
+            self.assertEqual(report["evaluation_mode"], EVALUATION_MODE)
+            self.assertFalse(report["runtime_components"]["reranker"]["enabled"])
+            self.assertFalse(report["runtime_components"]["embedding"]["enabled"])
             self.assertEqual(report["remote_calls_expected"], 2)
             self.assertEqual(
                 sorted(item.name for item in preflight_dir.iterdir()),
@@ -937,6 +949,88 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                     strict_paths=True,
                     allowlist=["pd-1"],
                 )
+
+    def test_runtime_qwen3_env_does_not_break_replay_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, cases, _ = _mini_world(root, ["pd-1"])
+            with patch.dict(
+                os.environ,
+                {
+                    "MAS_RAG_RERANK_PROVIDER": "qwen3",
+                    "DEEPSEEK_API_KEY": "sk-test-not-for-disk",
+                },
+            ):
+                result = _authorized_run(
+                    lambda _case: _structured_payload(1),
+                    repo_root=root,
+                    frozen_config=config,
+                    split=CLI_SPLIT,
+                    output_dir=root / "out",
+                    preflight_output_dir=root / "preflight",
+                    cases=cases,
+                    verify_runtime=True,
+                    allowlist=["pd-1"],
+                )
+            self.assertEqual(result["identity"]["evaluation_mode"], EVALUATION_MODE)
+            self.assertTrue(result["identity"]["not_live_production_retrieval"])
+            blob = (root / "out" / "environment.json").read_text(encoding="utf-8")
+            self.assertNotIn("sk-test-not-for-disk", blob)
+            self.assertNotIn("Authorization", blob)
+            env = json.loads(blob)
+            self.assertEqual(env["runtime"]["runtime_components"]["reranker"]["status"], "not_applicable")
+            self.assertEqual(
+                env["runtime"]["runtime_components"]["reranker"]["observed_env_provider"],
+                "qwen3",
+            )
+
+    def test_missing_chat_key_fails_preflight_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"])
+
+            class _Source:
+                def __init__(self, key: str) -> None:
+                    self.key = key
+                    self.source = "unset"
+                    self.length = 0
+
+            with patch(
+                "lumenfin.eval.ledger_structured_citation_shadow.describe_credential_sources",
+                return_value=[_Source("DEEPSEEK_API_KEY"), _Source("DASHSCOPE_API_KEY")],
+            ):
+                with self.assertRaisesRegex(ShadowError, "DEEPSEEK_API_KEY"):
+                    run_shadow(
+                        repo_root=root,
+                        frozen_config=config,
+                        split=CLI_SPLIT,
+                        confirm_exposed_shadow=True,
+                        output_dir=root / "out",
+                        preflight_output_dir=root / "preflight",
+                        preflight_only=True,
+                        verify_tag=False,
+                        require_clean=False,
+                        verify_runtime=False,
+                    )
+            self.assertFalse((root / "preflight").exists())
+            self.assertFalse((root / "out").exists())
+
+    def test_runtime_retrieval_calls_fail_closed(self) -> None:
+        with self.assertRaisesRegex(ShadowError, "embedding calls"):
+            forbid_runtime_embedding_call()
+        with self.assertRaisesRegex(ShadowError, "runtime reranker calls"):
+            forbid_runtime_reranker_call()
+
+    def test_retired_config_hash_is_not_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, _cases, _ = _mini_world(root, ["pd-1"])
+            payload = json.loads((root / "frozen.json").read_text(encoding="utf-8"))
+            payload["config_hash"] = RETIRED_BEFORE_PREFLIGHT_HASH
+            retired = root / "retired.json"
+            retired.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ShadowError, "retired|does not match canonical"):
+                load_frozen_config(retired)
 
     def test_paired_helper_does_not_claim_accuracy(self) -> None:
         shadow = summarize_rows(

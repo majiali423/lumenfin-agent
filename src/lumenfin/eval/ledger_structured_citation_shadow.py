@@ -68,6 +68,23 @@ CACHE_MANIFEST_SCHEMA = "lumenfin_ledger_structured_citation_shadow_cache.v1"
 PREVIOUS_UNUSED_CONFIG_HASH = (
     "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
 )
+RETIRED_BEFORE_PREFLIGHT_HASH = (
+    "ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e"
+)
+RETIRED_CONFIG_HASHES = {
+    PREVIOUS_UNUSED_CONFIG_HASH: {
+        "status": "never_executed",
+        "executions": 0,
+        "results": 0,
+    },
+    RETIRED_BEFORE_PREFLIGHT_HASH: {
+        "status": "retired_before_successful_preflight",
+        "executions": 0,
+        "results": 0,
+    },
+}
+EVALUATION_MODE = "sealed_candidate_replay_shadow"
+CHAT_CREDENTIAL_KEY = "DEEPSEEK_API_KEY"
 CHAIN_SEAL_RELATIVE = Path("data") / "eval_rag" / "holdout" / "ledger_public_dev_chain_seal.json"
 SPLIT_MANIFEST_RELATIVE = Path("data") / "eval_rag" / "holdout" / "ledger_public_manifest.json"
 SEALED_BASELINE_RELATIVE = (
@@ -131,8 +148,17 @@ class RuntimeSnapshot:
             "retry_backoff_seconds": self.retry_backoff_seconds,
             "base_url_sha256": chat_base_url_sha256(self.base_url),
             "prompt_sha256": prompt_sha256(self.prompt),
-            "rerank_provider": self.rerank_provider,
-            "rerank_instruct": self.rerank_instruct,
+            "evaluation_mode": EVALUATION_MODE,
+            "runtime_components": {
+                "embedding": {"enabled": False, "status": "disabled"},
+                "reranker": {
+                    "enabled": False,
+                    "status": "not_applicable",
+                    "observed_env_provider": self.rerank_provider,
+                },
+                "chat": {"enabled": True, "provider": "deepseek", "model": self.model},
+                "scoring_pool_ranker": "lexical_local",
+            },
         }
 
 
@@ -364,10 +390,19 @@ def verify_snapshot_matches_frozen(
         raise ShadowError("runtime chat endpoint hash does not match frozen config")
     if prompt_sha256(snapshot.prompt) != str(config.field("prompts", "system_prompt_sha256")):
         raise ShadowError("runtime prompt hash does not match frozen config")
-    if snapshot.rerank_provider != str(config.field("reranker", "provider")):
-        raise ShadowError("runtime rerank provider does not match frozen config")
-    if snapshot.rerank_instruct != str(config.field("reranker", "instruct")):
-        raise ShadowError("runtime rerank instruct does not match frozen config")
+    if config.field("evaluation_mode") != EVALUATION_MODE:
+        raise ShadowError("frozen config evaluation_mode is not sealed candidate replay")
+    if config.field("runtime_embedding_enabled") is not False:
+        raise ShadowError("sealed candidate replay forbids runtime embedding")
+    if config.field("runtime_reranker_enabled") is not False:
+        raise ShadowError("sealed candidate replay forbids runtime reranker")
+    runtime = config.field("runtime_components") or {}
+    if (runtime.get("embedding") or {}).get("enabled") is not False:
+        raise ShadowError("runtime embedding must stay disabled")
+    if (runtime.get("reranker") or {}).get("enabled") is not False:
+        raise ShadowError("runtime reranker must stay disabled")
+    if (runtime.get("chat") or {}).get("enabled") is not True:
+        raise ShadowError("runtime chat must stay enabled")
     rag = config.field("production_rag") or {}
     arm = ARM_SPECS[str(rag.get("ranking_arm") or "A_prod")]
     if (
@@ -594,6 +629,32 @@ def published_frozen_config_fields() -> dict[str, Any]:
         },
         "lumenfin_protocol_commit": PROTOCOL_COMMIT,
         "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
+        "evaluation_mode": EVALUATION_MODE,
+        "not_live_production_retrieval": True,
+        "candidate_cache_generation": {
+            "retrieval": "hybrid_rrf_top20",
+            "embedding": {
+                "provider": "dashscope",
+                "model": DEFAULT_DASHSCOPE_EMBEDDING_MODEL,
+                "dimension": DEFAULT_DASHSCOPE_EMBEDDING_DIM,
+            },
+            "reranker": {"provider": "lexical", "model": "lexical"},
+            "source_commit": SEAL_TARGET_COMMIT,
+            "cache_file_sha256": (
+                "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a"
+            ),
+            "manifest_sha256": (
+                "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90"
+            ),
+        },
+        "runtime_components": {
+            "embedding": {"enabled": False, "status": "disabled"},
+            "reranker": {"enabled": False, "status": "not_applicable"},
+            "chat": {"enabled": True, "provider": "deepseek"},
+            "scoring_pool_ranker": "lexical_local",
+        },
+        "runtime_embedding_enabled": False,
+        "runtime_reranker_enabled": False,
         "candidate_cache": {
             "manifest_path": DEFAULT_CACHE_MANIFEST_PATH.as_posix(),
             "manifest_sha256": "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90",
@@ -657,6 +718,7 @@ def published_frozen_config_fields() -> dict[str, Any]:
         "reranker": {
             "provider": "lexical",
             "model": "lexical",
+            "used_in_runtime": False,
             "instruct": DEFAULT_RERANK_INSTRUCT,
             "timeout_seconds": 12.0,
             "max_attempts": 2,
@@ -786,6 +848,8 @@ def load_frozen_config(
         raise ShadowError("frozen config is missing config_hash")
     if stored != computed:
         raise ShadowError("frozen config_hash does not match canonical digest")
+    if stored in RETIRED_CONFIG_HASHES:
+        raise ShadowError("retired shadow config hash is not executable")
     if require_published and stored != published_config_hash():
         raise ShadowError("frozen config_hash is not the published shadow digest")
     _validate_frozen_payload(payload)
@@ -809,6 +873,14 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
         raise ShadowError("frozen config must not claim a benchmark")
     if payload.get("retuning_allowed") is not False:
         raise ShadowError("frozen config must forbid retuning")
+    if payload.get("evaluation_mode") != EVALUATION_MODE:
+        raise ShadowError("frozen config must declare sealed candidate replay")
+    if payload.get("runtime_embedding_enabled") is not False:
+        raise ShadowError("frozen config must disable runtime embedding")
+    if payload.get("runtime_reranker_enabled") is not False:
+        raise ShadowError("frozen config must disable runtime reranker")
+    if payload.get("config_hash") in RETIRED_CONFIG_HASHES:
+        raise ShadowError("retired shadow config hash is not executable")
     cache = payload.get("candidate_cache") or {}
     if cache.get("not_live_production_retrieval") is not True:
         raise ShadowError("frozen config must mark candidate cache as frozen replay")
@@ -839,6 +911,22 @@ def credential_presence(*, repo_root: Path) -> list[dict[str, Any]]:
             }
         )
     return reports
+
+
+def require_chat_credential(*, repo_root: Path) -> dict[str, Any]:
+    reports = credential_presence(repo_root=repo_root)
+    chat = next((item for item in reports if item["key"] == CHAT_CREDENTIAL_KEY), None)
+    if chat is None or not chat.get("present"):
+        raise ShadowError("formal shadow requires DEEPSEEK_API_KEY")
+    return {"key": CHAT_CREDENTIAL_KEY, "source": chat["source"], "present": True}
+
+
+def forbid_runtime_embedding_call() -> None:
+    raise ShadowError("sealed candidate replay forbids embedding calls")
+
+
+def forbid_runtime_reranker_call() -> None:
+    raise ShadowError("sealed candidate replay forbids runtime reranker calls")
 
 
 def bind_chain_seal(
@@ -980,7 +1068,12 @@ def load_case_fixture(path: str | Path, *, allowlist: list[str], expected_hash: 
 
 def rank_hits(hits: list[dict[str, Any]], *, query_text: str, final_k: int) -> list[dict[str, Any]]:
     pool = prepare_rerank_pool(hits, arm="A_prod")
-    ranked, _meta = LexicalReranker().rerank(query_text, pool, top_k=final_k)
+    ranker = LexicalReranker()
+    ranked, meta = ranker.rerank(query_text, pool, top_k=final_k)
+    if str(meta.get("rerank_provider") or "") != "lexical":
+        raise ShadowError("scoring pool ranker must stay local lexical")
+    if int(meta.get("rerank_tokens") or 0) or str(meta.get("rerank_error_type") or ""):
+        raise ShadowError("scoring pool ranker performed a remote call")
     return ranked
 
 
@@ -1370,6 +1463,7 @@ def identity_payload(
         "benchmark_claim": False,
         "exposed_public_dev_shadow": True,
         "not_live_production_retrieval": True,
+        "evaluation_mode": EVALUATION_MODE,
     }
 
 
@@ -1455,6 +1549,7 @@ def run_preflight(
     verify_tag: bool = True,
     require_clean: bool = True,
     verify_runtime: bool = True,
+    require_chat_key: bool = True,
 ) -> dict[str, Any]:
     canonical_split(split)
     git = git_snapshot(repo_root)
@@ -1469,6 +1564,8 @@ def run_preflight(
     cache = verify_candidate_cache(repo_root=repo_root, config=frozen_config)
     if official_output_dir.exists() and any(official_output_dir.iterdir()):
         raise ShadowError("official shadow output directory already exists")
+    if require_chat_key:
+        require_chat_credential(repo_root=repo_root)
     credentials = credential_presence(repo_root=repo_root)
     expected_calls = int(frozen_config.field("call_budget", "remote_calls_expected") or 0)
     report = {
@@ -1497,7 +1594,10 @@ def run_preflight(
         "product_accuracy_claim": False,
         "benchmark_claim": False,
         "exposed_public_dev_shadow": True,
+        "evaluation_mode": EVALUATION_MODE,
         "not_live_production_retrieval": True,
+        "candidate_cache_generation": frozen_config.field("candidate_cache_generation"),
+        "runtime_components": frozen_config.field("runtime_components"),
         "billing_semantics": BILLING_SEMANTICS,
         "exactly_once": False,
     }
@@ -1604,6 +1704,7 @@ def run_shadow(
     allow_injected_generate: bool = False,
     live_generate: bool = False,
     strict_paths: bool = False,
+    require_chat_key: bool = True,
 ) -> dict[str, Any]:
     refuse_env_remote_override()
     if not confirm_exposed_shadow:
@@ -1638,6 +1739,7 @@ def run_shadow(
             verify_tag=verify_tag,
             require_clean=require_clean,
             verify_runtime=verify_runtime,
+            require_chat_key=require_chat_key,
         )
     if not allow_remote:
         raise ShadowError("formal scoring requires --allow-remote")
@@ -1705,6 +1807,7 @@ def run_shadow(
     if live_generate:
         if snapshot is None:
             raise ShadowError("live generate requires a frozen runtime snapshot")
+        require_chat_credential(repo_root=repo_root)
         active_generate: GenerateFn = build_live_generate(snapshot)
     elif generate_fn is None:
         raise ShadowError("live generate is only available through the CLI authorization path")

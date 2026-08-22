@@ -131,20 +131,23 @@ FinanceBench or LEDGER aggregate and is not a product-accuracy claim.
 
 ## LEDGER public/dev structured-citation shadow (tools only)
 
-Frozen harness for a future **exposed public/dev** shadow of structured
-citations. It is not held-out, not product accuracy, not a new LEDGER
-benchmark, and not rc5. `public_holdout` stays closed. Production RAG A
-is unchanged.
+Frozen harness for a future **exposed public/dev**
+`sealed_candidate_replay_shadow`. It evaluates current structured-answer
+generation and citation validation against a sealed Hybrid candidate pool. It
+is not current live production retrieval, not held-out, not product accuracy,
+not a new LEDGER benchmark, and not rc5. `public_holdout` stays closed.
+Production RAG A is unchanged.
 
 Frozen config:
-[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json)
-(`config_hash` `ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e`).
+[`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
 Candidate-cache identity:
 [`../data/eval_rag/structured_citation_shadow_cache_manifest.json`](../data/eval_rag/structured_citation_shadow_cache_manifest.json).
 CLI: `scripts/run_ledger_structured_citation_shadow.py`.
+Runtime embedding and reranker are disabled. Cache-generation lexical
+provenance stays immutable and is not compared to `MAS_RAG_RERANK_PROVIDER`.
 A future paid run requires both `--confirm-exposed-shadow` and
-`--allow-remote`, a verified frozen candidate cache, a clean worktree, and
-the exact official output directory. Preflight refuses `--allow-remote` and
-makes no provider calls. Do **not** run official `--preflight-only` or the
-paid public/dev shadow until a later explicit approval. The previous unused
-hash `3e834f0e…` never executed.
+`--allow-remote`, a verified frozen candidate cache, a present
+`DEEPSEEK_API_KEY`, a clean worktree, and the exact official output directory.
+Do **not** run official `--preflight-only` or the paid public/dev shadow until
+a later explicit approval. Retired hashes `3e834f0e…` and `ef497e8b…` never
+produced results.

@@ -63,6 +63,13 @@ image has been created. Latest published LumenFin remains
   `3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac`
   never executed and produced no results; the revised hash is
   `ef497e8b0d9ff237b21666291b98ade28a250a4e530e1e5cb57842508adb6d4e`.
+- Distinguished sealed candidate-cache provenance from runtime-enabled
+  components. This suite is `sealed_candidate_replay_shadow`, not a live
+  retrieval benchmark. Runtime embedding/reranker stay disabled; only DeepSeek
+  chat is enabled.   Hash `ef497e8b…` is
+  `retired_before_successful_preflight` (`executions=0`, `results=0`).
+  Current hash is
+  `4dd7519e13ad9eccf5a1df826fa9aa2469d5649ead8ec3c0216ee64d75f5b8ac`.
 
 ## 0.1.0rc4 — 2026-08-13
 
