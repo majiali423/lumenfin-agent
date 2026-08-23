@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
-    bootstrap_dotenv(ROOT)
+    bootstrap_dotenv(root=ROOT)
     probe = None
     try:
         parse_cli_guard(argv)
