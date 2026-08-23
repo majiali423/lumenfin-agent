@@ -30,12 +30,26 @@ from ..llm import LLMSettings
 from ..provider_resilience import classify_provider_exception
 from ..rag.dashscope_defaults import DEFAULT_DASHSCOPE_EMBEDDING_MODEL
 from ..rag.rerank import DEFAULT_RERANK_INSTRUCT, LexicalReranker
+from ..citation_alias import (
+    CITATION_ALIAS_PROTOCOL_VERSION,
+    LOCKED_FINAL_K,
+    CitationAliasError,
+    CitationAliasMap,
+    allowlist_from_window,
+    build_citation_alias_map,
+    build_final_evidence_window,
+    parse_and_map_citation_aliases,
+    prompt_hits_for_generator,
+    render_alias_passages,
+    window_identity_report,
+)
 from ..structured_answer import (
     CITATION_PATH_VALIDATION_FAILED,
     CITATION_SOURCE_STRUCTURED,
     CITATION_SOURCE_UNAVAILABLE,
     CITATION_VALIDATION_FAILED,
     STRUCTURED_ANSWER_SCHEMA_VERSION,
+    StructuredAnswerError,
 )
 from .financebench.constants import (
     DEFAULT_BM25_RRF_WEIGHT,
@@ -69,7 +83,8 @@ DEFAULT_OFFICIAL_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shad
 LEGACY_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v1"
 SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v2"
 SUPERSEDED_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v3"
-DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v4"
+SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v4"
+DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v5"
 CACHE_MANIFEST_SCHEMA = "lumenfin_ledger_structured_citation_shadow_cache.v1"
 PREVIOUS_UNUSED_CONFIG_HASH = (
     "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
@@ -100,6 +115,9 @@ V3_PREFLIGHT_SHA256 = (
 )
 V3_SHADOW_EXECUTION_COMMIT = (
     "fc77288d39c349b182ce94c0540237ef9d172ec0"
+)
+GOAL_C_CONFIG_HASH = (
+    "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24"
 )
 SUPPORT_METRIC_CONTRACT_VERSION = "citation_support_qrels_bound.v1"
 CLAIM_SUPPORT_NOT_EVALUABLE = "NOT_EVALUABLE"
@@ -178,9 +196,22 @@ RETIRED_CONFIG_HASHES = {
         "cli_exit_code": 0,
         "shadow_results": 1,
     },
+    GOAL_C_CONFIG_HASH: {
+        "status": "superseded_before_preflight",
+        "authorization_status": "SUPERSEDED_BEFORE_PREFLIGHT",
+        "retired_reason": "citation_alias_contract_changed",
+        "grant_status": "SUPERSEDED_BEFORE_PREFLIGHT",
+        "preflight_executions": 0,
+        "accepted_preflights": 0,
+        "shadow_executions": 0,
+        "results": 0,
+        "superseded_before_preflight": True,
+        "accepted_for_shadow_execution": False,
+        "shadow_results": 0,
+    },
 }
 EVALUATION_MODE = "sealed_candidate_replay_shadow"
-PREFLIGHT_SCHEMA_VERSION = "1.2"
+PREFLIGHT_SCHEMA_VERSION = "1.3"
 PREFLIGHT_OK = "PREFLIGHT_OK"
 PREFLIGHT_REQUIRED_FIELDS = (
     "kind",
@@ -206,6 +237,11 @@ PREFLIGHT_REQUIRED_FIELDS = (
     "qrels_nonempty_case_count",
     "qrels_identity_sha256",
     "support_metric_contract_version",
+    "alias_protocol_version",
+    "final_k",
+    "prompt_window_equals_alias_window",
+    "alias_window_equals_validator_window",
+    "raw_chunk_id_output_forbidden",
 )
 GENERATOR_FORBIDDEN_KEYS = frozenset(
     {
@@ -257,12 +293,13 @@ _SECRET_KEY_RE = re.compile(
 STRUCTURED_SHADOW_SYSTEM_PROMPT = (
     "Extract one KPI number from the numbered passages. "
     "Reply with JSON only: "
-    '{"answer": <string>, "citations": [<stable_chunk_id>], '
+    '{"answer": <string>, "citations": ["E01"], '
     '"structured_answer_schema_version": "1.0", '
     '"value": <number-or-null>, "abstain": <bool>}. '
-    "Citations must be exact chunk_id values from the passages. "
+    "Citations must be exact evidence aliases such as E01 from the passages. "
+    "Do not emit chunk ids, filenames, page numbers, or raw digits. "
     "Use null and abstain=true when the passages do not contain the answer. "
-    "Do not invent numbers or chunk ids."
+    "Do not invent numbers or aliases."
 )
 
 GenerateFn = Callable[[Mapping[str, Any]], str]
@@ -844,19 +881,25 @@ def published_frozen_config_fields() -> dict[str, Any]:
         "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         "preflight_required_fields": list(PREFLIGHT_REQUIRED_FIELDS),
         "predecessor_config": {
-            "config_hash": SEALED_V3_CONFIG_HASH,
-            "preflight_executions": 1,
-            "accepted_preflights": 1,
-            "shadow_executions": 1,
-            "results": 1,
-            "retired_reason": "evaluator_qrel_binding_changed",
-            "grant_status": "SUPERSEDED_BEFORE_NEXT_SHADOW",
-            "accepted_at_execution_commit": V3_SHADOW_EXECUTION_COMMIT,
-            "artifact_status": "PREFLIGHT_OK",
-            "artifact_sha256": V3_PREFLIGHT_SHA256,
+            "config_hash": GOAL_C_CONFIG_HASH,
+            "preflight_executions": 0,
+            "accepted_preflights": 0,
+            "shadow_executions": 0,
+            "results": 0,
+            "retired_reason": "citation_alias_contract_changed",
+            "grant_status": "SUPERSEDED_BEFORE_PREFLIGHT",
+            "superseded_before_preflight": True,
             "accepted_for_shadow_execution": False,
-            "cli_exit_code": 0,
-            "shadow_results": 1,
+            "shadow_results": 0,
+            "v4_preflight_executions": 0,
+            "v4_superseded_before_execution": True,
+        },
+        "citation_alias": {
+            "protocol_version": CITATION_ALIAS_PROTOCOL_VERSION,
+            "final_k": LOCKED_FINAL_K,
+            "raw_chunk_id_output_forbidden": True,
+            "wrapper_equivalence": ["[E01]"],
+            "numeric_guess_forbidden": True,
         },
         "not_live_production_retrieval": True,
         "candidate_cache_generation": {
@@ -991,6 +1034,7 @@ def published_frozen_config_fields() -> dict[str, Any]:
             "legacy_preflight_dirname": LEGACY_PREFLIGHT_OUTPUT_DIR.name,
             "superseded_preflight_dirname": SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name,
             "superseded_v2_preflight_dirname": SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR.name,
+            "superseded_v4_preflight_dirname": SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR.name,
             "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         },
         "call_budget": {
@@ -1120,11 +1164,17 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
         raise ShadowError("frozen config preflight required fields mismatch")
     output = payload.get("output") or {}
     if output.get("preflight_dirname") != DEFAULT_PREFLIGHT_OUTPUT_DIR.name:
-        raise ShadowError("frozen config preflight directory must be v4")
+        raise ShadowError("frozen config preflight directory must be v5")
     if output.get("superseded_preflight_dirname") != SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name:
         raise ShadowError("frozen config superseded preflight directory must be v3")
     if output.get("superseded_v2_preflight_dirname") != SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR.name:
         raise ShadowError("frozen config superseded v2 preflight directory must be v2")
+    if output.get("superseded_v4_preflight_dirname") != SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR.name:
+        raise ShadowError("frozen config superseded v4 preflight directory must be v4")
+    if str(payload.get("citation_alias", {}).get("protocol_version") or "") != CITATION_ALIAS_PROTOCOL_VERSION:
+        raise ShadowError("frozen config alias protocol mismatch")
+    if int(payload.get("citation_alias", {}).get("final_k") or 0) != LOCKED_FINAL_K:
+        raise ShadowError("frozen config final_k must stay 10")
     if str(payload.get("support_metric_contract_version") or "") != SUPPORT_METRIC_CONTRACT_VERSION:
         raise ShadowError("frozen config support metric contract mismatch")
     if str(payload.get("case_selection", {}).get("gold_identity_sha256") or "") != GOLD_IDENTITY_SHA256:
@@ -1360,15 +1410,82 @@ def query_texts_sha256(cases: list[Mapping[str, Any]]) -> str:
     return sha256_text(canonical_dumps(payload))
 
 
-def generation_case_view(case: Mapping[str, Any]) -> dict[str, Any]:
+def bind_citation_contract(
+    case: Mapping[str, Any],
+    *,
+    window: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    query_text = str(case.get("query_text") or "")
+
+    def rank(hits: list[dict[str, Any]], *, final_k: int) -> list[dict[str, Any]]:
+        return rank_hits(hits, query_text=query_text, final_k=final_k)
+
+    final_window = window or build_final_evidence_window(
+        list(case.get("hits") or []),
+        already_ranked=False,
+        rank=rank,
+    )
+    alias_map = build_citation_alias_map(
+        final_window,
+        case_id=str(case.get("case_id") or ""),
+        attempt_id=str(case.get("attempt_id") or case.get("case_id") or ""),
+        tenant_id=str(case.get("tenant_id") or ""),
+        session_id=str(case.get("session_id") or ""),
+    )
+    allowlist = allowlist_from_window(
+        final_window,
+        tenant_id=str(case.get("tenant_id") or ""),
+        session_id=str(case.get("session_id") or ""),
+    )
+    identity = window_identity_report(final_window, alias_map, allowlist)
+    return {
+        "window": final_window,
+        "alias_map": alias_map,
+        "allowlist": allowlist,
+        "identity": identity,
+        "generation_view": generation_case_view(case, contract={"window": final_window, "alias_map": alias_map}),
+    }
+
+
+def render_generation_view_prompt(view: Mapping[str, Any], *, max_document_chars: int = 4000) -> str:
+    pairs: list[tuple[str, str]] = []
+    for hit in list(view.get("hits") or []):
+        alias = str(hit.get("alias") or "").strip()
+        if not alias:
+            raise ShadowError("generation view is missing citation alias")
+        pairs.append((alias, str(hit.get("text") or "")))
+    rendered = render_alias_passages(
+        pairs,
+        query_text=str(view.get("query_text") or ""),
+        max_document_chars=max_document_chars,
+    )
+    if "chunk_id=" in rendered.casefold():
+        raise ShadowError("prompt leaked a stable chunk id")
+    return rendered
+
+
+def generation_case_view(
+    case: Mapping[str, Any],
+    *,
+    contract: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    if contract is None:
+        bound = bind_citation_contract(case)
+        return bound["generation_view"]
+    alias_map = contract["alias_map"]
+    window = contract["window"]
     view = {
         "case_id": str(case.get("case_id") or ""),
         "query_text": str(case.get("query_text") or ""),
-        "hits": list(case.get("hits") or []),
+        "hits": prompt_hits_for_generator(window, alias_map),
+        "alias_protocol_version": CITATION_ALIAS_PROTOCOL_VERSION,
         "tenant_id": str(case.get("tenant_id") or "default"),
         "session_id": str(case.get("session_id") or "shadow"),
     }
     assert_generation_case_has_no_gold(view)
+    blob = json.dumps(view, ensure_ascii=False)
+    if "chunk_id=" in blob.casefold():
+        raise ShadowError("generator case leaked a stable chunk id")
     return view
 
 
@@ -1778,13 +1895,30 @@ def score_case(
     latency_ms: float,
     generate_attempts: int,
     remote_calls: int,
+    contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    parsed = parse_answer_payload(raw)
-    ranked = rank_hits(
-        list(case["hits"]),
-        query_text=str(case.get("query_text") or ""),
-        final_k=ARM_SPECS["A_prod"].final_k,
-    )
+    bound = dict(contract or bind_citation_contract(case))
+    alias_map: CitationAliasMap = bound["alias_map"]
+    window = list(bound["window"])
+    parsed = parse_answer_payload(raw, allow_duplicate_citations=True)
+    alias_failed = False
+    try:
+        mapped = parse_and_map_citation_aliases(
+            parsed.get("citations") or [],
+            alias_map,
+            expected_case_id=str(case.get("case_id") or ""),
+            expected_attempt_id=str(case.get("attempt_id") or case.get("case_id") or ""),
+            expected_tenant_id=str(case.get("tenant_id") or ""),
+            expected_session_id=str(case.get("session_id") or ""),
+        )
+        parsed["citations"] = mapped
+        parsed["cited_chunk_ids"] = mapped
+    except (CitationAliasError, StructuredAnswerError):
+        mapped = []
+        parsed["citations"] = []
+        parsed["cited_chunk_ids"] = []
+        parsed["citation_source"] = CITATION_SOURCE_UNAVAILABLE
+        alias_failed = True
     metric = citation_support_metric(case)
     scored = score_generated_answer(
         gold_value=float(case["gold_value"]),
@@ -1793,18 +1927,29 @@ def score_case(
             "tenant_id": case.get("tenant_id") or "",
             "session_id": case.get("session_id") or "",
         },
-        hits=ranked,
+        hits=window,
         qrels=metric["qrels"] if metric["valid"] else {},
     )
     accounting = scored["citation_accounting"]
     citations = list(parsed.get("citations") or [])
     source = str(scored.get("citation_source") or CITATION_SOURCE_UNAVAILABLE)
+    if alias_failed:
+        source = CITATION_SOURCE_UNAVAILABLE
+        citations = []
     structured_present = (
-        source == CITATION_SOURCE_STRUCTURED and bool(citations) and bool(parsed.get("structured_answer_schema_version"))
+        source == CITATION_SOURCE_STRUCTURED
+        and bool(citations)
+        and bool(parsed.get("structured_answer_schema_version"))
+        and not alias_failed
     )
-    validation_failed = False
+    validation_failed = bool(alias_failed)
     if citations and int(accounting.get("valid_citation") or 0) == 0:
         validation_failed = True
+    if alias_failed:
+        accounting = dict(accounting)
+        accounting["citation_alias_error"] = "citation_alias_invalid"
+        accounting["unknown_citation"] = 0
+        accounting["valid_citation"] = 0
     stale = int(accounting.get("unverified_citation") or 0)
     if metric["valid"]:
         supported_claim = bool(scored.get("citation_supported"))
@@ -2323,6 +2468,16 @@ def _assert_preflight_success_contract(report: Mapping[str, Any]) -> None:
         raise ShadowError("preflight success must record qrels identity hash")
     if report.get("support_metric_contract_version") != SUPPORT_METRIC_CONTRACT_VERSION:
         raise ShadowError("preflight support metric contract mismatch")
+    if report.get("alias_protocol_version") != CITATION_ALIAS_PROTOCOL_VERSION:
+        raise ShadowError("preflight alias protocol mismatch")
+    if int(report.get("final_k") or 0) != LOCKED_FINAL_K:
+        raise ShadowError("preflight final_k must stay 10")
+    if report.get("prompt_window_equals_alias_window") is not True:
+        raise ShadowError("preflight prompt window does not match alias window")
+    if report.get("alias_window_equals_validator_window") is not True:
+        raise ShadowError("preflight alias window does not match validator window")
+    if report.get("raw_chunk_id_output_forbidden") is not True:
+        raise ShadowError("preflight must forbid raw chunk id output")
     executed_at = str(report.get("executed_at") or "")
     parsed = datetime.fromisoformat(executed_at.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -2338,23 +2493,29 @@ def assert_preflight_authorizes_shadow(
 ) -> None:
     v2 = repo_root / SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR / "preflight.json"
     v3 = repo_root / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-    v4 = repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-    if v2.is_file() and not v4.is_file():
+    v4 = repo_root / SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    v5 = repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    if v2.is_file() and not v5.is_file():
         raise ShadowError("v2 preflight cannot authorize a later execution commit")
-    if v3.is_file() and not v4.is_file():
+    if v3.is_file() and not v5.is_file():
         raise ShadowError("v3 preflight cannot authorize a later execution commit")
-    if not v4.is_file():
-        raise ShadowError("official shadow requires an accepted v4 preflight")
-    report = read_json_object(v4, field="preflight")
+    if v4.is_file() and not v5.is_file():
+        raise ShadowError("v4 preflight cannot authorize a later execution commit")
+    if not v5.is_file():
+        raise ShadowError("official shadow requires an accepted v5 preflight")
+    report = read_json_object(v5, field="preflight")
     if str(report.get("execution_commit") or "") != execution_commit:
-        raise ShadowError("v4 preflight cannot authorize a different execution commit")
+        raise ShadowError("v5 preflight cannot authorize a different execution commit")
     if report.get("case_binding_verified") is not True:
-        raise ShadowError("v4 preflight did not verify case binding")
+        raise ShadowError("v5 preflight did not verify case binding")
     if report.get("qrels_bound") is not True:
-        raise ShadowError("v4 preflight did not bind evaluator qrels")
+        raise ShadowError("v5 preflight did not bind evaluator qrels")
+    if report.get("alias_protocol_version") != CITATION_ALIAS_PROTOCOL_VERSION:
+        raise ShadowError("v5 preflight did not bind the citation alias protocol")
     if report.get("authorization_status") in {
         "SUPERSEDED_BEFORE_SHADOW",
         "SUPERSEDED_BEFORE_NEXT_SHADOW",
+        "SUPERSEDED_BEFORE_PREFLIGHT",
     }:
         raise ShadowError("superseded preflight cannot authorize shadow execution")
 
@@ -2399,6 +2560,19 @@ def run_preflight(
             snapshot_hash=str(frozen_config.field("dataset", "source_artifact_sha256") or ""),
             snapshot_path=public_dev_snapshot_relative(frozen_config).as_posix(),
         )
+        alias_windows = []
+        for case in bound_cases:
+            contract = bind_citation_contract(case)
+            alias_windows.append(contract["identity"])
+            if any("chunk_id" in hit for hit in contract["generation_view"]["hits"]):
+                raise ShadowError("generation view leaked a stable chunk id")
+        if not alias_windows or any(
+            not item["prompt_window_equals_alias_window"]
+            or not item["alias_window_equals_validator_window"]
+            or int(item["final_k"]) != LOCKED_FINAL_K
+            for item in alias_windows
+        ):
+            raise ShadowError("citation alias windows are inconsistent")
         hashes_after = _readonly_artifact_hashes(repo_root=repo_root, config=frozen_config)
         if hashes_before != hashes_after:
             raise ShadowError("readonly artifact hash changed during preflight")
@@ -2473,6 +2647,11 @@ def run_preflight(
             "qrels_nonempty_case_count": binding["qrels_nonempty_case_count"],
             "qrels_identity_sha256": binding["qrels_identity_sha256"],
             "support_metric_contract_version": SUPPORT_METRIC_CONTRACT_VERSION,
+            "alias_protocol_version": CITATION_ALIAS_PROTOCOL_VERSION,
+            "final_k": LOCKED_FINAL_K,
+            "prompt_window_equals_alias_window": True,
+            "alias_window_equals_validator_window": True,
+            "raw_chunk_id_output_forbidden": True,
             "not_live_production_retrieval": True,
             "candidate_cache_generation": frozen_config.field("candidate_cache_generation"),
             "runtime_components": frozen_config.field("runtime_components"),
@@ -2556,12 +2735,8 @@ def build_live_generate(snapshot: RuntimeSnapshot) -> GenerateFn:
     client = DeepSeekChatClient(settings)
 
     def generate(case: Mapping[str, Any]) -> str:
-        safe = generation_case_view(case)
-        user_prompt = build_generation_prompt(
-            query_text=str(safe.get("query_text") or ""),
-            hits=list(safe.get("hits") or []),
-            max_document_chars=4000,
-        )
+        safe = dict(case) if case.get("alias_protocol_version") else generation_case_view(case)
+        user_prompt = render_generation_view_prompt(safe)
         request = {
             "system": snapshot.prompt,
             "user": user_prompt,
@@ -2753,7 +2928,8 @@ def run_shadow(
             started = time.perf_counter()
             remote_before = active_probe.remote_request_count
             try:
-                raw = active_generate(generation_case_view(case))
+                contract = bind_citation_contract(case)
+                raw = active_generate(contract["generation_view"])
                 latency_ms = (time.perf_counter() - started) * 1000.0
                 remote_delta = active_probe.remote_request_count - remote_before
                 if block_network and remote_delta:
@@ -2764,6 +2940,7 @@ def run_shadow(
                     latency_ms=latency_ms,
                     generate_attempts=1,
                     remote_calls=1,
+                    contract=contract,
                 )
             except ShadowError:
                 raise

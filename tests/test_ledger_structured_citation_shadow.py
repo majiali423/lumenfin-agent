@@ -25,6 +25,7 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     DEFAULT_FROZEN_CONFIG_PATH,
     DEFAULT_PREFLIGHT_OUTPUT_DIR,
     EVALUATION_MODE,
+    GOAL_C_CONFIG_HASH,
     GOLD_IDENTITY_SHA256,
     INCOMPLETE_AUDIT_CONFIG_HASH,
     INCOMPLETE_V1_PREFLIGHT_SHA256,
@@ -40,6 +41,7 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     SUPERSEDED_PREFLIGHT_OUTPUT_DIR,
     SUPERSEDED_V2_CONFIG_HASH,
     SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR,
+    SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR,
     SUPPORT_METRIC_CONTRACT_VERSION,
     V3_PREFLIGHT_SHA256,
     V3_SHADOW_EXECUTION_COMMIT,
@@ -127,8 +129,8 @@ def _case(case_id: str, index: int, **kwargs: object) -> dict:
     return row
 
 
-def _structured_payload(index: int, *, source: str = "structured") -> str:
-    chunk = f"doc-{index}:p1:c0"
+def _structured_payload(index: int, *, source: str = "structured", citations: list[str] | None = None) -> str:
+    chunk = citations[0] if citations else "E01"
     if source == "unavailable":
         return json.dumps(
             {
@@ -371,26 +373,34 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.payload["predecessor_config"]["config_hash"],
-            SEALED_V3_CONFIG_HASH,
+            GOAL_C_CONFIG_HASH,
         )
-        self.assertEqual(loaded.payload["predecessor_config"]["preflight_executions"], 1)
-        self.assertEqual(loaded.payload["predecessor_config"]["accepted_preflights"], 1)
-        self.assertEqual(loaded.payload["predecessor_config"]["shadow_executions"], 1)
+        self.assertEqual(loaded.payload["predecessor_config"]["preflight_executions"], 0)
+        self.assertEqual(loaded.payload["predecessor_config"]["accepted_preflights"], 0)
+        self.assertEqual(loaded.payload["predecessor_config"]["shadow_executions"], 0)
         self.assertEqual(
             loaded.payload["predecessor_config"]["grant_status"],
-            "SUPERSEDED_BEFORE_NEXT_SHADOW",
+            "SUPERSEDED_BEFORE_PREFLIGHT",
         )
         self.assertEqual(
             loaded.payload["predecessor_config"]["retired_reason"],
-            "evaluator_qrel_binding_changed",
+            "citation_alias_contract_changed",
         )
-        self.assertEqual(
-            loaded.payload["predecessor_config"]["accepted_at_execution_commit"],
-            V3_SHADOW_EXECUTION_COMMIT,
-        )
-        self.assertEqual(loaded.payload["predecessor_config"]["artifact_sha256"], V3_PREFLIGHT_SHA256)
+        self.assertIs(loaded.payload["predecessor_config"]["superseded_before_preflight"], True)
+        self.assertEqual(loaded.payload["predecessor_config"]["v4_preflight_executions"], 0)
+        self.assertIs(loaded.payload["predecessor_config"]["v4_superseded_before_execution"], True)
         self.assertIs(loaded.payload["predecessor_config"]["accepted_for_shadow_execution"], False)
+        self.assertEqual(RETIRED_CONFIG_HASHES[GOAL_C_CONFIG_HASH]["shadow_executions"], 0)
         self.assertEqual(RETIRED_CONFIG_HASHES[SEALED_V3_CONFIG_HASH]["shadow_executions"], 1)
+        self.assertEqual(
+            loaded.payload["citation_alias"]["protocol_version"],
+            "citation_alias_protocol.v1",
+        )
+        self.assertEqual(loaded.payload["citation_alias"]["final_k"], 10)
+        self.assertEqual(
+            loaded.payload["output"]["superseded_v4_preflight_dirname"],
+            SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR.name,
+        )
         self.assertEqual(RETIRED_CONFIG_HASHES[SUPERSEDED_V2_CONFIG_HASH]["shadow_executions"], 0)
         self.assertEqual(
             loaded.payload["support_metric_contract_version"],
@@ -407,6 +417,11 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertNotEqual(loaded.config_hash, INCOMPLETE_AUDIT_CONFIG_HASH)
         self.assertNotEqual(loaded.config_hash, SUPERSEDED_V2_CONFIG_HASH)
         self.assertNotEqual(loaded.config_hash, SEALED_V3_CONFIG_HASH)
+        self.assertNotEqual(loaded.config_hash, GOAL_C_CONFIG_HASH)
+        self.assertEqual(
+            loaded.config_hash,
+            "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b",
+        )
         blob = path.read_text(encoding="utf-8")
         self.assertNotIn("sk-", blob)
         self.assertNotIn("Authorization", blob)
@@ -1345,6 +1360,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 INCOMPLETE_AUDIT_CONFIG_HASH,
                 SUPERSEDED_V2_CONFIG_HASH,
                 SEALED_V3_CONFIG_HASH,
+                GOAL_C_CONFIG_HASH,
             ):
                 payload["config_hash"] = retired_hash
                 retired = root / "retired.json"
@@ -1550,8 +1566,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertEqual(ledger["accepted_preflights"], 0)
         self.assertIs(ledger["accepted_for_shadow_execution"], False)
         fields = published_frozen_config_fields()
-        self.assertEqual(fields["predecessor_config"]["artifact_sha256"], V3_PREFLIGHT_SHA256)
+        self.assertEqual(fields["predecessor_config"]["config_hash"], GOAL_C_CONFIG_HASH)
         self.assertEqual(fields["output"]["preflight_dirname"], DEFAULT_PREFLIGHT_OUTPUT_DIR.name)
+        self.assertEqual(fields["output"]["superseded_v4_preflight_dirname"], SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR.name)
         self.assertEqual(fields["output"]["legacy_preflight_dirname"], LEGACY_PREFLIGHT_OUTPUT_DIR.name)
         self.assertEqual(fields["output"]["superseded_preflight_dirname"], SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name)
         v1 = ROOT / LEGACY_PREFLIGHT_OUTPUT_DIR / "preflight.json"
@@ -1737,9 +1754,37 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 )
             self.assertFalse((root / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
 
-    def test_v4_directory_is_fixed_and_preflight_binds_without_remote(self) -> None:
+    def test_v4_preflight_cannot_authorize_new_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            v4 = root / SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR
+            v4.mkdir(parents=True)
+            (v4 / "preflight.json").write_text(
+                json.dumps(
+                    {
+                        "kind": "preflight",
+                        "status": PREFLIGHT_OK,
+                        "execution_commit": "0" * 40,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ShadowError, "v4 preflight cannot authorize"):
+                assert_preflight_authorizes_shadow(
+                    repo_root=root,
+                    execution_commit="deadbeef" * 5,
+                )
+            self.assertFalse((root / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
+
+    def test_v5_directory_is_fixed_and_preflight_binds_without_remote(self) -> None:
         self.assertEqual(
             DEFAULT_PREFLIGHT_OUTPUT_DIR.name,
+            "ledger_structured_citation_shadow_preflight_v5",
+        )
+        self.assertEqual(
+            SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR.name,
             "ledger_structured_citation_shadow_preflight_v4",
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -1774,6 +1819,11 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 report["support_metric_contract_version"],
                 SUPPORT_METRIC_CONTRACT_VERSION,
             )
+            self.assertEqual(report["alias_protocol_version"], "citation_alias_protocol.v1")
+            self.assertEqual(report["final_k"], 10)
+            self.assertIs(report["prompt_window_equals_alias_window"], True)
+            self.assertIs(report["alias_window_equals_validator_window"], True)
+            self.assertIs(report["raw_chunk_id_output_forbidden"], True)
             self.assertFalse(official.exists())
             self.assertEqual(sorted(item.name for item in preflight_dir.iterdir()), ["preflight.json"])
 
@@ -1816,6 +1866,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         blob = json.dumps(views, ensure_ascii=False)
         self.assertNotIn("gold_value", blob)
         self.assertNotIn('"qrels":', blob)
+        self.assertNotIn("chunk_id=", blob)
+        self.assertTrue(all(hit.get("alias", "").startswith("E") for view in views for hit in view["hits"]))
+        self.assertLessEqual(max(len(view["hits"]) for view in views), 10)
 
 
 if __name__ == "__main__":

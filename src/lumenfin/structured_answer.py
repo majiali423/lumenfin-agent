@@ -208,34 +208,25 @@ def degraded_structured_answer(
 
 
 def allowed_evidence_from_state(state: Mapping[str, Any]) -> list[AllowedEvidence]:
+    from .citation_alias import (
+        allowlist_from_window,
+        build_final_evidence_window,
+        flatten_rag_evidence,
+    )
+
     tenant_id = str(state.get("rag_tenant_id") or state.get("tenant_id") or "")
     session_id = str(state.get("thread_id") or state.get("run_id") or "")
     verified_ids = set(_verified_chunk_ids(state))
-    allowed: list[AllowedEvidence] = []
-    seen: dict[str, AllowedEvidence] = {}
-    for hits in (state.get("rag_evidence") or {}).values():
-        if not isinstance(hits, list):
-            continue
-        for hit in hits:
-            if not isinstance(hit, dict):
-                continue
-            chunk_id = str(hit.get("chunk_id") or "").strip()
-            if not chunk_id:
-                continue
-            record = AllowedEvidence(
-                chunk_id=chunk_id,
-                tenant_id=str(hit.get("tenant_id") or tenant_id),
-                session_id=str(hit.get("session_id") or session_id),
-                verified=chunk_id in verified_ids,
-                stale=bool(hit.get("stale_repair_attempt")),
-            )
-            previous = seen.get(chunk_id)
-            if previous is not None and _identity(previous) != _identity(record):
-                raise StructuredAnswerError("citation allowlist has conflicting metadata")
-            if previous is None:
-                seen[chunk_id] = record
-                allowed.append(record)
-    return allowed
+    window = build_final_evidence_window(
+        flatten_rag_evidence(state.get("rag_evidence") if isinstance(state.get("rag_evidence"), Mapping) else {}),
+        already_ranked=True,
+    )
+    return allowlist_from_window(
+        window,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        verified_ids=verified_ids,
+    )
 
 
 def build_structured_answer_from_state(state: Mapping[str, Any]) -> StructuredAnswer:

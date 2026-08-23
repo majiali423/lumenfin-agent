@@ -88,7 +88,28 @@ a program-owned index→`chunk_id` map. Conversion failure emits no citation.
   `final_report` remains the prose field for old clients.
 - FinRun envelope `schema_version` (`FINRUN_SCHEMA_VERSION`) is independent of
   `structured_answer_schema_version` even when both currently equal `1.0`.
+- Internal citation aliases use `citation_alias_protocol.v1`. That version is
+  not FinRun `1.0` and is not `structured_answer_schema_version`.
 - Historical FinRun artifacts and sealed LEDGER aggregates are not rewritten.
+
+## Internal citation alias protocol
+
+Generator-facing evidence is a single ephemeral Top-10 window
+(`A_prod.final_k = 10`):
+
+```text
+sealed/cache candidates → lexical final Top-10 → E01…E10
+→ model returns aliases only → program maps to stable chunk IDs
+→ validator allowlist is the same Top-10
+```
+
+Allowed model tokens are `E01`…`E10`. The only wrapper equivalence is
+`[E01]` → `E01`. Bare digits, filenames, page anchors, and raw chunk IDs
+are rejected even when the ID is inside the current Top-10. Mixed
+valid/invalid lists fail closed. Duplicate aliases keep first-seen order.
+Alias maps are created per case / repair attempt and are not written into
+checkpoints or public citations. Public structured answers remain schema
+`1.0` with stable chunk IDs.
 
 ## FinRun mapping
 
@@ -169,8 +190,11 @@ one sealed shadow at `fc77288…` and is
 `SUPERSEDED_BEFORE_NEXT_SHADOW` (`evaluator_qrel_binding_changed`;
 `shadow_executions=1`). Do not rerun or resume this shadow. The v1
 official preflight artifact is `INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA`
-(sha256 `755a7f60…`). Sealed-run config hash is `54f6e300…`. Current
-published config hash is `5b259515…`. The next official preflight
-directory is
-`outputs/ledger_structured_citation_shadow_preflight_v4/` and has not
-been executed.
+(sha256 `755a7f60…`). Sealed-run config hash is `54f6e300…`. Goal C
+published hash `5b259515…` recorded `preflight_executions=0`,
+`shadow_executions=0`, and is `SUPERSEDED_BEFORE_PREFLIGHT`
+(`citation_alias_contract_changed`). V4 was never executed
+(`v4_preflight_executions=0`). Current published hash is `7db41564…`.
+The next official preflight directory is
+`outputs/ledger_structured_citation_shadow_preflight_v5/` and has not
+been executed. Do not rerun or rescore the sealed public/dev shadow.

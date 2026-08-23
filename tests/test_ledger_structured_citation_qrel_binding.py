@@ -20,6 +20,7 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     ShadowError,
     attach_evaluator_qrels,
     bind_cases_from_verified_cache,
+    bind_citation_contract,
     citation_support_metric,
     evaluation_case_view,
     generation_case_view,
@@ -70,12 +71,15 @@ class LedgerStructuredCitationQrelBindingTests(unittest.TestCase):
     def test_score_supported_and_unsupported_with_bound_qrels(self) -> None:
         gold = _case("pd-1", 1)
         gold = attach_evaluator_qrels(gold, gold["qrels"])
+        contract = bind_citation_contract(gold)
+        alias = contract["alias_map"].alias_for(gold["hits"][0]["chunk_id"])
         supported = score_case(
             gold,
-            raw=_structured_payload(1),
+            raw=_structured_payload(1, citations=[alias]),
             latency_ms=1,
             generate_attempts=1,
             remote_calls=1,
+            contract=contract,
         )
         self.assertTrue(supported["support_metric_valid"])
         self.assertTrue(supported["supported_claim"])
@@ -83,12 +87,15 @@ class LedgerStructuredCitationQrelBindingTests(unittest.TestCase):
         self.assertEqual(supported["claim_support"], "supported")
 
         wrong = attach_evaluator_qrels(_case("pd-1", 1), {"other-doc": 1})
+        wrong_contract = bind_citation_contract(wrong)
+        wrong_alias = wrong_contract["alias_map"].alias_for(wrong["hits"][0]["chunk_id"])
         unsupported = score_case(
             wrong,
-            raw=_structured_payload(1),
+            raw=_structured_payload(1, citations=[wrong_alias]),
             latency_ms=1,
             generate_attempts=1,
             remote_calls=1,
+            contract=wrong_contract,
         )
         self.assertTrue(unsupported["support_metric_valid"])
         self.assertFalse(unsupported["supported_claim"])

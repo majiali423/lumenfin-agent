@@ -24,9 +24,11 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     PROTOCOL_COMMIT,
     SEAL_TAG,
     SEAL_TARGET_COMMIT,
+    GOAL_C_CONFIG_HASH,
     SEALED_V3_CONFIG_HASH,
     SUPERSEDED_PREFLIGHT_OUTPUT_DIR,
     SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR,
+    SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR,
     NetworkProbe,
     INCOMPLETE_V1_PREFLIGHT_SHA256,
     V2_PREFLIGHT_SHA256,
@@ -39,7 +41,10 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
 
 RESULT_PATH = ROOT / "data" / "eval_rag" / "ledger_structured_citation_shadow_result.json"
 AUDIT_PATH = ROOT / "data" / "eval_rag" / "ledger_structured_citation_shadow_audit.json"
-EXPECTED_PUBLISHED_CONFIG_HASH = "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24"
+GOAL_C_PUBLISHED_CONFIG_HASH = GOAL_C_CONFIG_HASH
+CURRENT_PUBLISHED_CONFIG_HASH = (
+    "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b"
+)
 OFFICIAL_DIR = ROOT / DEFAULT_OFFICIAL_OUTPUT_DIR
 EXPECTED_CONFIG_HASH = "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05"
 EXPECTED_EXECUTION_COMMIT = "fc77288d39c349b182ce94c0540237ef9d172ec0"
@@ -141,7 +146,8 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertEqual(provenance["protocol_ancestor"], PROTOCOL_COMMIT)
         self.assertEqual(provenance["config_hash"], EXPECTED_CONFIG_HASH)
         self.assertNotEqual(provenance["config_hash"], published_config_hash())
-        self.assertEqual(published_config_hash(), EXPECTED_PUBLISHED_CONFIG_HASH)
+        self.assertEqual(published_config_hash(), CURRENT_PUBLISHED_CONFIG_HASH)
+        self.assertNotEqual(published_config_hash(), GOAL_C_PUBLISHED_CONFIG_HASH)
         self.assertEqual(provenance["preflight_sha256"], EXPECTED_V3_PREFLIGHT)
         self.assertEqual(provenance["preflight_schema_version"], "1.1")
         self.assertIs(provenance["preflight_case_binding_verified"], True)
@@ -258,7 +264,7 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertEqual(audit["invalid_reason"], "qrels_not_bound_to_official_scorer")
         self.assertIs(audit["structured_citation_quality_gate_passed"], False)
         self.assertEqual(audit["sealed_config_hash"], EXPECTED_CONFIG_HASH)
-        self.assertEqual(audit["published_config_hash"], EXPECTED_PUBLISHED_CONFIG_HASH)
+        self.assertEqual(audit["published_config_hash"], GOAL_C_PUBLISHED_CONFIG_HASH)
         self.assertEqual(audit["v3_preflight"]["shadow_executions_under_v3"], 1)
         self.assertIs(audit["v4_preflight"]["executed"], False)
         self.assertEqual(audit["v4_preflight"]["cases_executed"], 0)
@@ -266,11 +272,16 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertIs(audit["mechanism_diagnosis"]["official"], False)
         self.assertIs(audit["mechanism_diagnosis"]["not_a_repaired_score"], True)
 
-    def test_v4_preflight_directory_is_fixed_and_not_executed(self) -> None:
+    def test_v4_and_v5_preflight_directories_are_fixed_and_not_executed(self) -> None:
         self.assertEqual(
-            DEFAULT_PREFLIGHT_OUTPUT_DIR.as_posix(),
+            SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR.as_posix(),
             "outputs/ledger_structured_citation_shadow_preflight_v4",
         )
+        self.assertEqual(
+            DEFAULT_PREFLIGHT_OUTPUT_DIR.as_posix(),
+            "outputs/ledger_structured_citation_shadow_preflight_v5",
+        )
+        self.assertFalse((ROOT / SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR / "preflight.json").is_file())
         self.assertFalse((ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json").is_file())
 
     def test_ledger_has_no_secrets_paths_queries_or_gold(self) -> None:
@@ -387,7 +398,8 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertEqual(provenance["config_hash"], EXPECTED_CONFIG_HASH)
         self.assertEqual(provenance["config_hash"], SEALED_V3_CONFIG_HASH)
         self.assertEqual(config.config_hash, published_config_hash())
-        self.assertEqual(config.config_hash, EXPECTED_PUBLISHED_CONFIG_HASH)
+        self.assertEqual(config.config_hash, CURRENT_PUBLISHED_CONFIG_HASH)
+        self.assertNotEqual(config.config_hash, GOAL_C_PUBLISHED_CONFIG_HASH)
         self.assertNotEqual(config.config_hash, provenance["config_hash"])
         manifest = ROOT / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
         self.assertEqual(sha256_normalized_file(manifest), provenance["cache_manifest_sha256"])

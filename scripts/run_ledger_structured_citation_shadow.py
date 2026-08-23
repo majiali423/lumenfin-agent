@@ -7,10 +7,11 @@ LEDGER benchmark, and not rc5. Formal scoring requires both
 verified candidate-cache prefix; it does not rebuild the cache and does not
 open public_holdout. Preflight refuses remote authorization and makes no
 provider calls. Official preflight writes only
-outputs/ledger_structured_citation_shadow_preflight_v4/. The accepted v3
-preflight authorized one sealed shadow and cannot authorize a later
-execution commit. This stage does not run official preflight or the paid
-public/dev shadow.
+outputs/ledger_structured_citation_shadow_preflight_v5/. Goal C config
+never executed a preflight or shadow. The accepted v3 preflight
+authorized one sealed shadow and cannot authorize a later execution
+commit. V4 was never executed. This stage does not run official
+preflight or the paid public/dev shadow.
 """
 from __future__ import annotations
 

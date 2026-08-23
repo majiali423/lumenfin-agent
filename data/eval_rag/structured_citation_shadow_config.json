@@ -29,7 +29,7 @@
     "download_forbidden": true,
     "empty_is_not_unsupported": true
   },
-  "preflight_schema_version": "1.2",
+  "preflight_schema_version": "1.3",
   "preflight_required_fields": [
     "kind",
     "preflight_schema_version",
@@ -53,22 +53,35 @@
     "qrels_case_count",
     "qrels_nonempty_case_count",
     "qrels_identity_sha256",
-    "support_metric_contract_version"
+    "support_metric_contract_version",
+    "alias_protocol_version",
+    "final_k",
+    "prompt_window_equals_alias_window",
+    "alias_window_equals_validator_window",
+    "raw_chunk_id_output_forbidden"
   ],
   "predecessor_config": {
-    "config_hash": "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05",
-    "preflight_executions": 1,
-    "accepted_preflights": 1,
-    "shadow_executions": 1,
-    "results": 1,
-    "retired_reason": "evaluator_qrel_binding_changed",
-    "grant_status": "SUPERSEDED_BEFORE_NEXT_SHADOW",
-    "accepted_at_execution_commit": "fc77288d39c349b182ce94c0540237ef9d172ec0",
-    "artifact_status": "PREFLIGHT_OK",
-    "artifact_sha256": "b49a3e705b94b01fcf4dbe926d34642db18f8ad39c7adcf62d0f415bea5074eb",
+    "config_hash": "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24",
+    "preflight_executions": 0,
+    "accepted_preflights": 0,
+    "shadow_executions": 0,
+    "results": 0,
+    "retired_reason": "citation_alias_contract_changed",
+    "grant_status": "SUPERSEDED_BEFORE_PREFLIGHT",
+    "superseded_before_preflight": true,
     "accepted_for_shadow_execution": false,
-    "cli_exit_code": 0,
-    "shadow_results": 1
+    "shadow_results": 0,
+    "v4_preflight_executions": 0,
+    "v4_superseded_before_execution": true
+  },
+  "citation_alias": {
+    "protocol_version": "citation_alias_protocol.v1",
+    "final_k": 10,
+    "raw_chunk_id_output_forbidden": true,
+    "wrapper_equivalence": [
+      "[E01]"
+    ],
+    "numeric_guess_forbidden": true
   },
   "not_live_production_retrieval": true,
   "candidate_cache_generation": {
@@ -182,7 +195,7 @@
   },
   "prompts": {
     "version": "ledger_structured_citation_shadow_v1",
-    "system_prompt_sha256": "a60bd04d0014ee749a335ce6295ee36843aee3f5172a5b7c7fce1cd530ae690d"
+    "system_prompt_sha256": "fae05b0a911be0ba59210aa73a9e666cb3f8d21e613896afe32336eebe9913da"
   },
   "timeouts": {
     "chat_timeout_seconds": 45.0,
@@ -203,11 +216,12 @@
   "output": {
     "schema_version": "lumenfin_ledger_structured_citation_shadow.v1",
     "official_dirname": "ledger_structured_citation_shadow_v1",
-    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v4",
+    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v5",
     "legacy_preflight_dirname": "ledger_structured_citation_shadow_preflight_v1",
     "superseded_preflight_dirname": "ledger_structured_citation_shadow_preflight_v3",
     "superseded_v2_preflight_dirname": "ledger_structured_citation_shadow_preflight_v2",
-    "preflight_schema_version": "1.2"
+    "superseded_v4_preflight_dirname": "ledger_structured_citation_shadow_preflight_v4",
+    "preflight_schema_version": "1.3"
   },
   "call_budget": {
     "cases_total": 50,
@@ -269,5 +283,5 @@
       "config_hash"
     ]
   },
-  "config_hash": "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24"
+  "config_hash": "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b"
 }

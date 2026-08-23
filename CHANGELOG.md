@@ -116,9 +116,19 @@ image has been created. Latest published LumenFin remains
   `data/eval_rag/ledger_structured_citation_shadow_audit.json`. Current
   hash is
   `5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24`.
+  That Goal C config recorded `preflight_executions=0` and
+  `shadow_executions=0` and is `SUPERSEDED_BEFORE_PREFLIGHT`
+  (`citation_alias_contract_changed`). V4 was never executed.
+- Bound generator citations to an ephemeral Top-10 alias window
+  (`citation_alias_protocol.v1`, `E01`…`E10`). Prompt, alias map, and
+  validator share one `final_k=10` identity. Models may not emit raw
+  chunk IDs. Public structured answers remain schema `1.0` with stable
+  IDs. Current published hash is
+  `7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b`.
   The next official preflight directory is
-  `outputs/ledger_structured_citation_shadow_preflight_v4/` and has not
-  been executed. Do not rerun public/dev to refresh numbers.
+  `outputs/ledger_structured_citation_shadow_preflight_v5/` and has not
+  been executed. Do not rerun public/dev to refresh numbers. The sealed
+  18 unknown citations are not reclassified.
 
 ## 0.1.0rc4 — 2026-08-13
 

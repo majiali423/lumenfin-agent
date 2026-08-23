@@ -68,7 +68,7 @@ def _require_finite_float(value: object, *, field: str) -> float:
     return number
 
 
-def parse_answer_payload(raw: str) -> dict[str, Any]:
+def parse_answer_payload(raw: str, *, allow_duplicate_citations: bool = False) -> dict[str, Any]:
     text = str(raw or "").strip()
     if not text:
         raise HoldoutError("LEDGER e2e generator returned empty text")
@@ -96,7 +96,7 @@ def parse_answer_payload(raw: str) -> dict[str, Any]:
     if not isinstance(cited, list) or any(not str(item).strip() for item in cited):
         raise HoldoutError("LEDGER e2e cited_chunk_ids must be non-empty strings")
     cited_ids = [str(item).strip() for item in cited]
-    if len(set(cited_ids)) != len(cited_ids):
+    if not allow_duplicate_citations and len(set(cited_ids)) != len(cited_ids):
         raise HoldoutError("LEDGER e2e cited_chunk_ids contain duplicates")
     schema_version = str(payload.get("structured_answer_schema_version") or "")
     if schema_version and schema_version != STRUCTURED_ANSWER_SCHEMA_VERSION:

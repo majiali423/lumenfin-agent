@@ -192,7 +192,7 @@ Contract-only. Not product accuracy, RAG recall, FinanceBench, or LEDGER
 benchmark. Refuses `public_holdout` and remote providers.
 
 ```powershell
-python -m unittest tests.test_structured_citation_canary tests.test_structured_answer tests.test_claim_binding tests.test_finrun_export tests.test_ledger_e2e_canary -v
+python -m unittest tests.test_citation_alias tests.test_structured_citation_canary tests.test_structured_answer tests.test_claim_binding tests.test_finrun_export tests.test_ledger_e2e_canary -v
 python scripts/run_structured_citation_canary.py --output-dir outputs/structured_citation_canary_v1
 ```
 
@@ -227,10 +227,12 @@ diagnosis, not an official repaired score. Do not rerun public/dev to
 refresh numbers. Audit:
 [`../data/eval_rag/ledger_structured_citation_shadow_audit.json`](../data/eval_rag/ledger_structured_citation_shadow_audit.json).
 v3 authorized that one sealed shadow and cannot authorize a later
-commit. Current published hash is `5b259515…`; next preflight is v4
-and has not been executed. rc5 must not claim reliable structured
-citations from this run.
+commit. Goal C hash `5b259515…` never executed (`preflight=0`,
+`shadow=0`) and is superseded before preflight. V4 was never executed.
+Current published hash is `7db41564…`; next preflight is v5 and has not
+been executed. rc5 must not claim reliable structured citations from
+this run.
 
 ```powershell
-python -m unittest tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_result tests.test_ledger_structured_citation_qrel_binding tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
+python -m unittest tests.test_citation_alias tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_result tests.test_ledger_structured_citation_qrel_binding tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
 ```

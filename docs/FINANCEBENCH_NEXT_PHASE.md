@@ -23,9 +23,11 @@ sealed shadow and is `SUPERSEDED_BEFORE_NEXT_SHADOW`. Recorded
 `supported_claims=0` is not a valid support rate (qrels were not bound
 to the official scorer). Do not publish a repaired support score or
 rerun public/dev to refresh numbers. Official raw files stay under
-`outputs/ledger_structured_citation_shadow_v1/`. The next preflight
-directory is `outputs/ledger_structured_citation_shadow_preflight_v4/`
-and has not been executed.
+`outputs/ledger_structured_citation_shadow_v1/`. Goal C hash
+`5b259515…` never executed and is superseded before preflight. V4 was
+never executed. The next preflight directory is
+`outputs/ledger_structured_citation_shadow_preflight_v5/` and has not
+been executed. Current published hash is `7db41564…`.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.

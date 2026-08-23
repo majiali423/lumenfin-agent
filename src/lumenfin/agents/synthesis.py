@@ -193,17 +193,29 @@ class SynthesisMixin:
             return update
 
         doc_context = ""
-        rag_citation_lines: list[str] = []
         if state.get("rag_evidence"):
-            for company, hits in state["rag_evidence"].items():
-                for hit in hits[:3]:
-                    rag_citation_lines.append(
-                        f"- [{company}] {hit.get('citation')} ({hit.get('retrieval_method')}): "
-                        f"{hit.get('text', '')[:240]}"
-                    )
-        if rag_citation_lines:
-            doc_context = "\nMilvus hybrid RAG evidence (with citations):\n" + "\n".join(rag_citation_lines)
-        elif state.get("document_contexts"):
+            from ..citation_alias import (
+                build_citation_alias_map,
+                build_final_evidence_window,
+                flatten_rag_evidence,
+                render_prompt_evidence,
+            )
+
+            window = build_final_evidence_window(
+                flatten_rag_evidence(state.get("rag_evidence")),
+                already_ranked=True,
+            )
+            if window:
+                alias_map = build_citation_alias_map(
+                    window,
+                    case_id=str(state.get("thread_id") or state.get("run_id") or ""),
+                    attempt_id=str(state.get("repair_attempt_id") or state.get("thread_id") or "attempt-1"),
+                    tenant_id=str(state.get("rag_tenant_id") or state.get("tenant_id") or ""),
+                    session_id=str(state.get("thread_id") or state.get("run_id") or ""),
+                )
+                rendered = render_prompt_evidence(window, alias_map, max_document_chars=240)
+                doc_context = "\nMilvus hybrid RAG evidence (with citations):\n" + rendered
+        if not doc_context and state.get("document_contexts"):
             excerpts = [d["excerpt"][:600] for d in state["document_contexts"] if d.get("excerpt")]
             if excerpts:
                 doc_context = "\nUploaded PDF excerpts:\n" + "\n---\n".join(excerpts)
