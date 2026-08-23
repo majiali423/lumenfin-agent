@@ -16,6 +16,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from lumenfin.env_bootstrap import bootstrap_dotenv
 from lumenfin.eval.synthetic_alias_compliance import (
     CanaryError,
     NetworkProbe,
@@ -51,12 +52,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     configure_stdio_utf8()
-    probe = NetworkProbe()
-    probe.install()
+    bootstrap_dotenv(ROOT)
+    probe = None
     try:
         parse_cli_guard(argv)
         parser = build_parser()
         args = parser.parse_args(argv)
+        probe = NetworkProbe() if args.preflight_only else None
+        if probe is not None:
+            probe.install()
         config = load_frozen_config(
             ROOT / "data" / "eval_rag" / "synthetic_alias_compliance_config.json",
             repo_root=ROOT,
@@ -76,10 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         print(redact_structured_error(str(exc)), file=sys.stderr)
         return 2
     finally:
-        probe.remove()
-        if probe.remote_request_count:
-            print("synthetic alias compliance made a remote call", file=sys.stderr)
-            return 1
+        if probe is not None:
+            probe.remove()
+            if probe.remote_request_count:
+                print("synthetic alias compliance made a remote call", file=sys.stderr)
+                return 1
 
 
 if __name__ == "__main__":
