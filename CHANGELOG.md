@@ -94,8 +94,11 @@ image has been created. Latest published LumenFin remains
   commit. The next official preflight directory is
   `outputs/ledger_structured_citation_shadow_preflight_v3/` with schema
   `1.1` case-binding fields. Hash `49e4f63f…` recorded one accepted
-  preflight and zero shadow results. Current hash is
-  `54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05`.
+  preflight and zero shadow results. Hash
+  `54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05`
+  authorized the one sealed public/dev shadow and is
+  `SUPERSEDED_BEFORE_NEXT_SHADOW` (`evaluator_qrel_binding_changed`;
+  `shadow_executions=1`).
 - Sealed the exposed public/dev structured-citation shadow as
   `RECORDED_COMPLETE` in
   `data/eval_rag/ledger_structured_citation_shadow_result.json`.
@@ -105,6 +108,17 @@ image has been created. Latest published LumenFin remains
 - Hardened the shadow result seal so CI verifies the tracked ledger
   without the gitignored raw output directory. File mtime is stored as
   inferred, non-authoritative `execution_time`.
+- Bound evaluator-only snapshot qrels to future citation-support
+  scoring. Cache remains the only candidate-hit source. Empty or unbound
+  qrels are `NOT_EVALUABLE`, not unsupported. Sealed raw
+  `supported_claims=0` is unchanged and is not a valid support rate.
+  Independent audit:
+  `data/eval_rag/ledger_structured_citation_shadow_audit.json`. Current
+  hash is
+  `5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24`.
+  The next official preflight directory is
+  `outputs/ledger_structured_citation_shadow_preflight_v4/` and has not
+  been executed. Do not rerun public/dev to refresh numbers.
 
 ## 0.1.0rc4 — 2026-08-13
 

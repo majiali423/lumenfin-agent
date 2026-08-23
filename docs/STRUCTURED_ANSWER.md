@@ -141,12 +141,21 @@ Raw official files stay gitignored under
 `execution_time` is an inferred `summary.json` mtime and is not
 authoritative. Execution gate passed.
 Structured-citation quality gate failed: 22/50 structured answers, 18/29
-unknown citations, and 11 valid citations that did not form a
-gold-supported claim. This is not held-out, not product accuracy, not
-live retrieval, not a LEDGER benchmark, and not rc5. Do not retune
-prompt or RAG from this exposed result. Possible follow-up audits
-(free-form chunk IDs, evaluator strictness, candidate/gold mismatch,
-claim-citation binding) are hypotheses only.
+unknown citations, and 11 citation-validation failures. The recorded
+`supported_claims=0` / `citation_support_rate=0.0` is the raw sealed
+fact, but it is **not** a valid evidence-support rate: the official
+scorer received empty qrels. Do not read that zero as “11 valid
+citations were unsupported.” A later read-only mechanism diagnosis
+found 7 valid citations that the existing `citation_supported()` check
+would accept once snapshot qrels are bound; that count is **not** an
+official repaired score. Do not rerun or rescore public/dev to refresh
+numbers. See
+[`../data/eval_rag/ledger_structured_citation_shadow_audit.json`](../data/eval_rag/ledger_structured_citation_shadow_audit.json).
+This is not held-out, not product accuracy, not live retrieval, not a
+LEDGER benchmark, and not rc5. Do not retune prompt or RAG from this
+exposed result. Possible follow-up audits (free-form chunk IDs,
+evaluator strictness, candidate/gold mismatch, claim-citation binding)
+are hypotheses only.
 
 Frozen config:
 [`../data/eval_rag/structured_citation_shadow_config.json`](../data/eval_rag/structured_citation_shadow_config.json).
@@ -155,6 +164,13 @@ Candidate-cache identity:
 CLI: `scripts/run_ledger_structured_citation_shadow.py`.
 Runtime embedding and reranker stay disabled. Gold values never enter the
 generator prompt. The accepted v2 preflight (`f3179e05…` at `f69f133…`)
-is `SUPERSEDED_BEFORE_SHADOW`. Do not rerun or resume this shadow. The v1
+is `SUPERSEDED_BEFORE_SHADOW`. The accepted v3 preflight authorized the
+one sealed shadow at `fc77288…` and is
+`SUPERSEDED_BEFORE_NEXT_SHADOW` (`evaluator_qrel_binding_changed`;
+`shadow_executions=1`). Do not rerun or resume this shadow. The v1
 official preflight artifact is `INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA`
-(sha256 `755a7f60…`). Current config hash is `54f6e300…`.
+(sha256 `755a7f60…`). Sealed-run config hash is `54f6e300…`. Current
+published config hash is `5b259515…`. The next official preflight
+directory is
+`outputs/ledger_structured_citation_shadow_preflight_v4/` and has not
+been executed.

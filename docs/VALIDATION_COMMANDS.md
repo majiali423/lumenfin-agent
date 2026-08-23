@@ -219,10 +219,18 @@ Raw outputs stay gitignored under
 `status` or `executed_at` field; the ledger uses
 `seal_status=RECORDED_COMPLETE`. `execution_time` is inferred from
 `summary.json` mtime and is not authoritative.
-22/50 structured answers, 18/29 unknown citations, and 11 valid
-citations without a gold-supported claim. rc5 must not claim reliable
-structured citations from this run.
+22/50 structured answers, 18/29 unknown citations, and 11
+citation-validation failures. Recorded `supported_claims=0` is the raw
+sealed fact, not a valid support rate (official scorer received empty
+qrels). The “7 might be supported” count is a read-only mechanism
+diagnosis, not an official repaired score. Do not rerun public/dev to
+refresh numbers. Audit:
+[`../data/eval_rag/ledger_structured_citation_shadow_audit.json`](../data/eval_rag/ledger_structured_citation_shadow_audit.json).
+v3 authorized that one sealed shadow and cannot authorize a later
+commit. Current published hash is `5b259515…`; next preflight is v4
+and has not been executed. rc5 must not claim reliable structured
+citations from this run.
 
 ```powershell
-python -m unittest tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_result tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
+python -m unittest tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_result tests.test_ledger_structured_citation_qrel_binding tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
 ```

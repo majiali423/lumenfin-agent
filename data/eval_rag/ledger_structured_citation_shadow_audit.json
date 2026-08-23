@@ -1,0 +1,43 @@
+{
+  "schema_version": "lumenfin_ledger_structured_citation_shadow_audit.v1",
+  "kind": "sealed_result_audit_addendum",
+  "sealed_result": "data/eval_rag/ledger_structured_citation_shadow_result.json",
+  "execution_commit": "fc77288d39c349b182ce94c0540237ef9d172ec0",
+  "sealed_config_hash": "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05",
+  "published_config_hash": "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24",
+  "raw_metrics_modified": false,
+  "raw_supported_claims": 0,
+  "raw_citation_support_rate": 0.0,
+  "citation_support_metric_valid": false,
+  "invalid_reason": "qrels_not_bound_to_official_scorer",
+  "structured_citation_quality_gate_passed": false,
+  "quality_gate_still_fails_without_support_metric": {
+    "unknown_citations": 18,
+    "citation_validation_failed": 11
+  },
+  "interpretation": {
+    "raw_zero_supported_is_recorded_fact": true,
+    "raw_zero_supported_is_valid_support_rate": false,
+    "empty_qrels_must_not_be_read_as_all_unsupported": true,
+    "repaired_official_score_forbidden": true,
+    "public_dev_rescore_forbidden": true
+  },
+  "mechanism_diagnosis": {
+    "official": false,
+    "not_a_repaired_score": true,
+    "method": "read_only_counterfactual_against_existing_citation_supported_membership",
+    "note": "A later scorer with bound snapshot qrels would accept 7 of the 11 valid citations. That count is a mechanism diagnosis only. It is not an official repaired score and must not be published as one. Do not rerun public/dev to refresh numbers."
+  },
+  "v3_preflight": {
+    "status": "superseded_before_next_shadow",
+    "reason": "evaluator_qrel_binding_changed",
+    "shadow_executions_under_v3": 1,
+    "cannot_authorize_future_shadow": true
+  },
+  "v4_preflight": {
+    "directory": "outputs/ledger_structured_citation_shadow_preflight_v4",
+    "executed": false,
+    "cases_executed": 0,
+    "remote_request_count": 0
+  }
+}

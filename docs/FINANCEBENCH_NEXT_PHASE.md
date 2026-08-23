@@ -18,8 +18,14 @@ live retrieval benchmark, not a new LEDGER benchmark, not held-out, and not
 an rc5 citation claim. Runtime embedding/reranker stay disabled. Do not
 rerun or resume. Do not open `public_holdout`. Do not retune from this
 exposed public/dev result. The accepted v2 preflight is
-`SUPERSEDED_BEFORE_SHADOW`. Official raw files stay under
-`outputs/ledger_structured_citation_shadow_v1/`.
+`SUPERSEDED_BEFORE_SHADOW`. The accepted v3 preflight authorized one
+sealed shadow and is `SUPERSEDED_BEFORE_NEXT_SHADOW`. Recorded
+`supported_claims=0` is not a valid support rate (qrels were not bound
+to the official scorer). Do not publish a repaired support score or
+rerun public/dev to refresh numbers. Official raw files stay under
+`outputs/ledger_structured_citation_shadow_v1/`. The next preflight
+directory is `outputs/ledger_structured_citation_shadow_preflight_v4/`
+and has not been executed.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.

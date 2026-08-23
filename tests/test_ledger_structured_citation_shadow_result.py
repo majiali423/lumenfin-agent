@@ -24,7 +24,9 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     PROTOCOL_COMMIT,
     SEAL_TAG,
     SEAL_TARGET_COMMIT,
+    SEALED_V3_CONFIG_HASH,
     SUPERSEDED_PREFLIGHT_OUTPUT_DIR,
+    SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR,
     NetworkProbe,
     INCOMPLETE_V1_PREFLIGHT_SHA256,
     V2_PREFLIGHT_SHA256,
@@ -36,6 +38,8 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
 )
 
 RESULT_PATH = ROOT / "data" / "eval_rag" / "ledger_structured_citation_shadow_result.json"
+AUDIT_PATH = ROOT / "data" / "eval_rag" / "ledger_structured_citation_shadow_audit.json"
+EXPECTED_PUBLISHED_CONFIG_HASH = "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24"
 OFFICIAL_DIR = ROOT / DEFAULT_OFFICIAL_OUTPUT_DIR
 EXPECTED_CONFIG_HASH = "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05"
 EXPECTED_EXECUTION_COMMIT = "fc77288d39c349b182ce94c0540237ef9d172ec0"
@@ -136,7 +140,8 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertEqual(provenance["execution_commit"], EXPECTED_EXECUTION_COMMIT)
         self.assertEqual(provenance["protocol_ancestor"], PROTOCOL_COMMIT)
         self.assertEqual(provenance["config_hash"], EXPECTED_CONFIG_HASH)
-        self.assertEqual(provenance["config_hash"], published_config_hash())
+        self.assertNotEqual(provenance["config_hash"], published_config_hash())
+        self.assertEqual(published_config_hash(), EXPECTED_PUBLISHED_CONFIG_HASH)
         self.assertEqual(provenance["preflight_sha256"], EXPECTED_V3_PREFLIGHT)
         self.assertEqual(provenance["preflight_schema_version"], "1.1")
         self.assertIs(provenance["preflight_case_binding_verified"], True)
@@ -229,6 +234,45 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         self.assertIs(payload["gates"]["production_change_authorized"], False)
         self.assertIs(payload["gates"]["retuning_on_public_dev_forbidden"], True)
 
+    def test_audit_addendum_marks_support_metric_invalid_without_repairing_score(self) -> None:
+        payload = _load_result()
+        claims = payload["claims"]
+        addendum = payload["audit_addendum"]
+        audit = json.loads(AUDIT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(claims["supported_claims"], 0)
+        self.assertEqual(claims["citation_support_rate"], 0.0)
+        self.assertEqual(addendum["raw_supported_claims"], 0)
+        self.assertEqual(addendum["raw_citation_support_rate"], 0.0)
+        self.assertIs(addendum["raw_metrics_modified"], False)
+        self.assertIs(addendum["citation_support_metric_valid"], False)
+        self.assertEqual(addendum["invalid_reason"], "qrels_not_bound_to_official_scorer")
+        self.assertIs(addendum["structured_citation_quality_gate_passed"], False)
+        self.assertIs(addendum["repaired_official_score_forbidden"], True)
+        self.assertNotIn("repaired_supported_claims", payload)
+        self.assertNotIn("repaired_citation_support_rate", payload)
+        self.assertNotIn("repaired_supported_claims", audit)
+        self.assertEqual(audit["raw_supported_claims"], 0)
+        self.assertEqual(audit["raw_citation_support_rate"], 0.0)
+        self.assertIs(audit["raw_metrics_modified"], False)
+        self.assertIs(audit["citation_support_metric_valid"], False)
+        self.assertEqual(audit["invalid_reason"], "qrels_not_bound_to_official_scorer")
+        self.assertIs(audit["structured_citation_quality_gate_passed"], False)
+        self.assertEqual(audit["sealed_config_hash"], EXPECTED_CONFIG_HASH)
+        self.assertEqual(audit["published_config_hash"], EXPECTED_PUBLISHED_CONFIG_HASH)
+        self.assertEqual(audit["v3_preflight"]["shadow_executions_under_v3"], 1)
+        self.assertIs(audit["v4_preflight"]["executed"], False)
+        self.assertEqual(audit["v4_preflight"]["cases_executed"], 0)
+        self.assertEqual(audit["v4_preflight"]["remote_request_count"], 0)
+        self.assertIs(audit["mechanism_diagnosis"]["official"], False)
+        self.assertIs(audit["mechanism_diagnosis"]["not_a_repaired_score"], True)
+
+    def test_v4_preflight_directory_is_fixed_and_not_executed(self) -> None:
+        self.assertEqual(
+            DEFAULT_PREFLIGHT_OUTPUT_DIR.as_posix(),
+            "outputs/ledger_structured_citation_shadow_preflight_v4",
+        )
+        self.assertFalse((ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json").is_file())
+
     def test_ledger_has_no_secrets_paths_queries_or_gold(self) -> None:
         blob = RESULT_PATH.read_text(encoding="utf-8")
         lowered = blob.casefold()
@@ -260,6 +304,12 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
             check=False,
         )
         self.assertNotEqual(tracked.returncode, 0)
+        audit_tracked = subprocess.run(
+            ["git", "check-ignore", "-q", str(AUDIT_PATH.relative_to(ROOT))],
+            cwd=ROOT,
+            check=False,
+        )
+        self.assertNotEqual(audit_tracked.returncode, 0)
 
     def test_raw_outputs_absent_reports_not_present(self) -> None:
         payload = _load_result()
@@ -334,15 +384,19 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         payload = _load_result()
         provenance = payload["provenance"]
         config = load_frozen_config(ROOT / DEFAULT_FROZEN_CONFIG_PATH, require_published=True)
-        self.assertEqual(config.config_hash, provenance["config_hash"])
+        self.assertEqual(provenance["config_hash"], EXPECTED_CONFIG_HASH)
+        self.assertEqual(provenance["config_hash"], SEALED_V3_CONFIG_HASH)
+        self.assertEqual(config.config_hash, published_config_hash())
+        self.assertEqual(config.config_hash, EXPECTED_PUBLISHED_CONFIG_HASH)
+        self.assertNotEqual(config.config_hash, provenance["config_hash"])
         manifest = ROOT / "data" / "eval_rag" / "structured_citation_shadow_cache_manifest.json"
         self.assertEqual(sha256_normalized_file(manifest), provenance["cache_manifest_sha256"])
         baseline = ROOT / str(config.field("sealed_baseline", "path"))
         self.assertEqual(sha256_normalized_file(baseline), provenance["sealed_baseline_sha256"])
         optional = {
-            "v3_preflight": ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json",
+            "v3_preflight": ROOT / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json",
             "v1_preflight": ROOT / LEGACY_PREFLIGHT_OUTPUT_DIR / "preflight.json",
-            "v2_preflight": ROOT / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json",
+            "v2_preflight": ROOT / SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR / "preflight.json",
             "cache_file": ROOT / "outputs" / "ledger_public_dev_qwen3_paired_5x50_v3" / "candidates.jsonl",
             "snapshot": ROOT / public_dev_snapshot_relative(config),
         }
