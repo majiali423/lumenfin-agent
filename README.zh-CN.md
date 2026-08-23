@@ -12,10 +12,9 @@
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-最新已发布版本 **`0.1.0rc4`** / **`v0.1.0-rc.4`**。
-当前源码候选 **`0.1.0rc5`** / **`v0.1.0-rc.5`** — **尚未打标签、尚未发布**。
+最新已发布版本 **`0.1.0rc5`** / **`v0.1.0-rc.5`**。
 FinRun schema `1.0` · FinAgentBench 权威 pin **`v0.1.0-rc.3`** · required CI
-同时对已发布的 **`v0.1.0-rc.4`** fail-closed 兼容验证 · 受控 RC，边界见
+同时对已发布的 FinAgentBench **`v0.1.0-rc.4`** fail-closed 兼容验证 · 受控 RC，边界见
 [局限说明](docs/PRODUCTION_LIMITATIONS.md)
 
 [文档](docs/README.md) · [架构](docs/ARCHITECTURE.md) ·

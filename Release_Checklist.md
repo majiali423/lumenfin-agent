@@ -2,9 +2,7 @@
 
 > **Historical `0.1.0rc1` checklist — not the current release gate.**
 >
-> Latest published: LumenFin **`0.1.0rc4` / `v0.1.0-rc.4`**.
-> Current source candidate: **`0.1.0rc5` / `v0.1.0-rc.5`** — **not tagged,
-> not released**.
+> Latest published: LumenFin **`0.1.0rc5` / `v0.1.0-rc.5`**.
 > Authority: [`docs/PORTFOLIO_RELEASE_REPORT.md`](docs/PORTFOLIO_RELEASE_REPORT.md)  
 > Full validation: [`docs/PRODUCTION_LIMITATIONS.md`](docs/PRODUCTION_LIMITATIONS.md)
 >
@@ -39,10 +37,10 @@ Target (historical): LumenFin + FinAgentBench `0.1.0rc1`
 
 | Item | Status |
 |------|--------|
-| Latest published LumenFin | `0.1.0rc4` / `v0.1.0-rc.4`; tag CI passed |
-| Current source candidate | `0.1.0rc5` / `v0.1.0-rc.5` — unpublished (no tag, no GitHub Release) |
+| Latest published LumenFin | `0.1.0rc5` / `v0.1.0-rc.5`; GitHub pre-release |
+| Previous published LumenFin | `0.1.0rc4` / `v0.1.0-rc.4` |
 | License | MIT (`LICENSE`) + `THIRD_PARTY_NOTICES.md` |
-| LumenFin tag | `v0.1.0-rc.4` published |
+| LumenFin tag | `v0.1.0-rc.5` published |
 | FinAgentBench package tag | `v0.1.0-rc.4` published |
 | LumenFin evaluator pin | FinAgentBench `v0.1.0-rc.3` |
 | FinAgentBench latest published compatibility | `v0.1.0-rc.4` required CI lane; does not replace the pin |

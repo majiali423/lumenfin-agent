@@ -1,17 +1,16 @@
 # Changelog
 
-## 0.1.0rc5 — candidate preparation (unpublished)
+## 0.1.0rc5 — 2026-08-24
 
-This section records source-candidate identity for current `main`. It is **not**
-a published release: no `v0.1.0-rc.5` tag, GitHub Release, or public Docker
-image has been created. Latest published LumenFin remains
-`0.1.0rc4` / `v0.1.0-rc.4`.
+Controlled release candidate for the structured citation contract and
+auditable evaluation close. Annotated tag `v0.1.0-rc.5` is a GitHub
+pre-release. No public Docker image or PyPI upload.
 
 ### Identity
 
 - Python package, API fallback version, and Compose default image tag:
   `0.1.0rc5`
-- Intended annotated tag name (not created in this preparation): `v0.1.0-rc.5`
+- Annotated tag: `v0.1.0-rc.5`
 
 ### Documentation
 

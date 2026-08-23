@@ -1,9 +1,8 @@
 ﻿# LumenFin Final Architecture
 
 Trustworthy Financial Research Agent — architecture for the current
-**unpublished source candidate** `0.1.0rc5` (intended tag **`v0.1.0-rc.5`**,
-not created). Latest published release remains `0.1.0rc4` /
-**`v0.1.0-rc.4`**. FinRun schema `1.0`, FinAgentBench authoritative pin
+**published source** `0.1.0rc5` (tag **`v0.1.0-rc.5`**).
+FinRun schema `1.0`, FinAgentBench authoritative pin
 **`v0.1.0-rc.3`**; required CI also fail-closes published
 **`v0.1.0-rc.4`**.
 

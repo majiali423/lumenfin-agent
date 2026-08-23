@@ -14,11 +14,10 @@ what is verified.
 Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
 Docker Compose · pytest
 
-Latest published release **`0.1.0rc4`** / **`v0.1.0-rc.4`**.
-Current source candidate **`0.1.0rc5`** / **`v0.1.0-rc.5`** — **not tagged and
-not released**. FinRun schema `1.0` · FinAgentBench authoritative pin
+Latest published release **`0.1.0rc5`** / **`v0.1.0-rc.5`**.
+FinRun schema `1.0` · FinAgentBench authoritative pin
 **`v0.1.0-rc.3`** · required CI also fail-closes against published
-**`v0.1.0-rc.4`** · controlled RC under documented
+FinAgentBench **`v0.1.0-rc.4`** · controlled RC under documented
 limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
 [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) ·

@@ -74,7 +74,7 @@ score**. Do not rerun or rescore. `public_holdout` stays closed.
 ## 7. Reproducible identity
 
 - LumenFin package: `0.1.0rc5`
-- Intended tag: `v0.1.0-rc.5`
+- Tag: `v0.1.0-rc.5`
 - Canary config: `da4cdc4e…`
 - Dataset: `0d982240…`
 - Implementation ancestor: `f91c474…`
