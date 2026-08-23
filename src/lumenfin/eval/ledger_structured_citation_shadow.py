@@ -67,8 +67,9 @@ DEFAULT_CACHE_MANIFEST_PATH = (
 )
 DEFAULT_OFFICIAL_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_v1"
 LEGACY_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v1"
-SUPERSEDED_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v2"
-DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v3"
+SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v2"
+SUPERSEDED_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v3"
+DEFAULT_PREFLIGHT_OUTPUT_DIR = Path("outputs") / "ledger_structured_citation_shadow_preflight_v4"
 CACHE_MANIFEST_SCHEMA = "lumenfin_ledger_structured_citation_shadow_cache.v1"
 PREVIOUS_UNUSED_CONFIG_HASH = (
     "3e834f0ed5bbd42bb8f2346968eedd0a3025f49f8db628f64b0609577c8a46ac"
@@ -91,6 +92,18 @@ V2_PREFLIGHT_SHA256 = (
 V2_PREFLIGHT_EXECUTION_COMMIT = (
     "f69f1338fc1469779000e08efd24af9dd088c544"
 )
+SEALED_V3_CONFIG_HASH = (
+    "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05"
+)
+V3_PREFLIGHT_SHA256 = (
+    "b49a3e705b94b01fcf4dbe926d34642db18f8ad39c7adcf62d0f415bea5074eb"
+)
+V3_SHADOW_EXECUTION_COMMIT = (
+    "fc77288d39c349b182ce94c0540237ef9d172ec0"
+)
+SUPPORT_METRIC_CONTRACT_VERSION = "citation_support_qrels_bound.v1"
+CLAIM_SUPPORT_NOT_EVALUABLE = "NOT_EVALUABLE"
+SUPPORT_INVALID_QRELS_NOT_BOUND = "qrels_not_bound_or_invalid"
 GOLD_IDENTITY_SHA256 = (
     "990a7ff71234a0a9b3e2c021b972fbb2e93c71da6e747e6f647e25b8c51238a2"
 )
@@ -149,9 +162,25 @@ RETIRED_CONFIG_HASHES = {
         "cli_exit_code": 0,
         "shadow_results": 0,
     },
+    SEALED_V3_CONFIG_HASH: {
+        "status": "superseded_before_next_shadow",
+        "authorization_status": "SUPERSEDED_BEFORE_NEXT_SHADOW",
+        "retired_reason": "evaluator_qrel_binding_changed",
+        "grant_status": "SUPERSEDED_BEFORE_NEXT_SHADOW",
+        "accepted_at_execution_commit": V3_SHADOW_EXECUTION_COMMIT,
+        "preflight_executions": 1,
+        "accepted_preflights": 1,
+        "shadow_executions": 1,
+        "results": 1,
+        "artifact_status": "PREFLIGHT_OK",
+        "artifact_sha256": V3_PREFLIGHT_SHA256,
+        "accepted_for_shadow_execution": False,
+        "cli_exit_code": 0,
+        "shadow_results": 1,
+    },
 }
 EVALUATION_MODE = "sealed_candidate_replay_shadow"
-PREFLIGHT_SCHEMA_VERSION = "1.1"
+PREFLIGHT_SCHEMA_VERSION = "1.2"
 PREFLIGHT_OK = "PREFLIGHT_OK"
 PREFLIGHT_REQUIRED_FIELDS = (
     "kind",
@@ -172,6 +201,11 @@ PREFLIGHT_REQUIRED_FIELDS = (
     "gold_identity_sha256",
     "snapshot_identity",
     "gold_not_exposed_to_generator",
+    "qrels_bound",
+    "qrels_case_count",
+    "qrels_nonempty_case_count",
+    "qrels_identity_sha256",
+    "support_metric_contract_version",
 )
 GENERATOR_FORBIDDEN_KEYS = frozenset(
     {
@@ -737,6 +771,14 @@ def sanitize_payload(payload: Any) -> Any:
         cleaned: dict[str, Any] = {}
         for key, value in payload.items():
             lowered = str(key).casefold()
+            if lowered in {
+                "qrels",
+                "gold_value",
+                "gold_label",
+                "expected_answer",
+                "gold",
+            }:
+                continue
             if _SECRET_KEY_RE.search(lowered) or lowered in {"authorization", "api_key"}:
                 continue
             if lowered in {"base_url", "endpoint", "url"} and isinstance(value, str):
@@ -792,22 +834,29 @@ def published_frozen_config_fields() -> dict[str, Any]:
         "lumenfin_protocol_commit": PROTOCOL_COMMIT,
         "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
         "evaluation_mode": EVALUATION_MODE,
+        "support_metric_contract_version": SUPPORT_METRIC_CONTRACT_VERSION,
+        "evaluator_qrels": {
+            "source": "local_public_dev_snapshot",
+            "cache_qrels_forbidden": True,
+            "download_forbidden": True,
+            "empty_is_not_unsupported": True,
+        },
         "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         "preflight_required_fields": list(PREFLIGHT_REQUIRED_FIELDS),
         "predecessor_config": {
-            "config_hash": SUPERSEDED_V2_CONFIG_HASH,
+            "config_hash": SEALED_V3_CONFIG_HASH,
             "preflight_executions": 1,
             "accepted_preflights": 1,
-            "shadow_executions": 0,
-            "results": 0,
-            "retired_reason": "execution_code_changed",
-            "grant_status": "SUPERSEDED_BEFORE_SHADOW",
-            "accepted_at_execution_commit": V2_PREFLIGHT_EXECUTION_COMMIT,
+            "shadow_executions": 1,
+            "results": 1,
+            "retired_reason": "evaluator_qrel_binding_changed",
+            "grant_status": "SUPERSEDED_BEFORE_NEXT_SHADOW",
+            "accepted_at_execution_commit": V3_SHADOW_EXECUTION_COMMIT,
             "artifact_status": "PREFLIGHT_OK",
-            "artifact_sha256": V2_PREFLIGHT_SHA256,
+            "artifact_sha256": V3_PREFLIGHT_SHA256,
             "accepted_for_shadow_execution": False,
             "cli_exit_code": 0,
-            "shadow_results": 0,
+            "shadow_results": 1,
         },
         "not_live_production_retrieval": True,
         "candidate_cache_generation": {
@@ -941,6 +990,7 @@ def published_frozen_config_fields() -> dict[str, Any]:
             "preflight_dirname": DEFAULT_PREFLIGHT_OUTPUT_DIR.name,
             "legacy_preflight_dirname": LEGACY_PREFLIGHT_OUTPUT_DIR.name,
             "superseded_preflight_dirname": SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name,
+            "superseded_v2_preflight_dirname": SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR.name,
             "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         },
         "call_budget": {
@@ -975,6 +1025,9 @@ def published_frozen_config_fields() -> dict[str, Any]:
             "supported_claims",
             "unsupported_claims",
             "citation_support_rate",
+            "support_metric_valid",
+            "support_metric_invalid_reason",
+            "support_metric_contract_version",
             "answers_fully_supported",
             "answers_partially_supported",
             "answers_unsupported",
@@ -1067,9 +1120,13 @@ def _validate_frozen_payload(payload: Mapping[str, Any]) -> None:
         raise ShadowError("frozen config preflight required fields mismatch")
     output = payload.get("output") or {}
     if output.get("preflight_dirname") != DEFAULT_PREFLIGHT_OUTPUT_DIR.name:
-        raise ShadowError("frozen config preflight directory must be v3")
+        raise ShadowError("frozen config preflight directory must be v4")
     if output.get("superseded_preflight_dirname") != SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name:
-        raise ShadowError("frozen config superseded preflight directory must be v2")
+        raise ShadowError("frozen config superseded preflight directory must be v3")
+    if output.get("superseded_v2_preflight_dirname") != SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR.name:
+        raise ShadowError("frozen config superseded v2 preflight directory must be v2")
+    if str(payload.get("support_metric_contract_version") or "") != SUPPORT_METRIC_CONTRACT_VERSION:
+        raise ShadowError("frozen config support metric contract mismatch")
     if str(payload.get("case_selection", {}).get("gold_identity_sha256") or "") != GOLD_IDENTITY_SHA256:
         raise ShadowError("frozen config gold identity mismatch")
     dataset = payload.get("dataset") or {}
@@ -1260,17 +1317,19 @@ def load_case_fixture(path: str | Path, *, allowlist: list[str], expected_hash: 
         qrels = item.get("qrels") or {}
         if isinstance(qrels, list):
             qrels = {str(row.get("doc_id") or ""): int(row.get("relevance") or 0) for row in qrels}
-        normalized.append(
-            {
-                "case_id": case_id,
-                "query_text": str(item.get("query_text") or ""),
-                "gold_value": float(item.get("gold_value") or 0.0),
-                "hits": hits,
-                "qrels": {str(key): int(value) for key, value in dict(qrels).items()},
-                "tenant_id": str(item.get("tenant_id") or "default"),
-                "session_id": str(item.get("session_id") or "shadow"),
-            }
-        )
+        qrels = normalize_evaluator_qrels(qrels, case_id=case_id) if qrels else {}
+        row = {
+            "case_id": case_id,
+            "query_text": str(item.get("query_text") or ""),
+            "gold_value": float(item.get("gold_value") or 0.0),
+            "hits": hits,
+            "qrels": qrels,
+            "tenant_id": str(item.get("tenant_id") or "default"),
+            "session_id": str(item.get("session_id") or "shadow"),
+        }
+        if qrels:
+            row = attach_evaluator_qrels(row, qrels)
+        normalized.append(row)
     return normalized
 
 
@@ -1318,8 +1377,10 @@ def assert_generation_case_has_no_gold(case: Mapping[str, Any]) -> None:
         lowered = str(key).casefold()
         if lowered in GENERATOR_FORBIDDEN_KEYS or "gold" in lowered:
             raise ShadowError("generator case carries evaluator-only gold")
+        if "qrel" in lowered or "support_metric" in lowered:
+            raise ShadowError("generator case carries evaluator-only gold")
     blob = json.dumps(sanitize_payload(dict(case)), ensure_ascii=False).casefold()
-    for token in ("gold_value", "gold_label", "expected_answer"):
+    for token in ("gold_value", "gold_label", "expected_answer", "qrels"):
         if token in blob:
             raise ShadowError("generator case carries evaluator-only gold")
 
@@ -1330,6 +1391,12 @@ def case_binding_report(
     snapshot_hash: str,
     snapshot_path: str,
 ) -> dict[str, Any]:
+    qrels_by_case = {
+        str(item["case_id"]): dict(item.get("qrels") or {})
+        for item in cases
+        if item.get("qrels_bound") or item.get("qrels")
+    }
+    nonempty = sum(1 for mapping in qrels_by_case.values() if mapping)
     return {
         "case_binding_verified": True,
         "case_count": len(cases),
@@ -1344,6 +1411,11 @@ def case_binding_report(
             "download_forbidden": True,
         },
         "gold_not_exposed_to_generator": True,
+        "qrels_bound": nonempty == len(cases) and nonempty > 0,
+        "qrels_case_count": len(qrels_by_case),
+        "qrels_nonempty_case_count": nonempty,
+        "qrels_identity_sha256": qrels_identity_sha256(qrels_by_case) if qrels_by_case else "",
+        "support_metric_contract_version": SUPPORT_METRIC_CONTRACT_VERSION,
     }
 
 
@@ -1353,6 +1425,114 @@ def gold_identity_sha256(values: Mapping[str, float]) -> str:
         for query_id in sorted(values)
     ]
     return sha256_text(canonical_dumps(payload))
+
+
+def normalize_evaluator_qrels(raw: object, *, case_id: str) -> dict[str, int]:
+    """Parse snapshot/test qrels into document_id -> relevance. Fail closed."""
+    del case_id
+    if raw is None:
+        raise ShadowError("evaluator qrels are missing")
+    normalized: dict[str, int] = {}
+    if isinstance(raw, list):
+        items = raw
+        if not items:
+            raise ShadowError("evaluator qrels are empty")
+        for item in items:
+            if not isinstance(item, Mapping):
+                raise ShadowError("evaluator qrels format is invalid")
+            doc_id = str(item.get("doc_id") or "").strip()
+            if not doc_id:
+                raise ShadowError("evaluator qrels format is invalid")
+            if "relevance" not in item or isinstance(item.get("relevance"), bool):
+                raise ShadowError("evaluator qrels format is invalid")
+            try:
+                relevance = int(item.get("relevance"))
+            except (TypeError, ValueError) as exc:
+                raise ShadowError("evaluator qrels format is invalid") from exc
+            if doc_id in normalized and normalized[doc_id] != relevance:
+                raise ShadowError("evaluator qrels contain conflicting document ids")
+            normalized[doc_id] = relevance
+    elif isinstance(raw, Mapping):
+        if not raw:
+            raise ShadowError("evaluator qrels are empty")
+        for key, value in raw.items():
+            doc_id = str(key or "").strip()
+            if not doc_id or isinstance(value, bool):
+                raise ShadowError("evaluator qrels format is invalid")
+            try:
+                relevance = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ShadowError("evaluator qrels format is invalid") from exc
+            normalized[doc_id] = relevance
+    else:
+        raise ShadowError("evaluator qrels format is invalid")
+    if not normalized:
+        raise ShadowError("evaluator qrels are empty")
+    if not any(int(value) > 0 for value in normalized.values()):
+        raise ShadowError("evaluator qrels have no positive document")
+    return normalized
+
+
+def qrels_identity_sha256(by_case: Mapping[str, Mapping[str, int]]) -> str:
+    payload = [
+        {
+            "query_id": query_id,
+            "qrels": [
+                {"doc_id": doc_id, "relevance": int(by_case[query_id][doc_id])}
+                for doc_id in sorted(by_case[query_id])
+            ],
+        }
+        for query_id in sorted(by_case)
+    ]
+    return sha256_text(canonical_dumps(payload))
+
+
+def attach_evaluator_qrels(case: dict[str, Any], qrels: Mapping[str, int]) -> dict[str, Any]:
+    bound = dict(case)
+    bound["qrels"] = {str(key): int(value) for key, value in dict(qrels).items()}
+    bound["qrels_bound"] = True
+    bound["support_metric_valid"] = True
+    bound["support_metric_invalid_reason"] = ""
+    return bound
+
+
+def citation_support_metric(case: Mapping[str, Any]) -> dict[str, Any]:
+    """Decide whether citation support may be scored. Empty qrels is not unsupported."""
+    if not bool(case.get("qrels_bound")):
+        return {
+            "valid": False,
+            "reason": SUPPORT_INVALID_QRELS_NOT_BOUND,
+            "qrels": {},
+            "error": "qrels were not bound from the sealed snapshot",
+        }
+    try:
+        qrels = normalize_evaluator_qrels(case.get("qrels"), case_id=str(case.get("case_id") or ""))
+    except ShadowError as exc:
+        return {
+            "valid": False,
+            "reason": SUPPORT_INVALID_QRELS_NOT_BOUND,
+            "qrels": {},
+            "error": str(exc),
+        }
+    return {
+        "valid": True,
+        "reason": "",
+        "qrels": qrels,
+        "error": "",
+    }
+
+
+def evaluation_case_view(case: Mapping[str, Any]) -> dict[str, Any]:
+    metric = citation_support_metric(case)
+    return {
+        "case_id": str(case.get("case_id") or ""),
+        "qrels": dict(metric["qrels"]) if metric["valid"] else {},
+        "gold_value": float(case.get("gold_value") or 0.0),
+        "qrels_bound": bool(case.get("qrels_bound")),
+        "support_metric_valid": bool(metric["valid"]),
+        "support_metric_invalid_reason": str(metric["reason"] or ""),
+        "support_metric_contract_version": SUPPORT_METRIC_CONTRACT_VERSION,
+    }
 
 
 def load_verified_cache_prefix(
@@ -1404,9 +1584,8 @@ def cases_from_verified_cache_rows(
             raise ShadowError("verified cache row is missing hits")
         if any(not str(hit.get("chunk_id") or "").strip() for hit in hits):
             raise ShadowError("verified cache hit is missing chunk_id")
-        qrels = item.get("qrels") or {}
-        if isinstance(qrels, list):
-            qrels = {str(row.get("doc_id") or ""): int(row.get("relevance") or 0) for row in qrels}
+        if "qrels" in item:
+            raise ShadowError("candidate cache must not supply qrels")
         gold_raw = item.get("gold_value", item.get("value", 0.0))
         normalized.append(
             {
@@ -1414,7 +1593,8 @@ def cases_from_verified_cache_rows(
                 "query_text": str(item.get("query_text") or ""),
                 "gold_value": float(gold_raw or 0.0),
                 "hits": hits,
-                "qrels": {str(key): int(value) for key, value in dict(qrels).items()},
+                "qrels": {},
+                "qrels_bound": False,
                 "tenant_id": str(item.get("tenant_id") or "default"),
                 "session_id": str(item.get("session_id") or "shadow"),
             }
@@ -1452,8 +1632,8 @@ def load_allowlisted_public_dev_query_payloads(
     )
     if not snapshot.exists():
         raise ShadowError(
-            "verified cache is missing query text; public/dev query payloads "
-            "are not auto-fetched and cache rebuild is forbidden"
+            "public/dev snapshot is required to bind evaluator qrels; "
+            "public/dev query payloads are not auto-fetched and cache rebuild is forbidden"
         )
     from .holdout.ledger import ledger_snapshot_sha256
 
@@ -1473,10 +1653,11 @@ def load_allowlisted_public_dev_query_payloads(
         assert_safe_input_path(file_path, field="public-dev-snapshot")
         try:
             parquet_file = parquet.ParquetFile(file_path)
-            for batch in parquet_file.iter_batches(
-                batch_size=64,
-                columns=["query_id", "query_text", "value"],
-            ):
+            available = set(parquet_file.schema_arrow.names)
+            columns = ["query_id", "query_text", "value"]
+            if "qrels" in available:
+                columns.append("qrels")
+            for batch in parquet_file.iter_batches(batch_size=64, columns=columns):
                 for row in batch.to_pylist():
                     query_id = str(row.get("query_id") or "")
                     if query_id not in wanted_set:
@@ -1489,6 +1670,10 @@ def load_allowlisted_public_dev_query_payloads(
                     found[query_id] = {
                         "query_text": query_text,
                         "gold_value": float(row.get("value") or 0.0),
+                        "qrels": normalize_evaluator_qrels(
+                            row.get("qrels"),
+                            case_id=query_id,
+                        ),
                     }
         except ShadowError:
             raise
@@ -1524,25 +1709,31 @@ def bind_cases_from_verified_cache(
         expected_ids=expected_ids,
         expected_hash=str(config.field("case_selection", "query_ids_sha256")),
     )
-    if any(not str(case.get("query_text") or "").strip() for case in cases):
-        loaded = load_allowlisted_public_dev_query_payloads(
-            repo_root=repo_root,
-            config=config,
-            query_ids=[str(case["case_id"]) for case in cases],
-        )
-        payloads = loaded["payloads"]
-        extra = set(payloads) - {str(case["case_id"]) for case in cases}
-        if extra:
-            raise ShadowError("public/dev query payload contains extra case ids")
-        for case in cases:
-            if str(case.get("query_text") or "").strip():
-                continue
-            payload = payloads[str(case["case_id"])]
-            case["query_text"] = payload["query_text"]
-            if float(case.get("gold_value") or 0.0) == 0.0:
-                case["gold_value"] = float(payload["gold_value"])
+    loaded = load_allowlisted_public_dev_query_payloads(
+        repo_root=repo_root,
+        config=config,
+        query_ids=[str(case["case_id"]) for case in cases],
+    )
+    payloads = loaded["payloads"]
+    extra = set(payloads) - {str(case["case_id"]) for case in cases}
+    if extra:
+        raise ShadowError("public/dev query payload contains extra case ids")
+    for case in cases:
+        payload = payloads[str(case["case_id"])]
+        snapshot_text = str(payload.get("query_text") or "").strip()
+        cache_text = str(case.get("query_text") or "").strip()
+        if cache_text and snapshot_text and cache_text != snapshot_text:
+            raise ShadowError("bound query text does not match public/dev snapshot")
+        if not cache_text:
+            case["query_text"] = snapshot_text
+        case["gold_value"] = float(payload["gold_value"])
+        updated = attach_evaluator_qrels(case, payload["qrels"])
+        case.clear()
+        case.update(updated)
     if any(not str(case.get("query_text") or "").strip() for case in cases):
         raise ShadowError("live shadow cases are missing query text")
+    if any(not case.get("qrels_bound") or not case.get("qrels") for case in cases):
+        raise ShadowError("evaluator qrels are missing")
     bound_ids = [str(case["case_id"]) for case in cases]
     if bound_ids != expected_ids:
         raise ShadowError("bound case ids do not match verified candidate cache prefix")
@@ -1594,6 +1785,7 @@ def score_case(
         query_text=str(case.get("query_text") or ""),
         final_k=ARM_SPECS["A_prod"].final_k,
     )
+    metric = citation_support_metric(case)
     scored = score_generated_answer(
         gold_value=float(case["gold_value"]),
         parsed={
@@ -1602,7 +1794,7 @@ def score_case(
             "session_id": case.get("session_id") or "",
         },
         hits=ranked,
-        qrels=case["qrels"],
+        qrels=metric["qrels"] if metric["valid"] else {},
     )
     accounting = scored["citation_accounting"]
     citations = list(parsed.get("citations") or [])
@@ -1614,6 +1806,19 @@ def score_case(
     if citations and int(accounting.get("valid_citation") or 0) == 0:
         validation_failed = True
     stale = int(accounting.get("unverified_citation") or 0)
+    if metric["valid"]:
+        supported_claim = bool(scored.get("citation_supported"))
+        unsupported_claim = bool(citations) and not supported_claim
+        claim_support = "supported" if supported_claim else ("unsupported" if citations else "unavailable")
+    else:
+        supported_claim = False
+        unsupported_claim = False
+        claim_support = CLAIM_SUPPORT_NOT_EVALUABLE
+        accounting = dict(accounting)
+        accounting["supported_claim"] = False
+        accounting["unsupported_claim"] = False
+        accounting["support_metric_valid"] = False
+        accounting["support_metric_invalid_reason"] = metric["reason"]
     row = {
         "case_id": case["case_id"],
         "complete": True,
@@ -1629,8 +1834,11 @@ def score_case(
         "cross_scope_citations": int(accounting.get("cross_run_or_tenant_citation") or 0),
         "stale_citations": stale,
         "citation_validation_failed": validation_failed,
-        "supported_claim": bool(scored.get("citation_supported")),
-        "unsupported_claim": bool(citations) and not bool(scored.get("citation_supported")),
+        "supported_claim": supported_claim,
+        "unsupported_claim": unsupported_claim,
+        "support_metric_valid": bool(metric["valid"]),
+        "support_metric_invalid_reason": str(metric["reason"] or ""),
+        "support_metric_contract_version": SUPPORT_METRIC_CONTRACT_VERSION,
         "claims_total": 1 if citations or parsed.get("answer") else 0,
         "citation_accounting": accounting,
         "latency_ms": round(float(latency_ms), 2),
@@ -1649,12 +1857,7 @@ def score_case(
     }
     if row["claims_total"] == 0:
         row["claims_total"] = 1 if parsed.get("answer") or citations else 0
-    if row["supported_claim"]:
-        row["claim_support"] = "supported"
-    elif citations:
-        row["claim_support"] = "unsupported"
-    else:
-        row["claim_support"] = "unavailable"
+    row["claim_support"] = claim_support
     row["outcome"] = classify_outcome(row)
     return row
 
@@ -1709,8 +1912,23 @@ def summarize_rows(
     structured = sum(1 for row in rows if row.get("structured_answer_present"))
     with_citations = sum(1 for row in rows if row.get("citations"))
     claims_total = sum(int(row.get("claims_total") or 0) for row in rows)
-    supported = sum(1 for row in rows if row.get("supported_claim"))
-    unsupported = sum(1 for row in rows if row.get("unsupported_claim"))
+    metric_invalid = [
+        str(row.get("support_metric_invalid_reason") or SUPPORT_INVALID_QRELS_NOT_BOUND)
+        for row in rows
+        if row.get("support_metric_valid") is False
+        and str(row.get("claim_support") or "") == CLAIM_SUPPORT_NOT_EVALUABLE
+    ]
+    support_metric_valid = not metric_invalid
+    supported = sum(
+        1
+        for row in rows
+        if row.get("support_metric_valid") is not False and row.get("supported_claim")
+    )
+    unsupported = sum(
+        1
+        for row in rows
+        if row.get("support_metric_valid") is not False and row.get("unsupported_claim")
+    )
     fully = sum(
         1
         for row in rows
@@ -1718,7 +1936,11 @@ def summarize_rows(
     )
     partial = 0
     answers_unsupported = sum(
-        1 for row in rows if row.get("citations") and not row.get("supported_claim")
+        1
+        for row in rows
+        if row.get("citations")
+        and row.get("unsupported_claim")
+        and row.get("support_metric_valid") is not False
     )
     outcomes = {name: 0 for name in ("complete", "incomplete_data", "degraded", "failed")}
     for row in rows:
@@ -1760,7 +1982,12 @@ def summarize_rows(
         "claims_total": claims_total,
         "supported_claims": supported,
         "unsupported_claims": unsupported,
-        "citation_support_rate": round(supported / cases_total, 4) if cases_total else 0.0,
+        "citation_support_rate": (
+            round(supported / cases_total, 4) if cases_total and support_metric_valid else None
+        ),
+        "support_metric_valid": support_metric_valid,
+        "support_metric_invalid_reason": metric_invalid[0] if metric_invalid else "",
+        "support_metric_contract_version": SUPPORT_METRIC_CONTRACT_VERSION,
         "answers_fully_supported": fully,
         "answers_partially_supported": partial,
         "answers_unsupported": answers_unsupported,
@@ -2086,6 +2313,16 @@ def _assert_preflight_success_contract(report: Mapping[str, Any]) -> None:
         raise ShadowError("preflight success must record query text hash")
     if report.get("gold_not_exposed_to_generator") is not True:
         raise ShadowError("preflight success must prove gold was not sent to the generator")
+    if report.get("qrels_bound") is not True:
+        raise ShadowError("preflight success must bind evaluator qrels")
+    if int(report.get("qrels_case_count") or 0) != int(report.get("case_count") or 0):
+        raise ShadowError("preflight qrels case count mismatch")
+    if int(report.get("qrels_nonempty_case_count") or 0) != int(report.get("case_count") or 0):
+        raise ShadowError("preflight qrels are empty")
+    if not str(report.get("qrels_identity_sha256") or ""):
+        raise ShadowError("preflight success must record qrels identity hash")
+    if report.get("support_metric_contract_version") != SUPPORT_METRIC_CONTRACT_VERSION:
+        raise ShadowError("preflight support metric contract mismatch")
     executed_at = str(report.get("executed_at") or "")
     parsed = datetime.fromisoformat(executed_at.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -2099,23 +2336,26 @@ def assert_preflight_authorizes_shadow(
     repo_root: Path,
     execution_commit: str,
 ) -> None:
-    v2 = repo_root / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-    v3 = repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json"
-    if v2.is_file() and not v3.is_file():
+    v2 = repo_root / SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    v3 = repo_root / SUPERSEDED_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    v4 = repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    if v2.is_file() and not v4.is_file():
         raise ShadowError("v2 preflight cannot authorize a later execution commit")
-    if v2.is_file():
-        v2_payload = read_json_object(v2, field="superseded-preflight")
-        if str(v2_payload.get("execution_commit") or "") != execution_commit:
-            if not v3.is_file():
-                raise ShadowError("v2 preflight cannot authorize a later execution commit")
-    if not v3.is_file():
-        raise ShadowError("official shadow requires an accepted v3 preflight")
-    report = read_json_object(v3, field="preflight")
+    if v3.is_file() and not v4.is_file():
+        raise ShadowError("v3 preflight cannot authorize a later execution commit")
+    if not v4.is_file():
+        raise ShadowError("official shadow requires an accepted v4 preflight")
+    report = read_json_object(v4, field="preflight")
     if str(report.get("execution_commit") or "") != execution_commit:
-        raise ShadowError("v3 preflight cannot authorize a different execution commit")
+        raise ShadowError("v4 preflight cannot authorize a different execution commit")
     if report.get("case_binding_verified") is not True:
-        raise ShadowError("v3 preflight did not verify case binding")
-    if report.get("authorization_status") == "SUPERSEDED_BEFORE_SHADOW":
+        raise ShadowError("v4 preflight did not verify case binding")
+    if report.get("qrels_bound") is not True:
+        raise ShadowError("v4 preflight did not bind evaluator qrels")
+    if report.get("authorization_status") in {
+        "SUPERSEDED_BEFORE_SHADOW",
+        "SUPERSEDED_BEFORE_NEXT_SHADOW",
+    }:
         raise ShadowError("superseded preflight cannot authorize shadow execution")
 
 
@@ -2228,6 +2468,11 @@ def run_preflight(
             "gold_identity_sha256": binding["gold_identity_sha256"],
             "snapshot_identity": binding["snapshot_identity"],
             "gold_not_exposed_to_generator": True,
+            "qrels_bound": binding["qrels_bound"],
+            "qrels_case_count": binding["qrels_case_count"],
+            "qrels_nonempty_case_count": binding["qrels_nonempty_case_count"],
+            "qrels_identity_sha256": binding["qrels_identity_sha256"],
+            "support_metric_contract_version": SUPPORT_METRIC_CONTRACT_VERSION,
             "not_live_production_retrieval": True,
             "candidate_cache_generation": frozen_config.field("candidate_cache_generation"),
             "runtime_components": frozen_config.field("runtime_components"),

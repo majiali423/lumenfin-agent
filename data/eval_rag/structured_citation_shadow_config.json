@@ -22,7 +22,14 @@
   "lumenfin_protocol_commit": "78a719e2b744777aee5353acc24b9b88c410066e",
   "lumenfin_commit_policy": "require_clean_worktree_and_protocol_ancestor",
   "evaluation_mode": "sealed_candidate_replay_shadow",
-  "preflight_schema_version": "1.1",
+  "support_metric_contract_version": "citation_support_qrels_bound.v1",
+  "evaluator_qrels": {
+    "source": "local_public_dev_snapshot",
+    "cache_qrels_forbidden": true,
+    "download_forbidden": true,
+    "empty_is_not_unsupported": true
+  },
+  "preflight_schema_version": "1.2",
   "preflight_required_fields": [
     "kind",
     "preflight_schema_version",
@@ -41,22 +48,27 @@
     "query_texts_sha256",
     "gold_identity_sha256",
     "snapshot_identity",
-    "gold_not_exposed_to_generator"
+    "gold_not_exposed_to_generator",
+    "qrels_bound",
+    "qrels_case_count",
+    "qrels_nonempty_case_count",
+    "qrels_identity_sha256",
+    "support_metric_contract_version"
   ],
   "predecessor_config": {
-    "config_hash": "49e4f63f9c01b0d2050bd0e65a0e187f5c4723ffd7df632398dccb05daaa63bf",
+    "config_hash": "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05",
     "preflight_executions": 1,
     "accepted_preflights": 1,
-    "shadow_executions": 0,
-    "results": 0,
-    "retired_reason": "execution_code_changed",
-    "grant_status": "SUPERSEDED_BEFORE_SHADOW",
-    "accepted_at_execution_commit": "f69f1338fc1469779000e08efd24af9dd088c544",
+    "shadow_executions": 1,
+    "results": 1,
+    "retired_reason": "evaluator_qrel_binding_changed",
+    "grant_status": "SUPERSEDED_BEFORE_NEXT_SHADOW",
+    "accepted_at_execution_commit": "fc77288d39c349b182ce94c0540237ef9d172ec0",
     "artifact_status": "PREFLIGHT_OK",
-    "artifact_sha256": "f3179e05ee6b726f4fb192e1e50152b1fb8ae287e612b1398efd483124c5e2f3",
+    "artifact_sha256": "b49a3e705b94b01fcf4dbe926d34642db18f8ad39c7adcf62d0f415bea5074eb",
     "accepted_for_shadow_execution": false,
     "cli_exit_code": 0,
-    "shadow_results": 0
+    "shadow_results": 1
   },
   "not_live_production_retrieval": true,
   "candidate_cache_generation": {
@@ -191,10 +203,11 @@
   "output": {
     "schema_version": "lumenfin_ledger_structured_citation_shadow.v1",
     "official_dirname": "ledger_structured_citation_shadow_v1",
-    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v3",
+    "preflight_dirname": "ledger_structured_citation_shadow_preflight_v4",
     "legacy_preflight_dirname": "ledger_structured_citation_shadow_preflight_v1",
-    "superseded_preflight_dirname": "ledger_structured_citation_shadow_preflight_v2",
-    "preflight_schema_version": "1.1"
+    "superseded_preflight_dirname": "ledger_structured_citation_shadow_preflight_v3",
+    "superseded_v2_preflight_dirname": "ledger_structured_citation_shadow_preflight_v2",
+    "preflight_schema_version": "1.2"
   },
   "call_budget": {
     "cases_total": 50,
@@ -228,6 +241,9 @@
     "supported_claims",
     "unsupported_claims",
     "citation_support_rate",
+    "support_metric_valid",
+    "support_metric_invalid_reason",
+    "support_metric_contract_version",
     "answers_fully_supported",
     "answers_partially_supported",
     "answers_unsupported",
@@ -253,5 +269,5 @@
       "config_hash"
     ]
   },
-  "config_hash": "54f6e30074fa5ee9806216cb4c0320ba1a5a2e707d155d01fb0cf4b5fe9bac05"
+  "config_hash": "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24"
 }

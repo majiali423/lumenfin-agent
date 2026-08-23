@@ -36,8 +36,13 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     PROTOCOL_COMMIT,
     RETIRED_BEFORE_PREFLIGHT_HASH,
     RETIRED_CONFIG_HASHES,
+    SEALED_V3_CONFIG_HASH,
     SUPERSEDED_PREFLIGHT_OUTPUT_DIR,
     SUPERSEDED_V2_CONFIG_HASH,
+    SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR,
+    SUPPORT_METRIC_CONTRACT_VERSION,
+    V3_PREFLIGHT_SHA256,
+    V3_SHADOW_EXECUTION_COMMIT,
     V2_PREFLIGHT_EXECUTION_COMMIT,
     V2_PREFLIGHT_SHA256,
     forbid_runtime_embedding_call,
@@ -117,6 +122,8 @@ def _case(case_id: str, index: int, **kwargs: object) -> dict:
         "session_id": "shadow",
     }
     row.update(kwargs)
+    if row.get("qrels") and not row.get("qrels_bound"):
+        row["qrels_bound"] = True
     return row
 
 
@@ -181,11 +188,35 @@ def _structured_payload(index: int, *, source: str = "structured") -> str:
     )
 
 
+def _write_dev_snapshot(root: Path, cases: list[dict]) -> str:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from lumenfin.eval.holdout.ledger import ledger_snapshot_sha256
+    from lumenfin.eval.ledger_structured_citation_shadow import PUBLIC_DEV_SNAPSHOT_RELATIVE
+
+    snapshot = root / PUBLIC_DEV_SNAPSHOT_RELATIVE
+    snapshot.mkdir(parents=True, exist_ok=True)
+    table = pa.table(
+        {
+            "query_id": [case["case_id"] for case in cases],
+            "query_text": [case["query_text"] for case in cases],
+            "value": [case["gold_value"] for case in cases],
+            "qrels": [
+                [{"doc_id": key, "relevance": int(value)} for key, value in case["qrels"].items()]
+                for case in cases
+            ],
+        }
+    )
+    pq.write_table(table, snapshot / "0000.parquet")
+    return ledger_snapshot_sha256(snapshot)
+
+
 def _mini_world(
     tmp: Path,
     case_ids: list[str],
     *,
     cache_query_text: bool = True,
+    write_snapshot: bool = True,
 ) -> tuple[FrozenShadowConfig, list[dict], Path]:
     seal_dir = tmp / "data" / "eval_rag" / "holdout"
     seal = {
@@ -231,7 +262,6 @@ def _mini_world(
                 str(case["query_text"]).encode("utf-8")
             ).hexdigest()
             row["gold_value"] = case["gold_value"]
-            row["qrels"] = case["qrels"]
         cache_rows.append(row)
     cache_rel = Path("outputs") / "cache" / "candidates.jsonl"
     cache_path = tmp / cache_rel
@@ -291,6 +321,8 @@ def _mini_world(
     fields["split_manifest"]["sha256"] = sha256_normalized_file(manifest_path)
     fields["sealed_baseline"]["sha256"] = sha256_normalized_file(baseline_path)
     fields["candidate_cache"]["manifest_sha256"] = sha256_normalized_file(cache_manifest_path)
+    if write_snapshot:
+        fields["dataset"]["source_artifact_sha256"] = _write_dev_snapshot(tmp, cases)
     fields["config_hash"] = compute_config_hash(fields)
     config_path = tmp / "frozen.json"
     _write_json(config_path, fields)
@@ -339,21 +371,31 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         )
         self.assertEqual(
             loaded.payload["predecessor_config"]["config_hash"],
-            SUPERSEDED_V2_CONFIG_HASH,
+            SEALED_V3_CONFIG_HASH,
         )
         self.assertEqual(loaded.payload["predecessor_config"]["preflight_executions"], 1)
         self.assertEqual(loaded.payload["predecessor_config"]["accepted_preflights"], 1)
+        self.assertEqual(loaded.payload["predecessor_config"]["shadow_executions"], 1)
         self.assertEqual(
             loaded.payload["predecessor_config"]["grant_status"],
-            "SUPERSEDED_BEFORE_SHADOW",
+            "SUPERSEDED_BEFORE_NEXT_SHADOW",
+        )
+        self.assertEqual(
+            loaded.payload["predecessor_config"]["retired_reason"],
+            "evaluator_qrel_binding_changed",
         )
         self.assertEqual(
             loaded.payload["predecessor_config"]["accepted_at_execution_commit"],
-            V2_PREFLIGHT_EXECUTION_COMMIT,
+            V3_SHADOW_EXECUTION_COMMIT,
         )
-        self.assertEqual(loaded.payload["predecessor_config"]["artifact_sha256"], V2_PREFLIGHT_SHA256)
+        self.assertEqual(loaded.payload["predecessor_config"]["artifact_sha256"], V3_PREFLIGHT_SHA256)
         self.assertIs(loaded.payload["predecessor_config"]["accepted_for_shadow_execution"], False)
+        self.assertEqual(RETIRED_CONFIG_HASHES[SEALED_V3_CONFIG_HASH]["shadow_executions"], 1)
         self.assertEqual(RETIRED_CONFIG_HASHES[SUPERSEDED_V2_CONFIG_HASH]["shadow_executions"], 0)
+        self.assertEqual(
+            loaded.payload["support_metric_contract_version"],
+            SUPPORT_METRIC_CONTRACT_VERSION,
+        )
         self.assertEqual(RETIRED_CONFIG_HASHES[INCOMPLETE_AUDIT_CONFIG_HASH]["accepted_preflights"], 0)
         self.assertEqual(
             loaded.payload["output"]["superseded_preflight_dirname"],
@@ -364,6 +406,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertNotEqual(loaded.config_hash, RETIRED_BEFORE_PREFLIGHT_HASH)
         self.assertNotEqual(loaded.config_hash, INCOMPLETE_AUDIT_CONFIG_HASH)
         self.assertNotEqual(loaded.config_hash, SUPERSEDED_V2_CONFIG_HASH)
+        self.assertNotEqual(loaded.config_hash, SEALED_V3_CONFIG_HASH)
         blob = path.read_text(encoding="utf-8")
         self.assertNotIn("sk-", blob)
         self.assertNotIn("Authorization", blob)
@@ -1066,7 +1109,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
     def test_live_bind_without_query_text_or_snapshot_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config, _cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            config, _cases, _ = _mini_world(
+                root, ["pd-1"], cache_query_text=False, write_snapshot=False
+            )
             generate_calls = {"n": 0}
 
             def generate(_case: dict) -> str:
@@ -1136,7 +1181,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config, cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            config, cases, _ = _mini_world(
+                root, ["pd-1"], cache_query_text=False, write_snapshot=False
+            )
             snapshot = root / public_dev_snapshot_relative(config)
             snapshot.mkdir(parents=True)
             table = pa.table(
@@ -1144,6 +1191,10 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                     "query_id": ["pd-1", "holdout-secret"],
                     "query_text": [cases[0]["query_text"], "DO-NOT-BIND"],
                     "value": [cases[0]["gold_value"], 99.0],
+                    "qrels": [
+                        [{"doc_id": "doc-1", "relevance": 1}],
+                        [{"doc_id": "holdout-doc", "relevance": 1}],
+                    ],
                     "mmd_text": ["unused-dev", "unused-holdout"],
                 }
             )
@@ -1178,7 +1229,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
     def test_live_bind_refuses_holdout_snapshot_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config, _cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            config, _cases, _ = _mini_world(
+                root, ["pd-1"], cache_query_text=False, write_snapshot=False
+            )
             forbidden = root / "data" / "public_holdout" / "eval-test"
             forbidden.mkdir(parents=True)
             with patch(
@@ -1291,6 +1344,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                 RETIRED_BEFORE_PREFLIGHT_HASH,
                 INCOMPLETE_AUDIT_CONFIG_HASH,
                 SUPERSEDED_V2_CONFIG_HASH,
+                SEALED_V3_CONFIG_HASH,
             ):
                 payload["config_hash"] = retired_hash
                 retired = root / "retired.json"
@@ -1496,7 +1550,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         self.assertEqual(ledger["accepted_preflights"], 0)
         self.assertIs(ledger["accepted_for_shadow_execution"], False)
         fields = published_frozen_config_fields()
-        self.assertEqual(fields["predecessor_config"]["artifact_sha256"], V2_PREFLIGHT_SHA256)
+        self.assertEqual(fields["predecessor_config"]["artifact_sha256"], V3_PREFLIGHT_SHA256)
         self.assertEqual(fields["output"]["preflight_dirname"], DEFAULT_PREFLIGHT_OUTPUT_DIR.name)
         self.assertEqual(fields["output"]["legacy_preflight_dirname"], LEGACY_PREFLIGHT_OUTPUT_DIR.name)
         self.assertEqual(fields["output"]["superseded_preflight_dirname"], SUPERSEDED_PREFLIGHT_OUTPUT_DIR.name)
@@ -1587,7 +1641,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            config, cases, _ = _mini_world(root, ["pd-1"], cache_query_text=False)
+            config, cases, _ = _mini_world(
+                root, ["pd-1"], cache_query_text=False, write_snapshot=False
+            )
             snapshot = root / public_dev_snapshot_relative(config)
             snapshot.mkdir(parents=True)
             table = pa.table(
@@ -1595,6 +1651,10 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                     "query_id": ["pd-1", "pd-1"],
                     "query_text": [cases[0]["query_text"], cases[0]["query_text"]],
                     "value": [cases[0]["gold_value"], cases[0]["gold_value"]],
+                    "qrels": [
+                        [{"doc_id": "doc-1", "relevance": 1}],
+                        [{"doc_id": "doc-1", "relevance": 1}],
+                    ],
                 }
             )
             pq.write_table(table, snapshot / "0000.parquet")
@@ -1631,7 +1691,7 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
     def test_v2_preflight_cannot_authorize_new_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            v2 = root / SUPERSEDED_PREFLIGHT_OUTPUT_DIR
+            v2 = root / SUPERSEDED_V2_PREFLIGHT_OUTPUT_DIR
             v2.mkdir(parents=True)
             (v2 / "preflight.json").write_text(
                 json.dumps(
@@ -1653,10 +1713,34 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             self.assertFalse((root / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
             self.assertFalse((root / "outputs" / "ledger_structured_citation_shadow_v1").exists())
 
-    def test_v3_directory_is_fixed_and_preflight_binds_without_remote(self) -> None:
+    def test_v3_preflight_cannot_authorize_new_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            v3 = root / SUPERSEDED_PREFLIGHT_OUTPUT_DIR
+            v3.mkdir(parents=True)
+            (v3 / "preflight.json").write_text(
+                json.dumps(
+                    {
+                        "kind": "preflight",
+                        "status": PREFLIGHT_OK,
+                        "execution_commit": V3_SHADOW_EXECUTION_COMMIT,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ShadowError, "v3 preflight cannot authorize"):
+                assert_preflight_authorizes_shadow(
+                    repo_root=root,
+                    execution_commit="deadbeef" * 5,
+                )
+            self.assertFalse((root / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
+
+    def test_v4_directory_is_fixed_and_preflight_binds_without_remote(self) -> None:
         self.assertEqual(
             DEFAULT_PREFLIGHT_OUTPUT_DIR.name,
-            "ledger_structured_citation_shadow_preflight_v3",
+            "ledger_structured_citation_shadow_preflight_v4",
         )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1682,6 +1766,14 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             self.assertIs(report["case_binding_verified"], True)
             self.assertEqual(report["case_count"], 2)
             self.assertIs(report["gold_not_exposed_to_generator"], True)
+            self.assertIs(report["qrels_bound"], True)
+            self.assertEqual(report["qrels_case_count"], 2)
+            self.assertEqual(report["qrels_nonempty_case_count"], 2)
+            self.assertTrue(str(report["qrels_identity_sha256"]))
+            self.assertEqual(
+                report["support_metric_contract_version"],
+                SUPPORT_METRIC_CONTRACT_VERSION,
+            )
             self.assertFalse(official.exists())
             self.assertEqual(sorted(item.name for item in preflight_dir.iterdir()), ["preflight.json"])
 
@@ -1703,10 +1795,27 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
         )
         self.assertEqual(len(bound), 50)
         self.assertEqual(ids_sha256([item["case_id"] for item in bound]), config.field("case_selection", "query_ids_sha256"))
+        self.assertTrue(all(item.get("qrels_bound") for item in bound))
+        self.assertTrue(all(item.get("qrels") for item in bound))
+        from lumenfin.eval.ledger_structured_citation_shadow import (
+            case_binding_report,
+            qrels_identity_sha256,
+        )
+        binding = case_binding_report(
+            bound,
+            snapshot_hash=str(config.field("dataset", "source_artifact_sha256")),
+            snapshot_path=public_dev_snapshot_relative(config).as_posix(),
+        )
+        self.assertEqual(binding["qrels_case_count"], 50)
+        self.assertEqual(binding["qrels_nonempty_case_count"], 50)
+        self.assertEqual(
+            binding["qrels_identity_sha256"],
+            qrels_identity_sha256({item["case_id"]: item["qrels"] for item in bound}),
+        )
         views = [generation_case_view(item) for item in bound]
         blob = json.dumps(views, ensure_ascii=False)
         self.assertNotIn("gold_value", blob)
-        self.assertNotIn("qrels", blob)
+        self.assertNotIn('"qrels":', blob)
 
 
 if __name__ == "__main__":
