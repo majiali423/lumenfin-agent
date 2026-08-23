@@ -422,6 +422,17 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             loaded.config_hash,
             "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b",
         )
+        from lumenfin.eval.ledger_structured_citation_shadow import (
+            SHADOW_EXECUTION_LEDGER,
+            execution_authorized,
+        )
+
+        self.assertIn(loaded.config_hash, SHADOW_EXECUTION_LEDGER)
+        self.assertEqual(
+            SHADOW_EXECUTION_LEDGER[loaded.config_hash]["identity_status"],
+            "CONTRACT_IMPLEMENTATION_IDENTITY",
+        )
+        self.assertIs(execution_authorized(loaded), False)
         blob = path.read_text(encoding="utf-8")
         self.assertNotIn("sk-", blob)
         self.assertNotIn("Authorization", blob)
@@ -1577,9 +1588,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             self.assertEqual(digest, INCOMPLETE_V1_PREFLIGHT_SHA256)
             self.assertEqual(v1.stat().st_size, 3920)
 
-    def test_cli_returns_zero_after_successful_preflight_write(self) -> None:
+    def test_cli_refuses_published_v5_preflight_even_if_runner_is_mocked(self) -> None:
         cli = _load_cli()
-        with patch.object(cli, "run_shadow", return_value={"status": PREFLIGHT_OK, "exit_code": 0}):
+        with patch.object(cli, "run_shadow", return_value={"status": PREFLIGHT_OK, "exit_code": 0}) as mocked:
             self.assertEqual(
                 cli.main(
                     [
@@ -1591,8 +1602,9 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
                         "--preflight-only",
                     ]
                 ),
-                0,
+                2,
             )
+            mocked.assert_not_called()
 
     def test_official_cli_has_no_cases_path_flag(self) -> None:
         cli = _load_cli()

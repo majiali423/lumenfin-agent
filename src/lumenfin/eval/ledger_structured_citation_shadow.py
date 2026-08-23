@@ -7,7 +7,10 @@ A future official run is an exposed public/dev shadow only:
 held_out=false, not a product-accuracy claim, not a LEDGER benchmark, and
 not rc5. Official live scoring binds the verified candidate-cache prefix
 and never opens public_holdout. This module implements tools, preflight,
-and resume. It does not itself authorize a paid remote run.
+and resume. Hash `7db41564…` is the Goal A contract implementation
+identity only; V5 preflight and shadow execution are not authorized on
+the already consumed public/dev set. It does not itself authorize a paid
+remote run.
 """
 
 from __future__ import annotations
@@ -119,6 +122,29 @@ V3_SHADOW_EXECUTION_COMMIT = (
 GOAL_C_CONFIG_HASH = (
     "5b259515dc0480f93f3c5eb564c2efb4fbab9f9fc552b8312ecea88c3854fb24"
 )
+GOAL_A_CONFIG_HASH = (
+    "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b"
+)
+CONTRACT_IMPLEMENTATION_HASH = GOAL_A_CONFIG_HASH
+GOAL_A_IDENTITY_COMMIT = "b00c052fe5bb683a7466ec68caa4d2accf62fbd3"
+CONSUMED_PUBLIC_DEV_QUERY_IDS_SHA256 = (
+    "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa"
+)
+CONSUMED_CACHE_FILE_SHA256 = (
+    "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a"
+)
+CONSUMED_CACHE_MANIFEST_SHA256 = (
+    "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90"
+)
+UNAUTHORIZED_SHADOW_EXECUTION = (
+    "config is not authorized: consumed exposed public/dev dataset"
+)
+EXECUTION_LEDGER_SCHEMA_VERSION = (
+    "lumenfin_ledger_structured_citation_shadow_execution.v1"
+)
+DEFAULT_EXECUTION_LEDGER_PATH = (
+    Path("data") / "eval_rag" / "structured_citation_shadow_execution_ledger.json"
+)
 SUPPORT_METRIC_CONTRACT_VERSION = "citation_support_qrels_bound.v1"
 CLAIM_SUPPORT_NOT_EVALUABLE = "NOT_EVALUABLE"
 SUPPORT_INVALID_QRELS_NOT_BOUND = "qrels_not_bound_or_invalid"
@@ -209,6 +235,41 @@ RETIRED_CONFIG_HASHES = {
         "accepted_for_shadow_execution": False,
         "shadow_results": 0,
     },
+}
+
+
+def consumed_public_dev_dataset_identity() -> dict[str, Any]:
+    return {
+        "split": CANONICAL_SPLIT,
+        "query_count": 50,
+        "query_ids_sha256": CONSUMED_PUBLIC_DEV_QUERY_IDS_SHA256,
+        "gold_identity_sha256": GOLD_IDENTITY_SHA256,
+        "dataset_snapshot_sha256": DATASET_SNAPSHOT_SHA256,
+        "source_artifact_sha256": DATASET_SOURCE_ARTIFACT_SHA256,
+        "cache_file_sha256": CONSUMED_CACHE_FILE_SHA256,
+        "cache_manifest_sha256": CONSUMED_CACHE_MANIFEST_SHA256,
+    }
+
+
+def goal_a_execution_record() -> dict[str, Any]:
+    return {
+        "config_hash": GOAL_A_CONFIG_HASH,
+        "identity_status": "CONTRACT_IMPLEMENTATION_IDENTITY",
+        "dataset_identity": consumed_public_dev_dataset_identity(),
+        "status": "NOT_AUTHORIZED_FOR_EXECUTION",
+        "reason": "consumed_exposed_public_dev",
+        "preflight_authorized": False,
+        "shadow_authorized": False,
+        "execution_authorized": False,
+        "preflight_executions": 0,
+        "shadow_executions": 0,
+        "superseded_at_commit": GOAL_A_IDENTITY_COMMIT,
+        "retired_before_preflight": True,
+    }
+
+
+SHADOW_EXECUTION_LEDGER: dict[str, dict[str, Any]] = {
+    GOAL_A_CONFIG_HASH: goal_a_execution_record(),
 }
 EVALUATION_MODE = "sealed_candidate_replay_shadow"
 PREFLIGHT_SCHEMA_VERSION = "1.3"
@@ -664,7 +725,14 @@ def assert_exact_output_path(
 
 
 def refuse_env_remote_override() -> None:
-    for key in ("LUMENFIN_SHADOW_ALLOW_REMOTE", "ALLOW_REMOTE", "MAS_ALLOW_REMOTE"):
+    for key in (
+        "LUMENFIN_SHADOW_ALLOW_REMOTE",
+        "LUMENFIN_SHADOW_FORCE_EXECUTE",
+        "LUMENFIN_SHADOW_AUTHORIZE",
+        "LUMENFIN_AUTHORIZE_SHADOW",
+        "ALLOW_REMOTE",
+        "MAS_ALLOW_REMOTE",
+    ):
         raw = os.getenv(key)
         if raw and raw.strip() and raw.strip().lower() not in {"0", "false", "no"}:
             raise ShadowError("environment variables cannot authorize remote shadow execution")
@@ -1096,7 +1164,87 @@ def published_frozen_config_fields() -> dict[str, Any]:
 
 
 def published_config_hash() -> str:
+    """Return the Goal A contract implementation identity, not an execution grant."""
     return compute_config_hash(published_frozen_config_fields())
+
+
+def shadow_execution_record(config_hash: str) -> dict[str, Any] | None:
+    record = SHADOW_EXECUTION_LEDGER.get(str(config_hash))
+    return dict(record) if record is not None else None
+
+
+def config_matches_consumed_public_dev(config: FrozenShadowConfig) -> bool:
+    expected = consumed_public_dev_dataset_identity()
+    actual = {
+        "split": str(config.field("split") or ""),
+        "query_count": int(config.field("case_selection", "query_count") or 0),
+        "query_ids_sha256": str(config.field("case_selection", "query_ids_sha256") or ""),
+        "gold_identity_sha256": str(config.field("case_selection", "gold_identity_sha256") or ""),
+        "dataset_snapshot_sha256": str(config.field("dataset", "dataset_snapshot_sha256") or ""),
+        "source_artifact_sha256": str(config.field("dataset", "source_artifact_sha256") or ""),
+        "cache_file_sha256": str(
+            config.field("candidate_cache_generation", "cache_file_sha256") or ""
+        ),
+        "cache_manifest_sha256": str(config.field("candidate_cache", "manifest_sha256") or ""),
+    }
+    return actual == expected
+
+
+def execution_authorized(config: FrozenShadowConfig) -> bool:
+    record = SHADOW_EXECUTION_LEDGER.get(config.config_hash)
+    if record is not None and not record.get("execution_authorized"):
+        return False
+    if config_matches_consumed_public_dev(config):
+        return False
+    return True
+
+
+def path_targets_reserved_shadow_output(path: Path) -> bool:
+    reserved = (
+        DEFAULT_OFFICIAL_OUTPUT_DIR.name.casefold(),
+        DEFAULT_PREFLIGHT_OUTPUT_DIR.name.casefold(),
+    )
+    for part in Path(path).parts:
+        token = part.casefold()
+        if any(token == name or token.startswith(name) for name in reserved):
+            return True
+    return False
+
+
+def assert_consumed_shadow_outputs_protected(
+    config: FrozenShadowConfig,
+    *,
+    output_dir: Path | None = None,
+    preflight_output_dir: Path | None = None,
+    resume: bool = False,
+) -> None:
+    consumed = config.config_hash in SHADOW_EXECUTION_LEDGER or config_matches_consumed_public_dev(
+        config
+    )
+    if not consumed:
+        return
+    if resume:
+        raise ShadowError(UNAUTHORIZED_SHADOW_EXECUTION)
+    dirs = [item for item in (output_dir, preflight_output_dir) if item is not None]
+    if any(path_targets_reserved_shadow_output(item) for item in dirs):
+        raise ShadowError(UNAUTHORIZED_SHADOW_EXECUTION)
+
+
+def refuse_unauthorized_shadow_execution(
+    config: FrozenShadowConfig,
+    *,
+    output_dir: Path | None = None,
+    preflight_output_dir: Path | None = None,
+    resume: bool = False,
+) -> None:
+    if not execution_authorized(config):
+        raise ShadowError(UNAUTHORIZED_SHADOW_EXECUTION)
+    assert_consumed_shadow_outputs_protected(
+        config,
+        output_dir=output_dir,
+        preflight_output_dir=preflight_output_dir,
+        resume=resume,
+    )
 
 
 class FrozenShadowConfig:
@@ -2499,23 +2647,7 @@ def assert_preflight_authorizes_shadow(
         raise ShadowError("v3 preflight cannot authorize a later execution commit")
     if v4.is_file() and not v5.is_file():
         raise ShadowError("v4 preflight cannot authorize a later execution commit")
-    if not v5.is_file():
-        raise ShadowError("official shadow requires an accepted v5 preflight")
-    report = read_json_object(v5, field="preflight")
-    if str(report.get("execution_commit") or "") != execution_commit:
-        raise ShadowError("v5 preflight cannot authorize a different execution commit")
-    if report.get("case_binding_verified") is not True:
-        raise ShadowError("v5 preflight did not verify case binding")
-    if report.get("qrels_bound") is not True:
-        raise ShadowError("v5 preflight did not bind evaluator qrels")
-    if report.get("alias_protocol_version") != CITATION_ALIAS_PROTOCOL_VERSION:
-        raise ShadowError("v5 preflight did not bind the citation alias protocol")
-    if report.get("authorization_status") in {
-        "SUPERSEDED_BEFORE_SHADOW",
-        "SUPERSEDED_BEFORE_NEXT_SHADOW",
-        "SUPERSEDED_BEFORE_PREFLIGHT",
-    }:
-        raise ShadowError("superseded preflight cannot authorize shadow execution")
+    raise ShadowError("v5 preflight is not authorized: consumed exposed public/dev dataset")
 
 
 def run_preflight(
@@ -2530,6 +2662,12 @@ def run_preflight(
     verify_runtime: bool = True,
     require_chat_key: bool = True,
 ) -> dict[str, Any]:
+    refuse_unauthorized_shadow_execution(
+        frozen_config,
+        output_dir=official_output_dir,
+        preflight_output_dir=preflight_output_dir,
+        resume=False,
+    )
     audit = InputAccessAudit()
     token = _ACCESS_AUDIT.set(audit)
     try:
@@ -2779,6 +2917,12 @@ def run_shadow(
     strict_paths: bool = False,
     require_chat_key: bool = True,
 ) -> dict[str, Any]:
+    refuse_unauthorized_shadow_execution(
+        frozen_config,
+        output_dir=output_dir,
+        preflight_output_dir=preflight_output_dir,
+        resume=resume,
+    )
     refuse_env_remote_override()
     if not confirm_exposed_shadow:
         raise ShadowError("structured citation shadow requires --confirm-exposed-shadow")

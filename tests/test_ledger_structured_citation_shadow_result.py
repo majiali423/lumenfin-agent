@@ -283,6 +283,21 @@ class LedgerStructuredCitationShadowResultTests(unittest.TestCase):
         )
         self.assertFalse((ROOT / SUPERSEDED_V4_PREFLIGHT_OUTPUT_DIR / "preflight.json").is_file())
         self.assertFalse((ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json").is_file())
+        from lumenfin.eval.ledger_structured_citation_shadow import (
+            SHADOW_EXECUTION_LEDGER,
+            execution_authorized,
+        )
+
+        config = load_frozen_config(ROOT / DEFAULT_FROZEN_CONFIG_PATH, require_published=True)
+        self.assertEqual(
+            SHADOW_EXECUTION_LEDGER[config.config_hash]["preflight_executions"],
+            0,
+        )
+        self.assertEqual(
+            SHADOW_EXECUTION_LEDGER[config.config_hash]["shadow_executions"],
+            0,
+        )
+        self.assertIs(execution_authorized(config), False)
 
     def test_ledger_has_no_secrets_paths_queries_or_gold(self) -> None:
         blob = RESULT_PATH.read_text(encoding="utf-8")

@@ -194,7 +194,12 @@ official preflight artifact is `INCOMPLETE_PREFLIGHT_AUDIT_SCHEMA`
 published hash `5b259515…` recorded `preflight_executions=0`,
 `shadow_executions=0`, and is `SUPERSEDED_BEFORE_PREFLIGHT`
 (`citation_alias_contract_changed`). V4 was never executed
-(`v4_preflight_executions=0`). Current published hash is `7db41564…`.
-The next official preflight directory is
-`outputs/ledger_structured_citation_shadow_preflight_v5/` and has not
-been executed. Do not rerun or rescore the sealed public/dev shadow.
+(`v4_preflight_executions=0`). Hash `7db41564…` is the Goal A
+**contract implementation identity**, not an executable shadow candidate.
+V5 was never executed and is retired before preflight
+(`preflight_authorized=false`, `shadow_authorized=false`,
+`reason=consumed_exposed_public_dev`). Goal A was validated by offline
+contract tests only. No repaired public/dev score exists. Do not run V5
+preflight or shadow. Do not rerun or rescore the sealed public/dev
+shadow. Execution ledger:
+[`../data/eval_rag/structured_citation_shadow_execution_ledger.json`](../data/eval_rag/structured_citation_shadow_execution_ledger.json).

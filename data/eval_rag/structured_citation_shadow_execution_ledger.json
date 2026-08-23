@@ -1,0 +1,36 @@
+{
+  "schema_version": "lumenfin_ledger_structured_citation_shadow_execution.v1",
+  "kind": "execution_authorization_ledger",
+  "notes": [
+    "Parameter identity and execution authorization are separate.",
+    "7db41564 remains the Goal A contract implementation identity.",
+    "V5 was never executed and is retired before preflight.",
+    "Goal A was validated by offline contract tests only.",
+    "No repaired public/dev score exists."
+  ],
+  "records": {
+    "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b": {
+      "config_hash": "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b",
+      "identity_status": "CONTRACT_IMPLEMENTATION_IDENTITY",
+      "dataset_identity": {
+        "split": "public_dev",
+        "query_count": 50,
+        "query_ids_sha256": "6fbe540fa4cca45f298950b7728d769beee8bb43a9711c3bece01a2b62a8f9aa",
+        "gold_identity_sha256": "990a7ff71234a0a9b3e2c021b972fbb2e93c71da6e747e6f647e25b8c51238a2",
+        "dataset_snapshot_sha256": "6449593accbf71ca282f28b424b6e5d267dd7f180ccd18238614d92b412d44ea",
+        "source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad",
+        "cache_file_sha256": "c49d06665376b769950492cecd41cb3d7ad144509e57d0cdf09493aeab52e65a",
+        "cache_manifest_sha256": "2550d0310caaa68f13107e8c0f870d891bda3797908b5a888e30b49048b9db90"
+      },
+      "status": "NOT_AUTHORIZED_FOR_EXECUTION",
+      "reason": "consumed_exposed_public_dev",
+      "preflight_authorized": false,
+      "shadow_authorized": false,
+      "execution_authorized": false,
+      "preflight_executions": 0,
+      "shadow_executions": 0,
+      "superseded_at_commit": "b00c052fe5bb683a7466ec68caa4d2accf62fbd3",
+      "retired_before_preflight": true
+    }
+  }
+}

@@ -125,10 +125,14 @@ image has been created. Latest published LumenFin remains
   chunk IDs. Public structured answers remain schema `1.0` with stable
   IDs. Current published hash is
   `7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b`.
-  The next official preflight directory is
-  `outputs/ledger_structured_citation_shadow_preflight_v5/` and has not
-  been executed. Do not rerun public/dev to refresh numbers. The sealed
-  18 unknown citations are not reclassified.
+  That hash remains the Goal A contract implementation identity. V5 was
+  never executed and is retired before preflight
+  (`consumed_exposed_public_dev`). Goal A was validated by offline
+  contract tests only. No repaired public/dev score exists. Do not run
+  V5 preflight or shadow. Do not rerun public/dev to refresh numbers.
+  The sealed 18 unknown citations are not reclassified. Execution
+  ledger:
+  `data/eval_rag/structured_citation_shadow_execution_ledger.json`.
 
 ## 0.1.0rc4 — 2026-08-13
 

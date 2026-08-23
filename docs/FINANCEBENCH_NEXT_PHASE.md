@@ -25,9 +25,10 @@ to the official scorer). Do not publish a repaired support score or
 rerun public/dev to refresh numbers. Official raw files stay under
 `outputs/ledger_structured_citation_shadow_v1/`. Goal C hash
 `5b259515…` never executed and is superseded before preflight. V4 was
-never executed. The next preflight directory is
-`outputs/ledger_structured_citation_shadow_preflight_v5/` and has not
-been executed. Current published hash is `7db41564…`.
+never executed. Hash `7db41564…` is the Goal A contract implementation
+identity only. V5 was never executed and is retired before preflight.
+Do not run V5 preflight or shadow. Goal A was validated by offline
+contract tests only. No repaired public/dev score exists.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.

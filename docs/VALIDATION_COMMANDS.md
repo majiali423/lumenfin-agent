@@ -229,10 +229,12 @@ refresh numbers. Audit:
 v3 authorized that one sealed shadow and cannot authorize a later
 commit. Goal C hash `5b259515…` never executed (`preflight=0`,
 `shadow=0`) and is superseded before preflight. V4 was never executed.
-Current published hash is `7db41564…`; next preflight is v5 and has not
-been executed. rc5 must not claim reliable structured citations from
-this run.
+Hash `7db41564…` is the Goal A contract implementation identity only.
+V5 was never executed and is retired before preflight. Do not run V5
+preflight or shadow. Goal A was validated by offline contract tests
+only. No repaired public/dev score exists. rc5 must not claim reliable
+structured citations from this run.
 
 ```powershell
-python -m unittest tests.test_citation_alias tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_result tests.test_ledger_structured_citation_qrel_binding tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
+python -m unittest tests.test_citation_alias tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_execution tests.test_ledger_structured_citation_shadow_result tests.test_ledger_structured_citation_qrel_binding tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
 ```
