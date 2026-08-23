@@ -206,7 +206,7 @@ shadow. Execution ledger:
 The tracked JSON is the only execution-grant source; code loads and
 enforces it. Missing, unknown, or malformed hashes default to deny.
 
-## Synthetic remote alias-compliance canary (not run)
+## Synthetic remote alias-compliance canary (sealed)
 
 Independent suite `synthetic_remote_alias_compliance_canary`. Eight
 fictional workshop cases prove only that a model can emit legal `E01`–`E10`
@@ -220,11 +220,13 @@ Frozen config:
 (`config_hash`
 `da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445`;
 previous hash `51331a4f…` never preflighted or remoted).
-Authorization:
+Authorization is closed (`ONE_SHOT_CONSUMED`, executions 1/1):
 [`../data/eval_rag/synthetic_alias_compliance_authorization.json`](../data/eval_rag/synthetic_alias_compliance_authorization.json).
-One-shot official preflight/remote is authorized against ancestor
-`f91c474…` (`max_official_*_executions=1`). CLI:
-`scripts/run_synthetic_alias_compliance_canary.py`. Future official
-remote runs require both `--confirm-synthetic-alias-compliance` and
-`--allow-remote`. Preflight is `--preflight-only` and makes no provider
-calls. Do not reuse LEDGER V5 hash `7db41564…`.
+Official preflight (`PREFLIGHT_OK`, remote=0) and one 8-case DeepSeek
+canary ran at execution commit `030bf725…`: 8/8, provider_errors=0,
+protocol and synthetic evidence gates passed. Claim name only:
+**live-model synthetic alias protocol compliance**. Tracked ledger:
+[`../data/eval_rag/synthetic_alias_compliance_result.json`](../data/eval_rag/synthetic_alias_compliance_result.json).
+Do not retune, resume, or rerun. Do not reuse LEDGER V5 hash
+`7db41564…`. Interview summary:
+[`AUTUMN_RECRUITING_EVIDENCE.md`](AUTUMN_RECRUITING_EVIDENCE.md).

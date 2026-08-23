@@ -28,18 +28,18 @@
       "config_hash": "da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445",
       "suite": "synthetic_remote_alias_compliance_canary",
       "dataset_kind": "synthetic_fictional",
-      "identity_status": "ONE_SHOT_AUTHORIZED",
-      "execution_authorized": true,
-      "preflight_authorized": true,
-      "remote_run_authorized": true,
-      "reason": "one_shot_official_preflight_and_remote",
-      "official_preflight_executions": 0,
-      "official_remote_executions": 0,
+      "identity_status": "ONE_SHOT_CONSUMED",
+      "execution_authorized": false,
+      "preflight_authorized": false,
+      "remote_run_authorized": false,
+      "reason": "one_shot_consumed_dataset_closed",
+      "official_preflight_executions": 1,
+      "official_remote_executions": 1,
       "max_official_preflight_executions": 1,
       "max_official_remote_executions": 1,
       "requires_successful_preflight": true,
       "resume_authorized_only_for_transport_interruption": true,
-      "dataset_consumed": false,
+      "dataset_consumed": true,
       "dataset_identity": {
         "dataset_schema_version": "synthetic_alias_compliance_dataset.v1",
         "case_count": 8,
@@ -52,5 +52,5 @@
       "required_implementation_ancestor": "f91c474642c5c4f6f0454e54ac86fda25bb9efe4"
     }
   },
-  "authorization_sha256": "3be92af07099e64065fbb0369d58631d22bf7b4ca68f5a827ae1d53bce8ae786"
+  "authorization_sha256": "c28fc414265b86bf939eee7d16651f6899ec96de3ea2f64b55516bc84ef1d8dc"
 }

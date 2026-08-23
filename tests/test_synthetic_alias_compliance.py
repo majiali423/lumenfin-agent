@@ -228,7 +228,7 @@ class SyntheticAliasContractTests(unittest.TestCase):
 
 
 class SyntheticAliasAuthorizationTests(unittest.TestCase):
-    def test_published_record_is_one_shot_authorized(self) -> None:
+    def test_published_record_is_consumed_and_closed(self) -> None:
         config = load_frozen_config(ROOT / DEFAULT_CONFIG_PATH, repo_root=ROOT, require_published=True)
         record = load_authorization(repo_root=ROOT)["records"][config.config_hash]
         self.assertEqual(config.config_hash, published_config_hash(repo_root=ROOT))
@@ -249,19 +249,17 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
 
         self.assertIn(RETIRED_BEFORE_PREFLIGHT_HASH, RETIRED_CONFIG_HASHES)
         self.assertEqual(config.payload["suite"], SUITE)
-        self.assertIs(record["preflight_authorized"], True)
-        self.assertIs(record["remote_run_authorized"], True)
-        self.assertIs(record["execution_authorized"], True)
-        self.assertEqual(record["official_preflight_executions"], 0)
-        self.assertEqual(record["official_remote_executions"], 0)
-        self.assertEqual(record["max_official_preflight_executions"], 1)
-        self.assertEqual(record["max_official_remote_executions"], 1)
-        self.assertEqual(
-            record["required_implementation_ancestor"],
-            "f91c474642c5c4f6f0454e54ac86fda25bb9efe4",
-        )
-        self.assertTrue(execution_authorized(config, repo_root=ROOT, want="preflight"))
-        self.assertTrue(execution_authorized(config, repo_root=ROOT, want="remote"))
+        self.assertIs(record["preflight_authorized"], False)
+        self.assertIs(record["remote_run_authorized"], False)
+        self.assertIs(record["execution_authorized"], False)
+        self.assertIs(record["dataset_consumed"], True)
+        self.assertEqual(record["official_preflight_executions"], 1)
+        self.assertEqual(record["official_remote_executions"], 1)
+        self.assertEqual(record["reason"], "one_shot_consumed_dataset_closed")
+        self.assertFalse(execution_authorized(config, repo_root=ROOT, want="preflight"))
+        self.assertFalse(execution_authorized(config, repo_root=ROOT, want="remote"))
+        with self.assertRaisesRegex(CanaryError, "not authorized"):
+            refuse_unauthorized(config, repo_root=ROOT, want="preflight")
 
     def test_unknown_copy_dataset_change_dir_and_env_force_are_denied(self) -> None:
         config = load_frozen_config(ROOT / DEFAULT_CONFIG_PATH, repo_root=ROOT, require_published=True)
@@ -317,8 +315,6 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
                     self.assertEqual(payload["cases_executed"], 0)
                     self.assertEqual(payload["remote_request_count"], 0)
             self.assertEqual(probe.remote_request_count, 0)
-        self.assertFalse((ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
-        self.assertFalse((ROOT / DEFAULT_OFFICIAL_OUTPUT_DIR).exists())
 
     def test_cli_requires_dual_keys_and_still_denies_official_run(self) -> None:
         cli = _load_cli()
@@ -353,8 +349,31 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
             with self.assertRaisesRegex(CanaryError, "overwrite"):
                 assert_output_not_overwritten(dest)
 
+    def test_tracked_result_is_readable_without_raw_outputs(self) -> None:
+        path = ROOT / "data" / "eval_rag" / "synthetic_alias_compliance_result.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["seal_status"], "RECORDED_COMPLETE")
+        self.assertEqual(payload["claim"], "live-model synthetic alias protocol compliance")
+        self.assertIs(payload["product_accuracy_claim"], False)
+        self.assertIs(payload["retuning_after_result_forbidden"], True)
+        self.assertIs(payload["protocol_gate_passed"], True)
+        self.assertIs(payload["synthetic_evidence_gate_passed"], True)
+        self.assertEqual(payload["completion_evidence"]["cases_succeeded"], 8)
+        self.assertEqual(payload["protocol"]["alias_mapping_success"], 7)
+        self.assertEqual(len(payload["cases"]), 8)
+        incomplete = next(item for item in payload["cases"] if "no-answer" in item["case_id"])
+        self.assertEqual(incomplete["citations"], [])
+        self.assertIs(incomplete["incomplete_case_handled"], True)
+        tracked = subprocess.run(
+            ["git", "check-ignore", "-q", "data/eval_rag/synthetic_alias_compliance_result.json"],
+            cwd=ROOT,
+            check=False,
+        )
+        self.assertNotEqual(tracked.returncode, 0)
+
     def test_tracked_files_have_no_credentials_or_absolute_paths(self) -> None:
-        for rel in (DEFAULT_DATASET_PATH, DEFAULT_CONFIG_PATH, DEFAULT_AUTHORIZATION_PATH):
+        result = Path("data") / "eval_rag" / "synthetic_alias_compliance_result.json"
+        for rel in (DEFAULT_DATASET_PATH, DEFAULT_CONFIG_PATH, DEFAULT_AUTHORIZATION_PATH, result):
             blob = (ROOT / rel).read_text(encoding="utf-8")
             self.assertNotIn("sk-", blob)
             self.assertNotIn("DEEPSEEK_API_KEY", blob)

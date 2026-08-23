@@ -14,7 +14,8 @@ behavior.
 | [CONFIGURATION.md](CONFIGURATION.md) | Runtime/provider configuration |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Locked install + release gates |
 | [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Controlled deployment boundary + validated gate summary |
-| [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer / verified chunk-id citations (`1.0`); synthetic canary, public/dev shadow, and synthetic alias-compliance canary are not accuracy claims |
+| [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer / verified chunk-id citations (`1.0`); synthetic canary, public/dev shadow, and sealed synthetic alias-compliance canary are not accuracy claims |
+| [AUTUMN_RECRUITING_EVIDENCE.md](AUTUMN_RECRUITING_EVIDENCE.md) | Autumn-recruiting interview evidence (not product accuracy) |
 | [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline and optional live demo runbook |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Current RC freeze evidence |
 

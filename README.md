@@ -23,7 +23,8 @@ limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
 
 [Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) ·
 [Limitations](docs/PRODUCTION_LIMITATIONS.md) · [Demo](docs/DEMO_GUIDE.md) ·
-[Release report](docs/PORTFOLIO_RELEASE_REPORT.md)
+[Release report](docs/PORTFOLIO_RELEASE_REPORT.md) ·
+[Autumn recruiting evidence](docs/AUTUMN_RECRUITING_EVIDENCE.md)
 
 ---
 

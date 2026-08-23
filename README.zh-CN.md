@@ -20,7 +20,8 @@ FinRun schema `1.0` · FinAgentBench 权威 pin **`v0.1.0-rc.3`** · required CI
 
 [文档](docs/README.md) · [架构](docs/ARCHITECTURE.md) ·
 [局限](docs/PRODUCTION_LIMITATIONS.md) · [演示](docs/DEMO_GUIDE.md) ·
-[发布报告](docs/PORTFOLIO_RELEASE_REPORT.md)
+[发布报告](docs/PORTFOLIO_RELEASE_REPORT.md) ·
+[秋招证据](docs/AUTUMN_RECRUITING_EVIDENCE.md)
 
 ---
 

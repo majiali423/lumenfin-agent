@@ -1,0 +1,180 @@
+{
+  "schema_version": "synthetic_alias_compliance_result_ledger.v1",
+  "kind": "sealed_result_ledger",
+  "suite": "synthetic_remote_alias_compliance_canary",
+  "dataset_kind": "synthetic_fictional",
+  "seal_status": "RECORDED_COMPLETE",
+  "claim": "live-model synthetic alias protocol compliance",
+  "product_accuracy_claim": false,
+  "benchmark_claim": false,
+  "financial_accuracy_claim": false,
+  "retrieval_quality_claim": false,
+  "retuning_after_result_forbidden": true,
+  "public_holdout_used": false,
+  "financebench_used": false,
+  "ledger_public_dev_used": false,
+  "protocol_gate_passed": true,
+  "synthetic_evidence_gate_passed": true,
+  "release_gate_passed": true,
+  "provenance": {
+    "execution_commit": "030bf725131c8323aaa5cfc4de946fcc254809d6",
+    "executed_at": "2026-08-23T19:02:52Z",
+    "executed_at_source": "summary.json executed_at",
+    "executed_at_authoritative": true,
+    "preflight_executed_at": "2026-08-23T19:02:25Z",
+    "config_hash": "da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445",
+    "dataset_hash": "0d9822409b77707a0e5a54426c5f0ec592fef26553b238e9b0a7010045961b7a",
+    "prompt_sha256": "723fbe0ca8d468000f6b2f934e315886bb995abe850a17288ef6f53b45d8047d",
+    "authorization_sha256_at_execution": "3be92af07099e64065fbb0369d58631d22bf7b4ca68f5a827ae1d53bce8ae786",
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "preflight_path": "outputs/synthetic_alias_compliance_preflight_v1/preflight.json",
+    "preflight_sha256": "849939c709408d5b703df8a26823e99bcae2d02b387faa8fab521d2ab1677a2a",
+    "preflight_status": "PREFLIGHT_OK",
+    "summary_path": "outputs/synthetic_alias_compliance_v1/summary.json",
+    "summary_sha256": "def44fb4350f647ff2db625d33dc770d08fd9fe255d6c2af0936b86e05a93cf1",
+    "per_case_sha256": "177d635326d855d01fb2bd08bcc30e7bc7b24db61c0caa1fc432fef8a634853e",
+    "official_output_dir": "outputs/synthetic_alias_compliance_v1"
+  },
+  "completion_evidence": {
+    "status": "CANARY_COMPLETE",
+    "exit_code": 0,
+    "cases_total": 8,
+    "cases_succeeded": 8,
+    "cases_failed": 0,
+    "cases_remaining": 0
+  },
+  "calls": {
+    "logical_generate_calls": 8,
+    "recorded_remote_calls": 8,
+    "generate_attempts": 8,
+    "provider_errors": 0,
+    "embedding": 0,
+    "rerank": 0,
+    "latency_p50": 1.3837892999872565,
+    "latency_p95": 2.6006073999451473,
+    "billing_semantics": "at_least_once",
+    "exactly_once": false,
+    "unobserved_inflight_possible": true
+  },
+  "protocol": {
+    "json_parse_success": 8,
+    "alias_syntax_valid": 8,
+    "alias_allowlist_valid": 8,
+    "unknown_aliases": 0,
+    "raw_chunk_id_leakage": 0,
+    "mixed_valid_invalid": 0,
+    "alias_mapping_success": 7,
+    "structured_answer_emitted": 8,
+    "citation_validation_failed": 0,
+    "expected_alias_match": 7,
+    "mapped_chunk_matches_synthetic_qrels": 7,
+    "incomplete_case_handled": true
+  },
+  "cases": [
+    {
+      "case_id": "SAC-01-harborwick-crate-count",
+      "succeeded": true,
+      "expected_alias_match": true,
+      "mapped_chunk_matches_synthetic_qrels": true,
+      "incomplete_case_handled": false,
+      "alias_mapping_success": true,
+      "citations": [
+        "sac-pebbleford:memo-alpha:p1:c0"
+      ],
+      "http_attempts": 1,
+      "latency_seconds": 2.6006073999451473
+    },
+    {
+      "case_id": "SAC-02-wick-lot-label",
+      "succeeded": true,
+      "expected_alias_match": true,
+      "mapped_chunk_matches_synthetic_qrels": true,
+      "incomplete_case_handled": false,
+      "alias_mapping_success": true,
+      "citations": [
+        "sac-cedar:card-beta:p2:c2"
+      ],
+      "http_attempts": 1,
+      "latency_seconds": 1.4380617999704555
+    },
+    {
+      "case_id": "SAC-03-ribbon-spool-color",
+      "succeeded": true,
+      "expected_alias_match": true,
+      "mapped_chunk_matches_synthetic_qrels": true,
+      "incomplete_case_handled": false,
+      "alias_mapping_success": true,
+      "citations": [
+        "sac-night:slip-gamma:p3:c6"
+      ],
+      "http_attempts": 1,
+      "latency_seconds": 1.2138097999850288
+    },
+    {
+      "case_id": "SAC-04-shelf-hook-count",
+      "succeeded": true,
+      "expected_alias_match": true,
+      "mapped_chunk_matches_synthetic_qrels": true,
+      "incomplete_case_handled": false,
+      "alias_mapping_success": true,
+      "citations": [
+        "sac-dock:card-delta:p4:c9"
+      ],
+      "http_attempts": 1,
+      "latency_seconds": 1.384867100045085
+    },
+    {
+      "case_id": "SAC-05-dual-tag-and-bin",
+      "succeeded": true,
+      "expected_alias_match": true,
+      "mapped_chunk_matches_synthetic_qrels": true,
+      "incomplete_case_handled": false,
+      "alias_mapping_success": true,
+      "citations": [
+        "sac-larkfin:tray-epsilon:p5:c1",
+        "sac-larkfin:tray-epsilon:p5:c8"
+      ],
+      "http_attempts": 1,
+      "latency_seconds": 1.1598923000274226
+    },
+    {
+      "case_id": "SAC-06-combine-hours-and-lane",
+      "succeeded": true,
+      "expected_alias_match": true,
+      "mapped_chunk_matches_synthetic_qrels": true,
+      "incomplete_case_handled": false,
+      "alias_mapping_success": true,
+      "citations": [
+        "sac-mossgate:studio-zeta:p6:c3",
+        "sac-mossgate:studio-zeta:p6:c5"
+      ],
+      "http_attempts": 1,
+      "latency_seconds": 1.2446608999744058
+    },
+    {
+      "case_id": "SAC-07-no-answer-glint-count",
+      "succeeded": true,
+      "expected_alias_match": false,
+      "mapped_chunk_matches_synthetic_qrels": false,
+      "incomplete_case_handled": true,
+      "alias_mapping_success": false,
+      "citations": [],
+      "http_attempts": 1,
+      "latency_seconds": 1.2427459999453276
+    },
+    {
+      "case_id": "SAC-08-middle-evidence-distractors",
+      "succeeded": true,
+      "expected_alias_match": true,
+      "mapped_chunk_matches_synthetic_qrels": true,
+      "incomplete_case_handled": false,
+      "alias_mapping_success": true,
+      "citations": [
+        "sac-quillmere:loom-theta:p8:c4"
+      ],
+      "http_attempts": 1,
+      "latency_seconds": 1.3837892999872565
+    }
+  ]
+}

@@ -64,6 +64,7 @@ data/**
 !data/eval_rag/synthetic_alias_compliance_cases.json
 !data/eval_rag/synthetic_alias_compliance_config.json
 !data/eval_rag/synthetic_alias_compliance_authorization.json
+!data/eval_rag/synthetic_alias_compliance_result.json
 !data/.gitkeep
 
 .env

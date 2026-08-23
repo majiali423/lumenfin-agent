@@ -148,8 +148,13 @@ image has been created. Latest published LumenFin remains
   `da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445`
   and freezes both the protocol gate and the synthetic evidence gate.
   One-shot official preflight/remote authorization is bound to ancestor
-  `f91c474…` with max executions 1/1. Do not reuse retired LEDGER V5
-  hash `7db41564…`.
+  `f91c474…` with max executions 1/1. Official preflight (`PREFLIGHT_OK`,
+  remote=0) and the 8-case DeepSeek canary ran once at execution commit
+  `030bf725…`. Result: 8/8, provider_errors=0, both frozen gates passed.
+  Claim name only: live-model synthetic alias protocol compliance. Sealed
+  ledger: `data/eval_rag/synthetic_alias_compliance_result.json`.
+  Authorization is closed (`ONE_SHOT_CONSUMED`, executions 1/1). Do not
+  retune or rerun. Do not reuse retired LEDGER V5 hash `7db41564…`.
 
 ## 0.1.0rc4 — 2026-08-13
 
