@@ -74,7 +74,7 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
     published_config_hash,
     published_frozen_config_fields,
     read_sealed_baseline_readonly,
-    run_shadow,
+    run_shadow as _run_shadow_impl,
     sha256_normalized_file,
     sha256_raw_file,
     summarize_rows,
@@ -331,6 +331,11 @@ def _mini_world(
     return load_frozen_config(config_path), cases, tmp
 
 
+def run_shadow(**kwargs):
+    kwargs.setdefault("synthetic_unlisted_ok", True)
+    return _run_shadow_impl(**kwargs)
+
+
 def _authorized_run(generate, **kwargs):
     kwargs.setdefault("confirm_exposed_shadow", True)
     kwargs.setdefault("allow_remote", True)
@@ -338,6 +343,7 @@ def _authorized_run(generate, **kwargs):
     kwargs.setdefault("verify_tag", False)
     kwargs.setdefault("require_clean", False)
     kwargs.setdefault("verify_runtime", False)
+    kwargs.setdefault("synthetic_unlisted_ok", True)
     kwargs["generate_fn"] = generate
     return run_shadow(**kwargs)
 
@@ -423,13 +429,16 @@ class LedgerStructuredCitationShadowTests(unittest.TestCase):
             "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b",
         )
         from lumenfin.eval.ledger_structured_citation_shadow import (
-            SHADOW_EXECUTION_LEDGER,
             execution_authorized,
+            load_execution_ledger,
         )
 
-        self.assertIn(loaded.config_hash, SHADOW_EXECUTION_LEDGER)
+        ledger = load_execution_ledger()
+        self.assertIsNotNone(ledger)
+        assert ledger is not None
+        self.assertIn(loaded.config_hash, ledger["records"])
         self.assertEqual(
-            SHADOW_EXECUTION_LEDGER[loaded.config_hash]["identity_status"],
+            ledger["records"][loaded.config_hash]["identity_status"],
             "CONTRACT_IMPLEMENTATION_IDENTITY",
         )
         self.assertIs(execution_authorized(loaded), False)

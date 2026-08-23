@@ -27,8 +27,9 @@ rerun public/dev to refresh numbers. Official raw files stay under
 `5b259515…` never executed and is superseded before preflight. V4 was
 never executed. Hash `7db41564…` is the Goal A contract implementation
 identity only. V5 was never executed and is retired before preflight.
-Do not run V5 preflight or shadow. Goal A was validated by offline
-contract tests only. No repaired public/dev score exists.
+Do not run V5 preflight or shadow. The tracked execution ledger is the
+only grant source; unknown hashes default to deny. Goal A was validated
+by offline contract tests only. No repaired public/dev score exists.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.

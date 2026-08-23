@@ -1,6 +1,7 @@
 {
   "schema_version": "lumenfin_ledger_structured_citation_shadow_execution.v1",
   "kind": "execution_authorization_ledger",
+  "ledger_sha256": "14614b551a8934ba109975c680cf93e87d8adfeee34a59312836bd0ac383b2f4",
   "notes": [
     "Parameter identity and execution authorization are separate.",
     "7db41564 remains the Goal A contract implementation identity.",

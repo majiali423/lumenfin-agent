@@ -238,39 +238,31 @@ RETIRED_CONFIG_HASHES = {
 }
 
 
-def consumed_public_dev_dataset_identity() -> dict[str, Any]:
-    return {
-        "split": CANONICAL_SPLIT,
-        "query_count": 50,
-        "query_ids_sha256": CONSUMED_PUBLIC_DEV_QUERY_IDS_SHA256,
-        "gold_identity_sha256": GOLD_IDENTITY_SHA256,
-        "dataset_snapshot_sha256": DATASET_SNAPSHOT_SHA256,
-        "source_artifact_sha256": DATASET_SOURCE_ARTIFACT_SHA256,
-        "cache_file_sha256": CONSUMED_CACHE_FILE_SHA256,
-        "cache_manifest_sha256": CONSUMED_CACHE_MANIFEST_SHA256,
-    }
-
-
-def goal_a_execution_record() -> dict[str, Any]:
-    return {
-        "config_hash": GOAL_A_CONFIG_HASH,
-        "identity_status": "CONTRACT_IMPLEMENTATION_IDENTITY",
-        "dataset_identity": consumed_public_dev_dataset_identity(),
-        "status": "NOT_AUTHORIZED_FOR_EXECUTION",
-        "reason": "consumed_exposed_public_dev",
-        "preflight_authorized": False,
-        "shadow_authorized": False,
-        "execution_authorized": False,
-        "preflight_executions": 0,
-        "shadow_executions": 0,
-        "superseded_at_commit": GOAL_A_IDENTITY_COMMIT,
-        "retired_before_preflight": True,
-    }
-
-
-SHADOW_EXECUTION_LEDGER: dict[str, dict[str, Any]] = {
-    GOAL_A_CONFIG_HASH: goal_a_execution_record(),
-}
+EXECUTION_LEDGER_KIND = "execution_authorization_ledger"
+EXECUTION_LEDGER_HASH_SKIP = frozenset({"ledger_sha256"})
+EXECUTION_LEDGER_RECORD_REQUIRED = (
+    "config_hash",
+    "dataset_identity",
+    "identity_status",
+    "execution_authorized",
+    "preflight_authorized",
+    "shadow_authorized",
+    "reason",
+    "preflight_executions",
+    "shadow_executions",
+    "superseded_at_commit",
+)
+EXECUTION_LEDGER_DATASET_REQUIRED = (
+    "split",
+    "query_count",
+    "query_ids_sha256",
+    "gold_identity_sha256",
+    "dataset_snapshot_sha256",
+    "source_artifact_sha256",
+    "cache_file_sha256",
+    "cache_manifest_sha256",
+)
+UNAUTHORIZED_SHADOW_GENERIC = "config is not authorized"
 EVALUATION_MODE = "sealed_candidate_replay_shadow"
 PREFLIGHT_SCHEMA_VERSION = "1.3"
 PREFLIGHT_OK = "PREFLIGHT_OK"
@@ -1168,14 +1160,21 @@ def published_config_hash() -> str:
     return compute_config_hash(published_frozen_config_fields())
 
 
-def shadow_execution_record(config_hash: str) -> dict[str, Any] | None:
-    record = SHADOW_EXECUTION_LEDGER.get(str(config_hash))
-    return dict(record) if record is not None else None
+def consumed_public_dev_dataset_identity() -> dict[str, Any]:
+    return {
+        "split": CANONICAL_SPLIT,
+        "query_count": 50,
+        "query_ids_sha256": CONSUMED_PUBLIC_DEV_QUERY_IDS_SHA256,
+        "gold_identity_sha256": GOLD_IDENTITY_SHA256,
+        "dataset_snapshot_sha256": DATASET_SNAPSHOT_SHA256,
+        "source_artifact_sha256": DATASET_SOURCE_ARTIFACT_SHA256,
+        "cache_file_sha256": CONSUMED_CACHE_FILE_SHA256,
+        "cache_manifest_sha256": CONSUMED_CACHE_MANIFEST_SHA256,
+    }
 
 
-def config_matches_consumed_public_dev(config: FrozenShadowConfig) -> bool:
-    expected = consumed_public_dev_dataset_identity()
-    actual = {
+def dataset_identity_from_config(config: FrozenShadowConfig) -> dict[str, Any]:
+    return {
         "split": str(config.field("split") or ""),
         "query_count": int(config.field("case_selection", "query_count") or 0),
         "query_ids_sha256": str(config.field("case_selection", "query_ids_sha256") or ""),
@@ -1187,16 +1186,164 @@ def config_matches_consumed_public_dev(config: FrozenShadowConfig) -> bool:
         ),
         "cache_manifest_sha256": str(config.field("candidate_cache", "manifest_sha256") or ""),
     }
-    return actual == expected
 
 
-def execution_authorized(config: FrozenShadowConfig) -> bool:
-    record = SHADOW_EXECUTION_LEDGER.get(config.config_hash)
-    if record is not None and not record.get("execution_authorized"):
+def config_matches_consumed_public_dev(config: FrozenShadowConfig) -> bool:
+    return dataset_identity_from_config(config) == consumed_public_dev_dataset_identity()
+
+
+def execution_ledger_path(*, repo_root: Path | None = None) -> Path:
+    if repo_root is None:
+        return DEFAULT_EXECUTION_LEDGER_PATH
+    return Path(repo_root) / DEFAULT_EXECUTION_LEDGER_PATH
+
+
+def compute_execution_ledger_hash(payload: Mapping[str, Any]) -> str:
+    material = {key: value for key, value in payload.items() if key not in EXECUTION_LEDGER_HASH_SKIP}
+    return sha256_text(canonical_dumps(material))
+
+
+def _strict_true(value: Any) -> bool:
+    return value is True
+
+
+def _dataset_identity_key(identity: Mapping[str, Any]) -> str:
+    return canonical_dumps(dict(identity))
+
+
+def _normalized_dataset_identity(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, Mapping):
+        return None
+    missing = [key for key in EXECUTION_LEDGER_DATASET_REQUIRED if key not in raw]
+    if missing:
+        return None
+    try:
+        query_count = int(raw["query_count"])
+    except (TypeError, ValueError):
+        return None
+    return {
+        "split": str(raw.get("split") or ""),
+        "query_count": query_count,
+        "query_ids_sha256": str(raw.get("query_ids_sha256") or ""),
+        "gold_identity_sha256": str(raw.get("gold_identity_sha256") or ""),
+        "dataset_snapshot_sha256": str(raw.get("dataset_snapshot_sha256") or ""),
+        "source_artifact_sha256": str(raw.get("source_artifact_sha256") or ""),
+        "cache_file_sha256": str(raw.get("cache_file_sha256") or ""),
+        "cache_manifest_sha256": str(raw.get("cache_manifest_sha256") or ""),
+    }
+
+
+def _validate_execution_record(key: str, record: Any) -> dict[str, Any] | None:
+    if not isinstance(record, Mapping):
+        return None
+    if any(field not in record for field in EXECUTION_LEDGER_RECORD_REQUIRED):
+        return None
+    for flag in ("execution_authorized", "preflight_authorized", "shadow_authorized"):
+        if not isinstance(record.get(flag), bool):
+            return None
+    identity = _normalized_dataset_identity(record.get("dataset_identity"))
+    if identity is None:
+        return None
+    stored_hash = str(record.get("config_hash") or "")
+    if stored_hash != str(key) or len(stored_hash) != 64:
+        return None
+    cleaned = dict(record)
+    cleaned["dataset_identity"] = identity
+    return cleaned
+
+
+def load_execution_ledger(*, repo_root: Path | None = None) -> dict[str, Any] | None:
+    path = execution_ledger_path(repo_root=repo_root)
+    try:
+        raw = path.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("schema_version") != EXECUTION_LEDGER_SCHEMA_VERSION:
+        return None
+    if payload.get("kind") != EXECUTION_LEDGER_KIND:
+        return None
+    stored_hash = str(payload.get("ledger_sha256") or "")
+    computed = compute_execution_ledger_hash(payload)
+    if stored_hash != computed:
+        return None
+    records_raw = payload.get("records")
+    if not isinstance(records_raw, dict) or not records_raw:
+        return None
+    records: dict[str, dict[str, Any]] = {}
+    identities: dict[str, bool] = {}
+    for key, raw_record in records_raw.items():
+        record = _validate_execution_record(str(key), raw_record)
+        if record is None:
+            return None
+        identity_key = _dataset_identity_key(record["dataset_identity"])
+        authorized = _strict_true(record.get("execution_authorized"))
+        if identity_key in identities and identities[identity_key] != authorized:
+            return None
+        identities[identity_key] = authorized
+        records[str(key)] = record
+    goal_a = records.get(GOAL_A_CONFIG_HASH)
+    if goal_a is None:
+        return None
+    if goal_a["dataset_identity"] != consumed_public_dev_dataset_identity():
+        return None
+    if _strict_true(goal_a.get("execution_authorized")):
+        return None
+    return {
+        "schema_version": EXECUTION_LEDGER_SCHEMA_VERSION,
+        "kind": EXECUTION_LEDGER_KIND,
+        "ledger_sha256": computed,
+        "records": records,
+    }
+
+
+def shadow_execution_record(
+    config_hash: str,
+    *,
+    repo_root: Path | None = None,
+) -> dict[str, Any] | None:
+    ledger = load_execution_ledger(repo_root=repo_root)
+    if ledger is None:
+        return None
+    record = ledger["records"].get(str(config_hash))
+    return dict(record) if record is not None else None
+
+
+def _consumed_identities(ledger: Mapping[str, Any] | None) -> set[str]:
+    consumed = {_dataset_identity_key(consumed_public_dev_dataset_identity())}
+    if ledger is None:
+        return consumed
+    for record in ledger.get("records", {}).values():
+        if not isinstance(record, Mapping):
+            continue
+        if _strict_true(record.get("execution_authorized")):
+            continue
+        identity = record.get("dataset_identity")
+        if isinstance(identity, Mapping):
+            consumed.add(_dataset_identity_key(identity))
+    return consumed
+
+
+def execution_authorized(
+    config: FrozenShadowConfig,
+    *,
+    repo_root: Path | None = None,
+    synthetic_unlisted_ok: bool = False,
+) -> bool:
+    ledger = load_execution_ledger(repo_root=repo_root)
+    identity = dataset_identity_from_config(config)
+    if _dataset_identity_key(identity) in _consumed_identities(ledger):
         return False
-    if config_matches_consumed_public_dev(config):
+    if ledger is None:
+        return bool(synthetic_unlisted_ok)
+    record = ledger["records"].get(config.config_hash)
+    if record is None:
+        return bool(synthetic_unlisted_ok)
+    if dataset_identity_from_config(config) != record["dataset_identity"]:
         return False
-    return True
+    return _strict_true(record.get("execution_authorized"))
 
 
 def path_targets_reserved_shadow_output(path: Path) -> bool:
@@ -1214,13 +1361,15 @@ def path_targets_reserved_shadow_output(path: Path) -> bool:
 def assert_consumed_shadow_outputs_protected(
     config: FrozenShadowConfig,
     *,
+    repo_root: Path | None = None,
     output_dir: Path | None = None,
     preflight_output_dir: Path | None = None,
     resume: bool = False,
 ) -> None:
-    consumed = config.config_hash in SHADOW_EXECUTION_LEDGER or config_matches_consumed_public_dev(
-        config
-    )
+    identity = dataset_identity_from_config(config)
+    consumed = _dataset_identity_key(identity) in _consumed_identities(
+        load_execution_ledger(repo_root=repo_root)
+    ) or config.config_hash == GOAL_A_CONFIG_HASH
     if not consumed:
         return
     if resume:
@@ -1233,14 +1382,23 @@ def assert_consumed_shadow_outputs_protected(
 def refuse_unauthorized_shadow_execution(
     config: FrozenShadowConfig,
     *,
+    repo_root: Path | None = None,
     output_dir: Path | None = None,
     preflight_output_dir: Path | None = None,
     resume: bool = False,
+    synthetic_unlisted_ok: bool = False,
 ) -> None:
-    if not execution_authorized(config):
-        raise ShadowError(UNAUTHORIZED_SHADOW_EXECUTION)
+    if not execution_authorized(
+        config,
+        repo_root=repo_root,
+        synthetic_unlisted_ok=synthetic_unlisted_ok,
+    ):
+        if config_matches_consumed_public_dev(config) or config.config_hash == GOAL_A_CONFIG_HASH:
+            raise ShadowError(UNAUTHORIZED_SHADOW_EXECUTION)
+        raise ShadowError(UNAUTHORIZED_SHADOW_GENERIC)
     assert_consumed_shadow_outputs_protected(
         config,
+        repo_root=repo_root,
         output_dir=output_dir,
         preflight_output_dir=preflight_output_dir,
         resume=resume,
@@ -2661,12 +2819,15 @@ def run_preflight(
     require_clean: bool = True,
     verify_runtime: bool = True,
     require_chat_key: bool = True,
+    synthetic_unlisted_ok: bool = False,
 ) -> dict[str, Any]:
     refuse_unauthorized_shadow_execution(
         frozen_config,
+        repo_root=repo_root,
         output_dir=official_output_dir,
         preflight_output_dir=preflight_output_dir,
         resume=False,
+        synthetic_unlisted_ok=synthetic_unlisted_ok,
     )
     audit = InputAccessAudit()
     token = _ACCESS_AUDIT.set(audit)
@@ -2916,12 +3077,15 @@ def run_shadow(
     live_generate: bool = False,
     strict_paths: bool = False,
     require_chat_key: bool = True,
+    synthetic_unlisted_ok: bool = False,
 ) -> dict[str, Any]:
     refuse_unauthorized_shadow_execution(
         frozen_config,
+        repo_root=repo_root,
         output_dir=output_dir,
         preflight_output_dir=preflight_output_dir,
         resume=resume,
+        synthetic_unlisted_ok=synthetic_unlisted_ok,
     )
     refuse_env_remote_override()
     if not confirm_exposed_shadow:
@@ -2957,6 +3121,7 @@ def run_shadow(
             require_clean=require_clean,
             verify_runtime=verify_runtime,
             require_chat_key=require_chat_key,
+            synthetic_unlisted_ok=synthetic_unlisted_ok,
         )
     if not allow_remote:
         raise ShadowError("formal scoring requires --allow-remote")

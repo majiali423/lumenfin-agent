@@ -133,6 +133,9 @@ image has been created. Latest published LumenFin remains
   The sealed 18 unknown citations are not reclassified. Execution
   ledger:
   `data/eval_rag/structured_citation_shadow_execution_ledger.json`.
+  That tracked ledger is the authoritative execution grant. Missing,
+  unknown, or malformed hashes default to deny. V5 remains
+  `execution_authorized=false`.
 
 ## 0.1.0rc4 — 2026-08-13
 

@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         refuse_unauthorized_shadow_execution(
             config,
+            repo_root=ROOT,
             output_dir=Path(args.output_dir),
             preflight_output_dir=Path(args.preflight_dir),
             resume=bool(args.resume),

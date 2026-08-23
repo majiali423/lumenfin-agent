@@ -203,3 +203,5 @@ contract tests only. No repaired public/dev score exists. Do not run V5
 preflight or shadow. Do not rerun or rescore the sealed public/dev
 shadow. Execution ledger:
 [`../data/eval_rag/structured_citation_shadow_execution_ledger.json`](../data/eval_rag/structured_citation_shadow_execution_ledger.json).
+The tracked JSON is the only execution-grant source; code loads and
+enforces it. Missing, unknown, or malformed hashes default to deny.
