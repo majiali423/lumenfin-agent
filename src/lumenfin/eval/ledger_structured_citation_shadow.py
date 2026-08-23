@@ -1479,8 +1479,6 @@ def generation_case_view(
         "query_text": str(case.get("query_text") or ""),
         "hits": prompt_hits_for_generator(window, alias_map),
         "alias_protocol_version": CITATION_ALIAS_PROTOCOL_VERSION,
-        "tenant_id": str(case.get("tenant_id") or "default"),
-        "session_id": str(case.get("session_id") or "shadow"),
     }
     assert_generation_case_has_no_gold(view)
     blob = json.dumps(view, ensure_ascii=False)

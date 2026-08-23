@@ -21,8 +21,10 @@ from .structured_answer import (
 
 CITATION_ALIAS_PROTOCOL_VERSION = "citation_alias_protocol.v1"
 LOCKED_FINAL_K = 10
+OFFICIAL_RANKED_ORIGINS = frozenset({"production_rag", "shadow_lexical", "test_fixture"})
 ALIAS_TOKEN_RE = re.compile(r"^E(\d{2})$")
 ALIAS_WRAPPER_RE = re.compile(r"^\[(E\d{2})\]$")
+_ALIAS_IN_TEXT_RE = re.compile(r"\[(E\d{2})\]")
 _FILENAME_PAGE_RE = re.compile(r".+#p\d+", re.IGNORECASE)
 
 
@@ -39,20 +41,77 @@ def format_alias(index: int) -> str:
     return f"E{index:02d}"
 
 
-def flatten_rag_evidence(rag_evidence: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class OfficialRankedHits:
+    """A hit list that is already in official retrieval or rank order."""
+
+    hits: tuple[dict[str, Any], ...]
+    origin: str
+    company_order: tuple[str, ...]
+
+
+def official_ranked_hits(
+    hits: Sequence[Mapping[str, Any]] | None,
+    *,
+    origin: str,
+    company_order: Sequence[str] = (),
+    tenant_id: str = "",
+    session_id: str = "",
+) -> OfficialRankedHits:
+    if origin not in OFFICIAL_RANKED_ORIGINS:
+        raise CitationAliasError("official ranked origin is not recognized")
+    cleaned: list[dict[str, Any]] = []
+    scopes: set[tuple[str, str]] = set()
+    for hit in list(hits or []):
+        if not isinstance(hit, Mapping):
+            raise CitationAliasError("official ranked hits must be mappings")
+        row = dict(hit)
+        if not str(row.get("chunk_id") or "").strip():
+            raise CitationAliasError("official ranked hits are missing chunk_id")
+        scopes.add(
+            (
+                str(row.get("tenant_id") or tenant_id),
+                str(row.get("session_id") or session_id),
+            )
+        )
+        cleaned.append(row)
+    if len(scopes) > 1:
+        raise CitationAliasError("official ranked hits have conflicting tenant or session")
+    return OfficialRankedHits(
+        hits=tuple(cleaned),
+        origin=origin,
+        company_order=tuple(str(item) for item in company_order),
+    )
+
+
+def flatten_rag_evidence(
+    rag_evidence: Mapping[str, Any] | None,
+    *,
+    company_order: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    evidence = rag_evidence or {}
+    if company_order:
+        ordered = [str(company) for company in company_order if company in evidence]
+        extra = sorted((str(company) for company in evidence if str(company) not in set(ordered)), key=str)
+        companies = ordered + extra
+    else:
+        companies = sorted(evidence, key=lambda item: str(item))
     hits: list[dict[str, Any]] = []
-    for company in sorted((rag_evidence or {}), key=lambda item: str(item)):
-        rows = (rag_evidence or {}).get(company) or []
+    for company in companies:
+        rows = evidence.get(company) or []
         if not isinstance(rows, list):
             continue
         for hit in rows:
-            if isinstance(hit, dict) and str(hit.get("chunk_id") or "").strip():
-                hits.append(dict(hit))
+            if not isinstance(hit, dict) or not str(hit.get("chunk_id") or "").strip():
+                continue
+            row = dict(hit)
+            row.setdefault("company", company)
+            hits.append(row)
     return hits
 
 
 def build_final_evidence_window(
-    hits: Sequence[Mapping[str, Any]] | None,
+    hits: OfficialRankedHits | Sequence[Mapping[str, Any]] | None = None,
     *,
     final_k: int = LOCKED_FINAL_K,
     already_ranked: bool = False,
@@ -60,10 +119,13 @@ def build_final_evidence_window(
 ) -> list[dict[str, Any]]:
     if final_k != LOCKED_FINAL_K:
         raise CitationAliasError("final_k must stay 10")
-    source = [dict(item) for item in list(hits or [])]
-    if already_ranked:
+    if isinstance(hits, OfficialRankedHits):
+        source = [dict(item) for item in hits.hits]
         window = source[:LOCKED_FINAL_K]
+    elif already_ranked:
+        raise CitationAliasError("already_ranked requires official_ranked_hits()")
     else:
+        source = [dict(item) for item in list(hits or [])]
         if rank is None:
             raise CitationAliasError("ranking function is required for an unranked pool")
         ranked = list(rank(source, final_k=LOCKED_FINAL_K))
@@ -350,14 +412,44 @@ def assert_prompt_hides_stable_ids(prompt: str, window: Sequence[Mapping[str, An
         chunk_id = str(hit.get("chunk_id") or "").strip()
         if chunk_id and chunk_id in blob:
             raise CitationAliasError("prompt leaked a stable chunk id")
-        document_id = str(hit.get("document_id") or "").strip()
-        if document_id and document_id in blob and document_id != str(hit.get("text") or ""):
-            # document_id may legitimately appear inside passage text; only reject
-            # structured identity fields, which render_prompt_evidence never writes.
-            pass
+        for key in ("tenant_id", "session_id"):
+            value = str(hit.get(key) or "").strip()
+            passage = str(hit.get("text") or "")
+            if value and value in blob and value not in passage:
+                raise CitationAliasError("prompt leaked an internal identity")
     lowered = blob.casefold()
     if "chunk_id=" in lowered:
         raise CitationAliasError("prompt leaked a stable chunk id")
+    if "qrels" in lowered or "gold_value" in lowered or "expected_answer" in lowered:
+        raise CitationAliasError("prompt leaked evaluator gold")
+
+
+def replace_ephemeral_aliases_in_user_text(
+    text: str,
+    window: Sequence[Mapping[str, Any]],
+    alias_map: CitationAliasMap,
+) -> str:
+    """Replace leftover [E01] markers with display citations. Does not change IDs."""
+    assert_same_window(window, alias_map)
+    by_alias = {
+        alias: hit
+        for alias, hit in zip(alias_map.aliases, window)
+    }
+
+    def _replace(match: re.Match[str]) -> str:
+        hit = by_alias.get(match.group(1))
+        if hit is None:
+            return ""
+        display = str(hit.get("citation") or "").strip()
+        if display:
+            return display
+        filename = str(hit.get("filename") or "").strip()
+        page = hit.get("page")
+        if filename and page is not None and not isinstance(page, bool):
+            return f"{filename}#p{page}"
+        return ""
+
+    return _ALIAS_IN_TEXT_RE.sub(_replace, str(text or ""))
 
 
 def window_identity_report(

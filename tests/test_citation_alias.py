@@ -10,6 +10,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from concurrent.futures import ThreadPoolExecutor
+
 from lumenfin.citation_alias import (
     CITATION_ALIAS_PROTOCOL_VERSION,
     LOCKED_FINAL_K,
@@ -17,9 +19,12 @@ from lumenfin.citation_alias import (
     allowlist_from_window,
     build_citation_alias_map,
     build_final_evidence_window,
+    flatten_rag_evidence,
+    official_ranked_hits,
     parse_and_map_citation_aliases,
     prompt_hits_for_generator,
     render_prompt_evidence,
+    replace_ephemeral_aliases_in_user_text,
     window_identity_report,
 )
 from lumenfin.eval.ledger_structured_citation_shadow import (
@@ -31,15 +36,20 @@ from lumenfin.eval.ledger_structured_citation_shadow import (
 from lumenfin.finrun import export_finrun_state
 from lumenfin.structured_answer import (
     STRUCTURED_ANSWER_SCHEMA_VERSION,
+    allowed_evidence_from_state,
     public_structured_answer_fields,
 )
 
 from tests.test_ledger_structured_citation_shadow import _case, _hit, _structured_payload
 
 
+def _official(hits: list[dict], *, origin: str = "test_fixture"):
+    return official_ranked_hits(hits, origin=origin)
+
+
 def _window(n: int = 10, *, start: int = 1, extra: int = 0) -> list[dict]:
     hits = [_hit(start + index) for index in range(n + extra)]
-    return build_final_evidence_window(hits, already_ranked=True)
+    return build_final_evidence_window(_official(hits))
 
 
 class CitationAliasContractTests(unittest.TestCase):
@@ -66,7 +76,7 @@ class CitationAliasContractTests(unittest.TestCase):
 
     def test_raw_ids_digits_and_filenames_are_rejected(self) -> None:
         pool = [_hit(index) for index in range(1, 13)]
-        window = build_final_evidence_window(pool, already_ranked=True)
+        window = build_final_evidence_window(_official(pool))
         alias_map = build_citation_alias_map(window, case_id="c1")
         raw_top10 = window[0]["chunk_id"]
         raw_outside = pool[10]["chunk_id"]
@@ -92,7 +102,7 @@ class CitationAliasContractTests(unittest.TestCase):
         pool[0]["text"] = "VISIBLE_TOP1_BODY"
         pool[10]["text"] = "HIDDEN_TOP11_BODY"
         pool[10]["chunk_id"] = "SENTINEL_TOP11_CHUNK"
-        window = build_final_evidence_window(pool, already_ranked=True)
+        window = build_final_evidence_window(_official(pool))
         self.assertEqual(len(window), 10)
         self.assertEqual(LOCKED_FINAL_K, 10)
         alias_map = build_citation_alias_map(window, case_id="c1", attempt_id="a1")
@@ -124,7 +134,9 @@ class CitationAliasContractTests(unittest.TestCase):
         self.assertEqual(calls[0], 10)
         self.assertEqual(window[0]["chunk_id"], pool[-1]["chunk_id"])
         with self.assertRaisesRegex(CitationAliasError, "final_k must stay 10"):
-            build_final_evidence_window(pool, already_ranked=True, final_k=20)
+            build_final_evidence_window(_official(pool), final_k=20)
+        with self.assertRaisesRegex(CitationAliasError, "already_ranked requires official_ranked_hits"):
+            build_final_evidence_window(pool, already_ranked=True)
 
     def test_cross_case_and_stale_repair_fail(self) -> None:
         first = build_citation_alias_map(
@@ -160,13 +172,13 @@ class CitationAliasContractTests(unittest.TestCase):
         allowlist = allowlist_from_window(stale)
         self.assertTrue(allowlist[0].stale)
         conflict = [_hit(1), dict(_hit(1), tenant_id="other")]
-        with self.assertRaisesRegex(CitationAliasError, "conflicting metadata"):
-            build_final_evidence_window(conflict, already_ranked=True)
+        with self.assertRaisesRegex(CitationAliasError, "conflicting tenant or session"):
+            build_final_evidence_window(_official(conflict))
         with self.assertRaisesRegex(CitationAliasError, "conflicting metadata"):
             allowlist_from_window(conflict)
         duplicate = [_hit(1), dict(_hit(1))]
         with self.assertRaisesRegex(CitationAliasError, "duplicate chunk_id"):
-            build_final_evidence_window(duplicate, already_ranked=True)
+            build_final_evidence_window(_official(duplicate))
 
     def test_score_case_maps_alias_and_rejects_raw_id(self) -> None:
         case = _case("pd-1", 1)
@@ -276,6 +288,8 @@ class CitationAliasContractTests(unittest.TestCase):
         self.assertNotIn("gold_label", blob)
         self.assertNotIn("qrels", blob)
         self.assertNotIn(case["hits"][0]["chunk_id"], blob)
+        self.assertNotIn("tenant_id", blob)
+        self.assertNotIn("session_id", blob)
         self.assertTrue(all(hit["alias"].startswith("E") for hit in view["hits"]))
 
     def test_provider_error_does_not_leak_mapping(self) -> None:
@@ -310,6 +324,92 @@ class CitationAliasContractTests(unittest.TestCase):
             digest,
             "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b",
         )
+
+    def test_parallel_cases_do_not_share_e01_mapping(self) -> None:
+        first = _case("case-a", 1, tenant_id="tenant-a", session_id="session-a")
+        second = _case("case-b", 2, tenant_id="tenant-b", session_id="session-b")
+
+        def _score(case: dict) -> dict:
+            contract = bind_citation_contract(case)
+            alias = contract["alias_map"].alias_for(case["hits"][0]["chunk_id"])
+            self.assertEqual(alias, "E01")
+            row = score_case(
+                case,
+                raw=_structured_payload(1, citations=["E01"]),
+                latency_ms=1,
+                generate_attempts=1,
+                remote_calls=1,
+                contract=contract,
+            )
+            return row
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            rows = list(pool.map(_score, [first, second]))
+        self.assertEqual(rows[0]["citations"], [first["hits"][0]["chunk_id"]])
+        self.assertEqual(rows[1]["citations"], [second["hits"][0]["chunk_id"]])
+        self.assertNotEqual(rows[0]["citations"], rows[1]["citations"])
+
+    def test_flatten_keeps_company_order_and_identity_fields(self) -> None:
+        zebra = dict(_hit(1), tenant_id="t1", session_id="s1", company="Zebra")
+        apple = dict(_hit(2), tenant_id="t1", session_id="s1", company="Apple")
+        flat = flatten_rag_evidence(
+            {"Zebra": [zebra], "Apple": [apple]},
+            company_order=["Zebra", "Apple"],
+        )
+        self.assertEqual([hit["company"] for hit in flat], ["Zebra", "Apple"])
+        self.assertEqual(flat[0]["tenant_id"], "t1")
+        self.assertEqual(flat[0]["session_id"], "s1")
+        self.assertEqual(flat[0]["chunk_id"], zebra["chunk_id"])
+        window = build_final_evidence_window(
+            _official(flat, origin="production_rag"),
+        )
+        self.assertEqual(window[0]["company"], "Zebra")
+        allowlist = allowed_evidence_from_state(
+            {
+                "companies": ["Zebra", "Apple"],
+                "rag_tenant_id": "t1",
+                "thread_id": "s1",
+                "rag_evidence": {"Zebra": [zebra], "Apple": [apple]},
+            }
+        )
+        self.assertEqual([item.chunk_id for item in allowlist], [zebra["chunk_id"], apple["chunk_id"]])
+
+    def test_user_text_aliases_map_to_page_anchors_not_chunk_ids(self) -> None:
+        window = _window(1)
+        window[0]["citation"] = "filing.pdf#p4"
+        alias_map = build_citation_alias_map(window, case_id="c1")
+        text = replace_ephemeral_aliases_in_user_text("See [E01] for revenue.", window, alias_map)
+        self.assertEqual(text, "See filing.pdf#p4 for revenue.")
+        self.assertNotIn("E01", text)
+        self.assertNotIn(window[0]["chunk_id"], text)
+
+    def test_alias_failure_is_not_a_provider_error(self) -> None:
+        case = _case("pd-1", 1)
+        contract = bind_citation_contract(case)
+        rejected = score_case(
+            case,
+            raw=_structured_payload(1, citations=[case["hits"][0]["chunk_id"]]),
+            latency_ms=1,
+            generate_attempts=1,
+            remote_calls=1,
+            contract=contract,
+        )
+        self.assertFalse(rejected.get("failed"))
+        self.assertFalse(rejected.get("provider_error"))
+        self.assertTrue(rejected["citation_validation_failed"])
+        self.assertEqual(rejected["citation_source"], "unavailable")
+        self.assertEqual(rejected["citations"], [])
+        self.assertEqual(rejected["outcome"], "degraded")
+
+    def test_production_page_anchors_do_not_emit_aliases(self) -> None:
+        from lumenfin.reporting import format_rag_citation_section
+
+        hit = dict(_hit(1), filename="filing.pdf", page=4, citation="filing.pdf#p4")
+        blob = "\n".join(format_rag_citation_section({"Acme": [hit]}))
+        self.assertIn("filing.pdf p.4", blob)
+        self.assertNotIn("E01", blob)
+        self.assertNotIn("[E01]", blob)
+        self.assertNotIn(hit["chunk_id"], blob)
 
 
 if __name__ == "__main__":

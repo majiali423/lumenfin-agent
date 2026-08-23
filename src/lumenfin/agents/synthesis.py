@@ -50,7 +50,13 @@ class SynthesisMixin:
             self.session_memory.save({**state, **update})
             return update
 
-    def _attach_structured_answer(self, state: FinanceState, update: FinanceState) -> None:
+    def _attach_structured_answer(
+        self,
+        state: FinanceState,
+        update: FinanceState,
+        *,
+        window: list[dict[str, Any]] | None = None,
+    ) -> None:
         from ..structured_answer import (
             StructuredAnswerError,
             build_structured_answer_from_state,
@@ -58,6 +64,13 @@ class SynthesisMixin:
         )
 
         merged = {**state, **update}
+        if window:
+            from ..citation_alias import final_allowed_hits_sha256
+
+            merged["citation_final_window"] = {
+                "hits": window,
+                "sha256": final_allowed_hits_sha256(window),
+            }
         try:
             update["structured_answer"] = build_structured_answer_from_state(merged).to_dict()
         except StructuredAnswerError as exc:
@@ -192,30 +205,11 @@ class SynthesisMixin:
             self.session_memory.save({**state, **update})
             return update
 
-        doc_context = ""
-        if state.get("rag_evidence"):
-            from ..citation_alias import (
-                build_citation_alias_map,
-                build_final_evidence_window,
-                flatten_rag_evidence,
-                render_prompt_evidence,
-            )
+        from ..structured_answer import bind_production_citation_window
 
-            window = build_final_evidence_window(
-                flatten_rag_evidence(state.get("rag_evidence")),
-                already_ranked=True,
-            )
-            if window:
-                alias_map = build_citation_alias_map(
-                    window,
-                    case_id=str(state.get("thread_id") or state.get("run_id") or ""),
-                    attempt_id=str(state.get("repair_attempt_id") or state.get("thread_id") or "attempt-1"),
-                    tenant_id=str(state.get("rag_tenant_id") or state.get("tenant_id") or ""),
-                    session_id=str(state.get("thread_id") or state.get("run_id") or ""),
-                )
-                rendered = render_prompt_evidence(window, alias_map, max_document_chars=240)
-                doc_context = "\nMilvus hybrid RAG evidence (with citations):\n" + rendered
-        if not doc_context and state.get("document_contexts"):
+        citation_window = bind_production_citation_window(state)
+        doc_context = ""
+        if not citation_window and state.get("document_contexts"):
             excerpts = [d["excerpt"][:600] for d in state["document_contexts"] if d.get("excerpt")]
             if excerpts:
                 doc_context = "\nUploaded PDF excerpts:\n" + "\n---\n".join(excerpts)
@@ -877,6 +871,24 @@ class SynthesisMixin:
             )
 
         final_report = "\n".join(sections)
+        if citation_window:
+            from ..citation_alias import (
+                build_citation_alias_map,
+                replace_ephemeral_aliases_in_user_text,
+            )
+
+            alias_map = build_citation_alias_map(
+                citation_window,
+                case_id=str(state.get("thread_id") or state.get("run_id") or ""),
+                attempt_id=str(state.get("repair_attempt_id") or state.get("thread_id") or "attempt-1"),
+                tenant_id=str(state.get("rag_tenant_id") or state.get("tenant_id") or ""),
+                session_id=str(state.get("thread_id") or state.get("run_id") or ""),
+            )
+            final_report = replace_ephemeral_aliases_in_user_text(
+                final_report,
+                citation_window,
+                alias_map,
+            )
 
         # ── Chart Data ──
         chart_data = build_chart_data(
@@ -897,7 +909,7 @@ class SynthesisMixin:
             "chart_data": chart_data,
             "workflow_status": "completed",
         }
-        self._attach_structured_answer(state, update)
+        self._attach_structured_answer(state, update, window=citation_window or None)
         synth_detail = (
             f"Report assembled from verified claims only "
             f"(mode={output_format}; verified={len(verified_claims)}/{len(all_claims)}; "
