@@ -61,6 +61,9 @@ data/**
 !data/eval_rag/ledger_structured_citation_shadow_result.json
 !data/eval_rag/ledger_structured_citation_shadow_audit.json
 !data/eval_rag/structured_citation_shadow_execution_ledger.json
+!data/eval_rag/synthetic_alias_compliance_cases.json
+!data/eval_rag/synthetic_alias_compliance_config.json
+!data/eval_rag/synthetic_alias_compliance_authorization.json
 !data/.gitkeep
 
 .env

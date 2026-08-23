@@ -30,6 +30,9 @@ identity only. V5 was never executed and is retired before preflight.
 Do not run V5 preflight or shadow. The tracked execution ledger is the
 only grant source; unknown hashes default to deny. Goal A was validated
 by offline contract tests only. No repaired public/dev score exists.
+An independent synthetic alias-compliance canary is implemented but not
+authorized and not run. It does not reuse LEDGER, FinanceBench, or
+holdout data.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.

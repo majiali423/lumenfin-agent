@@ -1,0 +1,28 @@
+{
+  "schema_version": "synthetic_alias_compliance_authorization.v1",
+  "kind": "synthetic_alias_compliance_authorization",
+  "records": {
+    "51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793": {
+      "config_hash": "51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793",
+      "suite": "synthetic_remote_alias_compliance_canary",
+      "dataset_kind": "synthetic_fictional",
+      "identity_status": "SYNTHETIC_CONTRACT_IMPLEMENTATION_IDENTITY",
+      "execution_authorized": false,
+      "preflight_authorized": false,
+      "remote_run_authorized": false,
+      "reason": "implementation_only_not_authorized_this_phase",
+      "official_preflight_executions": 0,
+      "official_remote_executions": 0,
+      "dataset_identity": {
+        "dataset_schema_version": "synthetic_alias_compliance_dataset.v1",
+        "case_count": 8,
+        "case_ids_sha256": "1133f1e943221bfc6b78ff6c2196ee7ea198d099a3c47f2bf83505f923329d2a",
+        "query_texts_sha256": "861337087cc3f3daabfdfc71b62d0c1aa7586342cffe140d1a026ddbe6997c12",
+        "passages_sha256": "ebbe2242a6dff6e3230a56851cbce6af1bd6546e5999a1f81a352665c98fdfe2",
+        "gold_identity_sha256": "5e1cf151a51bb439a093d5588de3f75938c603e9e1c999a2b37c37800e770e83",
+        "dataset_sha256": "0d9822409b77707a0e5a54426c5f0ec592fef26553b238e9b0a7010045961b7a"
+      }
+    }
+  },
+  "authorization_sha256": "c7fffd750357d1c092afc0a7d4a0079ace4461a735dd29fe481383e9d8983e82"
+}

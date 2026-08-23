@@ -205,3 +205,26 @@ shadow. Execution ledger:
 [`../data/eval_rag/structured_citation_shadow_execution_ledger.json`](../data/eval_rag/structured_citation_shadow_execution_ledger.json).
 The tracked JSON is the only execution-grant source; code loads and
 enforces it. Missing, unknown, or malformed hashes default to deny.
+
+## Synthetic remote alias-compliance canary (not run)
+
+Independent suite `synthetic_remote_alias_compliance_canary`. Eight
+fictional workshop cases prove only that a model can emit legal `E01`–`E10`
+aliases, that those aliases map to stable chunk IDs, that invalid output
+fail-closes, and that the API/FinRun triple stays atomic. It is **not**
+product accuracy, financial accuracy, retrieval quality, FinanceBench,
+LEDGER, or a holdout score. Dataset:
+[`../data/eval_rag/synthetic_alias_compliance_cases.json`](../data/eval_rag/synthetic_alias_compliance_cases.json).
+Frozen config:
+[`../data/eval_rag/synthetic_alias_compliance_config.json`](../data/eval_rag/synthetic_alias_compliance_config.json)
+(`config_hash`
+`51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793`).
+Authorization:
+[`../data/eval_rag/synthetic_alias_compliance_authorization.json`](../data/eval_rag/synthetic_alias_compliance_authorization.json).
+Official flags stay `preflight_authorized=false` and
+`remote_run_authorized=false`. This phase does not run official
+preflight or the remote canary. CLI:
+`scripts/run_synthetic_alias_compliance_canary.py`. Future official
+remote runs require both `--confirm-synthetic-alias-compliance` and
+`--allow-remote`. Preflight is `--preflight-only` and makes no provider
+calls. Do not reuse LEDGER V5 hash `7db41564…`.

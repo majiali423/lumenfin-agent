@@ -136,6 +136,15 @@ image has been created. Latest published LumenFin remains
   That tracked ledger is the authoritative execution grant. Missing,
   unknown, or malformed hashes default to deny. V5 remains
   `execution_authorized=false`.
+- Added an independent synthetic remote alias-compliance canary
+  (`synthetic_remote_alias_compliance_canary`) with eight fictional
+  cases, a frozen config, default-deny authorization, and a dual-key CLI.
+  It reuses `citation_alias_protocol.v1` and is not product accuracy, not
+  LEDGER, not FinanceBench, and not holdout. Official
+  `preflight_authorized` and `remote_run_authorized` stay false. This
+  stage does not run official preflight or the remote canary. Config hash:
+  `51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793`.
+  Do not reuse retired LEDGER V5 hash `7db41564…`.
 
 ## 0.1.0rc4 — 2026-08-13
 

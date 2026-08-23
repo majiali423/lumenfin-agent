@@ -1,0 +1,429 @@
+{
+  "dataset_schema_version": "synthetic_alias_compliance_dataset.v1",
+  "suite": "synthetic_remote_alias_compliance_canary",
+  "dataset_kind": "synthetic_fictional",
+  "product_accuracy_claim": false,
+  "benchmark_claim": false,
+  "financial_accuracy_claim": false,
+  "retrieval_quality_claim": false,
+  "notes": "Fictional workshop memos only. No real companies, filings, or benchmark questions.",
+  "cases": [
+    {
+      "case_id": "SAC-01-harborwick-crate-count",
+      "query_text": "How many Harborwick crate tags did the Pebbleford shop count on Maple Shift?",
+      "expected_aliases": [
+        "E01"
+      ],
+      "gold_answer": "14 crate tags",
+      "incomplete": false,
+      "passages": [
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c0",
+          "text": "Maple Shift crate log: Harborwick Shelf Lamp crate tags counted = 14."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c1",
+          "text": "The shop kettle was refilled twice during Maple Shift."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c2",
+          "text": "Window glass on Bay 2 was wiped after lunch."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c3",
+          "text": "A spare ribbon spool was moved to the side bench."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c4",
+          "text": "The floor chalk mark near the door was redrawn."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c5",
+          "text": "Someone borrowed the green stool and returned it."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c6",
+          "text": "A visitor asked where the coat hooks were."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c7",
+          "text": "The leftover twine ball sat on the window ledge."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c8",
+          "text": "Bay 3 lights flickered once and then stayed on."
+        },
+        {
+          "chunk_id": "sac-pebbleford:memo-alpha:p1:c9",
+          "text": "The closing bell was tested and put away."
+        }
+      ]
+    },
+    {
+      "case_id": "SAC-02-wick-lot-label",
+      "query_text": "What wick-lot label is written on the Cedar Room card?",
+      "expected_aliases": [
+        "E03"
+      ],
+      "gold_answer": "WL-7C",
+      "incomplete": false,
+      "passages": [
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c0",
+          "text": "The Cedar Room door felt slightly sticky this morning."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c1",
+          "text": "A blue pencil was left on the card tray."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c2",
+          "text": "Cedar Room card: wick-lot label written as WL-7C."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c3",
+          "text": "The card tray also held a blank sticker sheet."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c4",
+          "text": "Someone folded a paper crane and left it nearby."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c5",
+          "text": "The window latch clicked when closed."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c6",
+          "text": "A mug ring was wiped from the side table."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c7",
+          "text": "The floor mat was shaken outside and returned."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c8",
+          "text": "A spare envelope sat under the tray."
+        },
+        {
+          "chunk_id": "sac-cedar:card-beta:p2:c9",
+          "text": "The room clock was one minute fast."
+        }
+      ]
+    },
+    {
+      "case_id": "SAC-03-ribbon-spool-color",
+      "query_text": "Which ribbon-spool color is listed on the Night Bench slip?",
+      "expected_aliases": [
+        "E07"
+      ],
+      "gold_answer": "umber",
+      "incomplete": false,
+      "passages": [
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c0",
+          "text": "Night Bench chairs were pushed in after the last guest."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c1",
+          "text": "A moth circled the lamp and left."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c2",
+          "text": "The ink pad was almost dry."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c3",
+          "text": "Someone stacked three empty boxes by the wall."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c4",
+          "text": "The window shade was lowered halfway."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c5",
+          "text": "A spare nail sat in a tiny dish."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c6",
+          "text": "Night Bench slip: ribbon-spool color listed as umber."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c7",
+          "text": "The kettle clicked off and cooled."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c8",
+          "text": "A loose button was placed in the lost-and-found cup."
+        },
+        {
+          "chunk_id": "sac-night:slip-gamma:p3:c9",
+          "text": "The porch light stayed on for the last walk-out."
+        }
+      ]
+    },
+    {
+      "case_id": "SAC-04-shelf-hook-count",
+      "query_text": "How many shelf hooks are written on the last dock card?",
+      "expected_aliases": [
+        "E10"
+      ],
+      "gold_answer": "9 shelf hooks",
+      "incomplete": false,
+      "passages": [
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c0",
+          "text": "The first dock cart needed a new wheel nut."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c1",
+          "text": "A seagull stood on the rail and left."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c2",
+          "text": "Someone swept the ramp after the drizzle."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c3",
+          "text": "The rope coil was moved one pace left."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c4",
+          "text": "A chalk arrow pointed toward the shed."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c5",
+          "text": "The spare tarp was folded twice."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c6",
+          "text": "A crate lid was tightened with one extra turn."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c7",
+          "text": "The dock bell rope was retied."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c8",
+          "text": "A visitor asked if the shop sold maps. It does not."
+        },
+        {
+          "chunk_id": "sac-dock:card-delta:p4:c9",
+          "text": "Last dock card: shelf hooks written as 9."
+        }
+      ]
+    },
+    {
+      "case_id": "SAC-05-dual-tag-and-bin",
+      "query_text": "What paint-tag code and storage-bin letter appear together for the Larkfin tray?",
+      "expected_aliases": [
+        "E02",
+        "E09"
+      ],
+      "gold_answer": "paint-tag PT-18 in bin K",
+      "incomplete": false,
+      "passages": [
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c0",
+          "text": "The Larkfin tray handle was wiped with a dry cloth."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c1",
+          "text": "Larkfin tray note A: paint-tag code is PT-18."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c2",
+          "text": "A paperclip sat beside the tray."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c3",
+          "text": "The aisle sign was slightly crooked."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c4",
+          "text": "Someone hummed while stacking lids."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c5",
+          "text": "The window had a small fingerprint."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c6",
+          "text": "A spare sticker sheet remained unused."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c7",
+          "text": "The floor squeaked near the third board."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c8",
+          "text": "Larkfin tray note B: storage-bin letter is K."
+        },
+        {
+          "chunk_id": "sac-larkfin:tray-epsilon:p5:c9",
+          "text": "The closing broom was hung on its peg."
+        }
+      ]
+    },
+    {
+      "case_id": "SAC-06-combine-hours-and-lane",
+      "query_text": "What opening hour and packing lane are recorded for Mossgate Studio?",
+      "expected_aliases": [
+        "E04",
+        "E06"
+      ],
+      "gold_answer": "opens at 8 and uses lane M",
+      "incomplete": false,
+      "passages": [
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c0",
+          "text": "Mossgate Studio swept the porch before guests arrived."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c1",
+          "text": "A bicycle bell rang once outside."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c2",
+          "text": "The welcome mat said hello in painted letters."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c3",
+          "text": "Mossgate card A: studio opening hour is 8."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c4",
+          "text": "A jar of buttons sat on the counter."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c5",
+          "text": "Mossgate card B: packing lane letter is M."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c6",
+          "text": "The kettle was set for later tea."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c7",
+          "text": "A folded map of imaginary streets hung on the wall."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c8",
+          "text": "Someone watered the window herb pot."
+        },
+        {
+          "chunk_id": "sac-mossgate:studio-zeta:p6:c9",
+          "text": "The studio bell rope was left neatly coiled."
+        }
+      ]
+    },
+    {
+      "case_id": "SAC-07-no-answer-glint-count",
+      "query_text": "How many Glintwood export crates were counted on Frost Shift?",
+      "expected_aliases": [],
+      "gold_answer": null,
+      "incomplete": true,
+      "passages": [
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c0",
+          "text": "Frost Shift started with a quiet hallway."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c1",
+          "text": "Someone polished a brass knob."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c2",
+          "text": "The lunch tin was empty before noon."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c3",
+          "text": "A cat slept on a folded coat."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c4",
+          "text": "The window fog cleared after a wipe."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c5",
+          "text": "A spare key hung on a wooden peg."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c6",
+          "text": "The radio played a short tune and stopped."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c7",
+          "text": "Someone stacked unused envelopes."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c8",
+          "text": "The porch chair was turned to face the hedge."
+        },
+        {
+          "chunk_id": "sac-glintwood:shift-eta:p7:c9",
+          "text": "No crate count for Glintwood export appears in these notes."
+        }
+      ]
+    },
+    {
+      "case_id": "SAC-08-middle-evidence-distractors",
+      "query_text": "What loom-batch code is recorded for the Quillmere scarf?",
+      "expected_aliases": [
+        "E05"
+      ],
+      "gold_answer": "LB-44",
+      "incomplete": false,
+      "passages": [
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c0",
+          "text": "Nearby shop talk mentioned batch ZX-99 for a different scarf."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c1",
+          "text": "A draft card guessed the code might be QQ-01."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c2",
+          "text": "Someone wrote maybe LB-12 on a scrap and crossed it out."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c3",
+          "text": "The tea tin label was not a loom-batch code."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c4",
+          "text": "Quillmere official loom card: scarf loom-batch code is LB-44."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c5",
+          "text": "A later rumor said the code was LB-88. That rumor is not the card."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c6",
+          "text": "The window list mentioned colors, not batch codes."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c7",
+          "text": "A visitor guessed LB-44 but did not write it on the official card."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c8",
+          "text": "The floor slate had a doodle that looked like LB-00."
+        },
+        {
+          "chunk_id": "sac-quillmere:loom-theta:p8:c9",
+          "text": "Closing notes mentioned leftover yarn, not a batch code."
+        }
+      ]
+    }
+  ],
+  "identity": {
+    "dataset_schema_version": "synthetic_alias_compliance_dataset.v1",
+    "case_count": 8,
+    "case_ids_sha256": "1133f1e943221bfc6b78ff6c2196ee7ea198d099a3c47f2bf83505f923329d2a",
+    "query_texts_sha256": "861337087cc3f3daabfdfc71b62d0c1aa7586342cffe140d1a026ddbe6997c12",
+    "passages_sha256": "ebbe2242a6dff6e3230a56851cbce6af1bd6546e5999a1f81a352665c98fdfe2",
+    "gold_identity_sha256": "5e1cf151a51bb439a093d5588de3f75938c603e9e1c999a2b37c37800e770e83",
+    "dataset_sha256": "0d9822409b77707a0e5a54426c5f0ec592fef26553b238e9b0a7010045961b7a"
+  }
+}

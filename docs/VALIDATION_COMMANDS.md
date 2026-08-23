@@ -239,3 +239,26 @@ exists. rc5 must not claim reliable structured citations from this run.
 ```powershell
 python -m unittest tests.test_citation_alias tests.test_ledger_structured_citation_shadow tests.test_ledger_structured_citation_shadow_execution tests.test_ledger_structured_citation_shadow_result tests.test_ledger_structured_citation_qrel_binding tests.test_structured_citation_canary tests.test_ledger_e2e_canary -v
 ```
+
+## 8d. Synthetic remote alias-compliance canary (not run)
+
+Independent fictional suite. Not product accuracy, not LEDGER, not
+FinanceBench, not holdout. Official preflight and remote execution stay
+default-deny. Do not run the official CLI this phase.
+
+```powershell
+python -m unittest tests.test_synthetic_alias_compliance tests.test_citation_alias tests.test_ledger_structured_citation_shadow_execution -v
+```
+
+Frozen config:
+[`../data/eval_rag/synthetic_alias_compliance_config.json`](../data/eval_rag/synthetic_alias_compliance_config.json).
+Dataset:
+[`../data/eval_rag/synthetic_alias_compliance_cases.json`](../data/eval_rag/synthetic_alias_compliance_cases.json).
+Authorization:
+[`../data/eval_rag/synthetic_alias_compliance_authorization.json`](../data/eval_rag/synthetic_alias_compliance_authorization.json).
+Future official commands (not authorized now):
+
+```powershell
+python scripts/run_synthetic_alias_compliance_canary.py --preflight-only
+python scripts/run_synthetic_alias_compliance_canary.py --confirm-synthetic-alias-compliance --allow-remote
+```

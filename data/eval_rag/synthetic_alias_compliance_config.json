@@ -1,0 +1,72 @@
+{
+  "schema_version": "synthetic_alias_compliance_config.v1",
+  "suite": "synthetic_remote_alias_compliance_canary",
+  "suite_version": "1.0",
+  "dataset_kind": "synthetic_fictional",
+  "protocol": "citation_alias_protocol.v1",
+  "structured_answer_schema_version": "1.0",
+  "product_accuracy_claim": false,
+  "benchmark_claim": false,
+  "financial_accuracy_claim": false,
+  "retrieval_quality_claim": false,
+  "model_selection_allowed": false,
+  "prompt_retuning_after_result": false,
+  "dataset": {
+    "path": "data/eval_rag/synthetic_alias_compliance_cases.json",
+    "dataset_schema_version": "synthetic_alias_compliance_dataset.v1",
+    "case_count": 8,
+    "case_ids_sha256": "1133f1e943221bfc6b78ff6c2196ee7ea198d099a3c47f2bf83505f923329d2a",
+    "query_texts_sha256": "861337087cc3f3daabfdfc71b62d0c1aa7586342cffe140d1a026ddbe6997c12",
+    "passages_sha256": "ebbe2242a6dff6e3230a56851cbce6af1bd6546e5999a1f81a352665c98fdfe2",
+    "gold_identity_sha256": "5e1cf151a51bb439a093d5588de3f75938c603e9e1c999a2b37c37800e770e83",
+    "dataset_sha256": "0d9822409b77707a0e5a54426c5f0ec592fef26553b238e9b0a7010045961b7a"
+  },
+  "alias_protocol": {
+    "version": "citation_alias_protocol.v1",
+    "final_k": 10,
+    "raw_chunk_id_output_forbidden": true
+  },
+  "prompt": {
+    "sha256": "723fbe0ca8d468000f6b2f934e315886bb995abe850a17288ef6f53b45d8047d"
+  },
+  "provider": {
+    "name": "deepseek",
+    "model": "deepseek-v4-flash",
+    "chat_base_url_sha256": "a34e2a4708ed1c61008a151688838dcf1c44d4e7f08054633e72ba7c0b16cfc1",
+    "timeout_seconds": 60,
+    "max_retries": 2,
+    "concurrency": 1
+  },
+  "call_budget": {
+    "cases": 8,
+    "logical_generate_calls_expected": 8,
+    "max_attempts_per_case": 3,
+    "embedding": 0,
+    "rerank": 0,
+    "at_least_once": true,
+    "exactly_once": false,
+    "unobserved_inflight_possible": true
+  },
+  "output": {
+    "schema_version": "synthetic_alias_compliance_result.v1",
+    "preflight_dir": "outputs/synthetic_alias_compliance_preflight_v1",
+    "official_dir": "outputs/synthetic_alias_compliance_v1"
+  },
+  "execution": {
+    "require_clean_commit": true,
+    "require_authorization_record": true
+  },
+  "gates": {
+    "provider_errors": 0,
+    "json_parse_success": 8,
+    "unknown_aliases": 0,
+    "raw_chunk_id_leakage": 0,
+    "mixed_valid_invalid": 0,
+    "alias_mapping_success": 7,
+    "citation_validation_failed": 0,
+    "incomplete_case_handled": true,
+    "prompt_retuning_after_result": false,
+    "model_selection_allowed": false
+  },
+  "config_hash": "51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793"
+}
