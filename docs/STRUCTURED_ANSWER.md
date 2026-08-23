@@ -222,9 +222,8 @@ Frozen config:
 previous hash `51331a4f…` never preflighted or remoted).
 Authorization:
 [`../data/eval_rag/synthetic_alias_compliance_authorization.json`](../data/eval_rag/synthetic_alias_compliance_authorization.json).
-Official flags stay `preflight_authorized=false` and
-`remote_run_authorized=false`. This phase does not run official
-preflight or the remote canary. CLI:
+One-shot official preflight/remote is authorized against ancestor
+`f91c474…` (`max_official_*_executions=1`). CLI:
 `scripts/run_synthetic_alias_compliance_canary.py`. Future official
 remote runs require both `--confirm-synthetic-alias-compliance` and
 `--allow-remote`. Preflight is `--preflight-only` and makes no provider

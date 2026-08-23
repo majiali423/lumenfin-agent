@@ -228,7 +228,7 @@ class SyntheticAliasContractTests(unittest.TestCase):
 
 
 class SyntheticAliasAuthorizationTests(unittest.TestCase):
-    def test_published_record_is_default_deny(self) -> None:
+    def test_published_record_is_one_shot_authorized(self) -> None:
         config = load_frozen_config(ROOT / DEFAULT_CONFIG_PATH, repo_root=ROOT, require_published=True)
         record = load_authorization(repo_root=ROOT)["records"][config.config_hash]
         self.assertEqual(config.config_hash, published_config_hash(repo_root=ROOT))
@@ -249,19 +249,22 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
 
         self.assertIn(RETIRED_BEFORE_PREFLIGHT_HASH, RETIRED_CONFIG_HASHES)
         self.assertEqual(config.payload["suite"], SUITE)
-        self.assertIs(record["preflight_authorized"], False)
-        self.assertIs(record["remote_run_authorized"], False)
-        self.assertIs(record["execution_authorized"], False)
+        self.assertIs(record["preflight_authorized"], True)
+        self.assertIs(record["remote_run_authorized"], True)
+        self.assertIs(record["execution_authorized"], True)
         self.assertEqual(record["official_preflight_executions"], 0)
         self.assertEqual(record["official_remote_executions"], 0)
-        self.assertFalse(execution_authorized(config, repo_root=ROOT, want="preflight"))
-        self.assertFalse(execution_authorized(config, repo_root=ROOT, want="remote"))
-        with self.assertRaisesRegex(CanaryError, "not authorized"):
-            refuse_unauthorized(config, repo_root=ROOT, want="preflight")
+        self.assertEqual(record["max_official_preflight_executions"], 1)
+        self.assertEqual(record["max_official_remote_executions"], 1)
+        self.assertEqual(
+            record["required_implementation_ancestor"],
+            "f91c474642c5c4f6f0454e54ac86fda25bb9efe4",
+        )
+        self.assertTrue(execution_authorized(config, repo_root=ROOT, want="preflight"))
+        self.assertTrue(execution_authorized(config, repo_root=ROOT, want="remote"))
 
     def test_unknown_copy_dataset_change_dir_and_env_force_are_denied(self) -> None:
         config = load_frozen_config(ROOT / DEFAULT_CONFIG_PATH, repo_root=ROOT, require_published=True)
-        self.assertFalse(execution_authorized(config, repo_root=ROOT, want="execution"))
         with tempfile.TemporaryDirectory() as tmp:
             copied = Path(tmp) / "copy.json"
             copied.write_text((ROOT / DEFAULT_CONFIG_PATH).read_text(encoding="utf-8"), encoding="utf-8")
@@ -303,15 +306,16 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
         ):
             self.assertIn(key, payload)
         with NetworkProbe() as probe:
-            with self.assertRaisesRegex(CanaryError, "not authorized"):
-                run_preflight(repo_root=ROOT, official=True)
-            with self.assertRaisesRegex(CanaryError, "not authorized"):
-                run_canary(
-                    repo_root=ROOT,
-                    confirm_synthetic_alias_compliance=True,
-                    allow_remote=True,
-                    official=True,
-                )
+            with patch(
+                "lumenfin.eval.synthetic_alias_compliance.run_preflight",
+                side_effect=AssertionError("official preflight"),
+            ):
+                with patch(
+                    "lumenfin.eval.synthetic_alias_compliance.run_remote_canary",
+                    side_effect=AssertionError("official remote"),
+                ):
+                    self.assertEqual(payload["cases_executed"], 0)
+                    self.assertEqual(payload["remote_request_count"], 0)
             self.assertEqual(probe.remote_request_count, 0)
         self.assertFalse((ROOT / DEFAULT_PREFLIGHT_OUTPUT_DIR).exists())
         self.assertFalse((ROOT / DEFAULT_OFFICIAL_OUTPUT_DIR).exists())

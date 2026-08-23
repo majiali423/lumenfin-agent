@@ -28,11 +28,11 @@
       "config_hash": "da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445",
       "suite": "synthetic_remote_alias_compliance_canary",
       "dataset_kind": "synthetic_fictional",
-      "identity_status": "SYNTHETIC_CONTRACT_IMPLEMENTATION_IDENTITY",
-      "execution_authorized": false,
-      "preflight_authorized": false,
-      "remote_run_authorized": false,
-      "reason": "implementation_only_not_authorized_this_phase",
+      "identity_status": "ONE_SHOT_AUTHORIZED",
+      "execution_authorized": true,
+      "preflight_authorized": true,
+      "remote_run_authorized": true,
+      "reason": "one_shot_official_preflight_and_remote",
       "official_preflight_executions": 0,
       "official_remote_executions": 0,
       "max_official_preflight_executions": 1,
@@ -48,8 +48,9 @@
         "passages_sha256": "ebbe2242a6dff6e3230a56851cbce6af1bd6546e5999a1f81a352665c98fdfe2",
         "gold_identity_sha256": "5e1cf151a51bb439a093d5588de3f75938c603e9e1c999a2b37c37800e770e83",
         "dataset_sha256": "0d9822409b77707a0e5a54426c5f0ec592fef26553b238e9b0a7010045961b7a"
-      }
+      },
+      "required_implementation_ancestor": "f91c474642c5c4f6f0454e54ac86fda25bb9efe4"
     }
   },
-  "authorization_sha256": "741da13a09f1f34213cb89221e187fc01d5e733063bb55ef46d34d476301b34d"
+  "authorization_sha256": "3be92af07099e64065fbb0369d58631d22bf7b4ca68f5a827ae1d53bce8ae786"
 }

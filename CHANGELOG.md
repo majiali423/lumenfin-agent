@@ -147,7 +147,9 @@ image has been created. Latest published LumenFin remains
   preflight (`evidence_gate_frozen_before_preflight`). Current hash is
   `da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445`
   and freezes both the protocol gate and the synthetic evidence gate.
-  Do not reuse retired LEDGER V5 hash `7db41564…`.
+  One-shot official preflight/remote authorization is bound to ancestor
+  `f91c474…` with max executions 1/1. Do not reuse retired LEDGER V5
+  hash `7db41564…`.
 
 ## 0.1.0rc4 — 2026-08-13
 
