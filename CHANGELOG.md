@@ -142,8 +142,11 @@ image has been created. Latest published LumenFin remains
   It reuses `citation_alias_protocol.v1` and is not product accuracy, not
   LEDGER, not FinanceBench, and not holdout. Official
   `preflight_authorized` and `remote_run_authorized` stay false. This
-  stage does not run official preflight or the remote canary. Config hash:
-  `51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793`.
+  stage does not run official preflight or the remote canary. Config hash
+  `51331a4f…` never preflighted or remoted and is retired before
+  preflight (`evidence_gate_frozen_before_preflight`). Current hash is
+  `da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445`
+  and freezes both the protocol gate and the synthetic evidence gate.
   Do not reuse retired LEDGER V5 hash `7db41564…`.
 
 ## 0.1.0rc4 — 2026-08-13

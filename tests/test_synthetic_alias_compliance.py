@@ -41,6 +41,7 @@ from lumenfin.eval.synthetic_alias_compliance import (
     EVAL_GOLD_SENTINEL,
     EXPECTED_CITATION_CASES,
     FORBIDDEN_PATH_TOKENS,
+    RETIRED_BEFORE_PREFLIGHT_HASH,
     RETIRED_LEDGER_V5_HASH,
     SUITE,
     CanaryError,
@@ -52,6 +53,7 @@ from lumenfin.eval.synthetic_alias_compliance import (
     dataset_identity,
     empty_metrics,
     evaluate_protocol_gate,
+    evaluate_synthetic_evidence_gate,
     execution_authorized,
     load_authorization,
     load_cases,
@@ -218,8 +220,11 @@ class SyntheticAliasContractTests(unittest.TestCase):
             apply_case_metrics(totals, scored["metrics"])
         self.assertEqual(totals["json_parse_success"], 8)
         self.assertEqual(totals["alias_mapping_success"], EXPECTED_CITATION_CASES)
+        self.assertEqual(totals["expected_alias_match"], EXPECTED_CITATION_CASES)
+        self.assertEqual(totals["mapped_chunk_matches_synthetic_qrels"], EXPECTED_CITATION_CASES)
         self.assertIs(totals["incomplete_case_handled"], True)
         self.assertTrue(evaluate_protocol_gate(totals))
+        self.assertTrue(evaluate_synthetic_evidence_gate(totals))
 
 
 class SyntheticAliasAuthorizationTests(unittest.TestCase):
@@ -229,8 +234,20 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
         self.assertEqual(config.config_hash, published_config_hash(repo_root=ROOT))
         self.assertEqual(
             config.config_hash,
-            "51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793",
+            "da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445",
         )
+        self.assertEqual(
+            config.payload["gates"]["synthetic_evidence"]["expected_alias_match"],
+            7,
+        )
+        retired = load_authorization(repo_root=ROOT)["records"][RETIRED_BEFORE_PREFLIGHT_HASH]
+        self.assertEqual(retired["reason"], "evidence_gate_frozen_before_preflight")
+        self.assertEqual(retired["official_preflight_executions"], 0)
+        self.assertEqual(retired["official_remote_executions"], 0)
+        self.assertNotEqual(config.config_hash, RETIRED_BEFORE_PREFLIGHT_HASH)
+        from lumenfin.eval.synthetic_alias_compliance import RETIRED_CONFIG_HASHES
+
+        self.assertIn(RETIRED_BEFORE_PREFLIGHT_HASH, RETIRED_CONFIG_HASHES)
         self.assertEqual(config.payload["suite"], SUITE)
         self.assertIs(record["preflight_authorized"], False)
         self.assertIs(record["remote_run_authorized"], False)
@@ -271,6 +288,20 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
         payload = build_preflight_payload(config, repo_root=ROOT)
         self.assertEqual(payload["cases_executed"], 0)
         self.assertEqual(payload["remote_request_count"], 0)
+        for key in (
+            "status",
+            "schema_version",
+            "executed_at",
+            "exit_code",
+            "execution_commit",
+            "config_hash",
+            "dataset_hash",
+            "authorization_identity",
+            "cases_total",
+            "cases_remaining",
+            "public_holdout_used",
+        ):
+            self.assertIn(key, payload)
         with NetworkProbe() as probe:
             with self.assertRaisesRegex(CanaryError, "not authorized"):
                 run_preflight(repo_root=ROOT, official=True)
@@ -288,13 +319,15 @@ class SyntheticAliasAuthorizationTests(unittest.TestCase):
     def test_cli_requires_dual_keys_and_still_denies_official_run(self) -> None:
         cli = _load_cli()
         with NetworkProbe() as probe:
-            self.assertEqual(cli.main(["--preflight-only"]), 2)
-            self.assertEqual(cli.main(["--allow-remote"]), 2)
-            self.assertEqual(cli.main(["--confirm-synthetic-alias-compliance"]), 2)
-            self.assertEqual(
-                cli.main(["--confirm-synthetic-alias-compliance", "--allow-remote"]),
-                2,
-            )
+            with patch.object(cli, "run_canary", side_effect=CanaryError("not authorized")) as mocked:
+                self.assertEqual(cli.main(["--preflight-only"]), 2)
+                self.assertEqual(cli.main(["--allow-remote"]), 2)
+                self.assertEqual(cli.main(["--confirm-synthetic-alias-compliance"]), 2)
+                self.assertEqual(
+                    cli.main(["--confirm-synthetic-alias-compliance", "--allow-remote"]),
+                    2,
+                )
+                self.assertGreaterEqual(mocked.call_count, 1)
             self.assertEqual(probe.remote_request_count, 0)
         with self.assertRaisesRegex(CanaryError, "refuses runtime overrides"):
             parse_cli_guard(["--limit", "2"])

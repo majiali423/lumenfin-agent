@@ -218,7 +218,8 @@ LEDGER, or a holdout score. Dataset:
 Frozen config:
 [`../data/eval_rag/synthetic_alias_compliance_config.json`](../data/eval_rag/synthetic_alias_compliance_config.json)
 (`config_hash`
-`51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793`).
+`da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445`;
+previous hash `51331a4f…` never preflighted or remoted).
 Authorization:
 [`../data/eval_rag/synthetic_alias_compliance_authorization.json`](../data/eval_rag/synthetic_alias_compliance_authorization.json).
 Official flags stay `preflight_authorized=false` and

@@ -57,16 +57,24 @@
     "require_authorization_record": true
   },
   "gates": {
-    "provider_errors": 0,
-    "json_parse_success": 8,
-    "unknown_aliases": 0,
-    "raw_chunk_id_leakage": 0,
-    "mixed_valid_invalid": 0,
-    "alias_mapping_success": 7,
-    "citation_validation_failed": 0,
-    "incomplete_case_handled": true,
+    "protocol": {
+      "provider_errors": 0,
+      "json_parse_success": 8,
+      "unknown_aliases": 0,
+      "raw_chunk_id_leakage": 0,
+      "mixed_valid_invalid": 0,
+      "alias_mapping_success": 7,
+      "citation_validation_failed": 0,
+      "incomplete_case_handled": true
+    },
+    "synthetic_evidence": {
+      "expected_alias_match": 7,
+      "mapped_chunk_matches_synthetic_qrels": 7,
+      "incomplete_case_handled": true,
+      "incomplete_citations_empty": true
+    },
     "prompt_retuning_after_result": false,
     "model_selection_allowed": false
   },
-  "config_hash": "51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793"
+  "config_hash": "da4cdc4ef515be5fbc95b67cf39809b031564d4e2f80bd85419a341af6d94445"
 }

@@ -6,8 +6,8 @@ fail-closes, and whether the API/FinRun contract stays atomic.
 
 It is not product accuracy, not a benchmark, not financial accuracy, not
 retrieval quality, and not a LEDGER/FinanceBench/holdout score. Official
-preflight and remote execution stay default-deny in this implementation
-phase.
+preflight and remote execution stay default-deny until a later one-shot
+authorization. Hash `51331a4f…` never preflighted or remoted.
 """
 
 from __future__ import annotations
@@ -19,7 +19,9 @@ import re
 import socket
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -62,6 +64,15 @@ UNAUTHORIZED_REASON = "implementation_only_not_authorized_this_phase"
 RETIRED_LEDGER_V5_HASH = (
     "7db4156491fbd0cb500ae71772002a494a3cc37b751eb5e55b707307fd02b91b"
 )
+RETIRED_BEFORE_PREFLIGHT_HASH = (
+    "51331a4f059d02905f8c2dd61abfe9c180919140f8973303570e6095c529f793"
+)
+RETIRED_CONFIG_HASHES = {
+    RETIRED_LEDGER_V5_HASH: "retired LEDGER V5 config hash is not executable",
+    RETIRED_BEFORE_PREFLIGHT_HASH: (
+        "retired synthetic alias config hash never preflighted or remoted"
+    ),
+}
 DEFAULT_CHAT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-v4-flash"
 FICTIONAL_COMPANY = "PebblefordLanterns"
@@ -814,7 +825,7 @@ def _finished_contract(
     metrics["structured_answer_emitted"] = True
     expected_chunks = [bound.alias_map.alias_to_chunk[alias] for alias in bound.case.expected_aliases]
     mapped = list(structured.get("citations") or [])
-    metrics["expected_alias_match"] = mapped == expected_chunks
+    metrics["expected_alias_match"] = (not bound.case.incomplete) and mapped == expected_chunks
     metrics["mapped_chunk_matches_synthetic_qrels"] = (
         not bound.case.incomplete
         and bool(mapped)
@@ -947,6 +958,8 @@ def empty_metrics() -> dict[str, int | bool]:
         "mapped_chunk_matches_synthetic_qrels": 0,
         "incomplete_case_handled": False,
         "protocol_gate_passed": False,
+        "synthetic_evidence_gate_passed": False,
+        "release_gate_passed": False,
     }
 
 
@@ -982,7 +995,25 @@ def evaluate_protocol_gate(metrics: Mapping[str, Any]) -> bool:
     )
 
 
-def frozen_gate_thresholds() -> dict[str, Any]:
+def evaluate_synthetic_evidence_gate(metrics: Mapping[str, Any]) -> bool:
+    return (
+        int(metrics.get("expected_alias_match") or 0) == EXPECTED_CITATION_CASES
+        and int(metrics.get("mapped_chunk_matches_synthetic_qrels") or 0) == EXPECTED_CITATION_CASES
+        and metrics.get("incomplete_case_handled") is True
+    )
+
+
+def evaluate_release_gate(metrics: Mapping[str, Any]) -> bool:
+    return (
+        evaluate_protocol_gate(metrics)
+        and evaluate_synthetic_evidence_gate(metrics)
+        and int(metrics.get("provider_errors") or 0) == 0
+        and int(metrics.get("cases_succeeded") or 0) == LOCKED_CASE_COUNT
+        and int(metrics.get("cases_failed") or 0) == 0
+    )
+
+
+def frozen_protocol_gates() -> dict[str, Any]:
     return {
         "provider_errors": 0,
         "json_parse_success": LOCKED_CASE_COUNT,
@@ -992,6 +1023,22 @@ def frozen_gate_thresholds() -> dict[str, Any]:
         "alias_mapping_success": EXPECTED_CITATION_CASES,
         "citation_validation_failed": 0,
         "incomplete_case_handled": True,
+    }
+
+
+def frozen_synthetic_evidence_gates() -> dict[str, Any]:
+    return {
+        "expected_alias_match": EXPECTED_CITATION_CASES,
+        "mapped_chunk_matches_synthetic_qrels": EXPECTED_CITATION_CASES,
+        "incomplete_case_handled": True,
+        "incomplete_citations_empty": True,
+    }
+
+
+def frozen_gate_thresholds() -> dict[str, Any]:
+    return {
+        "protocol": frozen_protocol_gates(),
+        "synthetic_evidence": frozen_synthetic_evidence_gates(),
         "prompt_retuning_after_result": False,
         "model_selection_allowed": False,
     }
@@ -1130,8 +1177,8 @@ def load_frozen_config(
         raise CanaryError("frozen config is missing config_hash")
     if stored != computed:
         raise CanaryError("frozen config_hash does not match canonical digest")
-    if stored == RETIRED_LEDGER_V5_HASH:
-        raise CanaryError("retired LEDGER V5 config hash is not executable")
+    if stored in RETIRED_CONFIG_HASHES:
+        raise CanaryError(RETIRED_CONFIG_HASHES[stored])
     identity = dataset_identity(load_dataset_payload(repo_root=root))
     _validate_frozen_payload(payload, identity=identity)
     if require_published:
@@ -1234,12 +1281,40 @@ def execution_authorized(
             return False
     if record.get("suite") != SUITE or record.get("dataset_kind") != DATASET_KIND:
         return False
+    if record.get("dataset_consumed") is True:
+        return False
+    ancestor = str(record.get("required_implementation_ancestor") or "").strip()
+    if ancestor and repo_root is not None:
+        head = git_snapshot(Path(repo_root))["lumenfin_commit"]
+        if not _is_git_ancestor(Path(repo_root), ancestor, head):
+            return False
     flag = {
         "execution": "execution_authorized",
         "preflight": "preflight_authorized",
         "remote": "remote_run_authorized",
     }[want]
-    return _strict_true(record.get(flag))
+    if not _strict_true(record.get(flag)):
+        return False
+    if want == "preflight":
+        used = int(record.get("official_preflight_executions") or 0)
+        maximum = int(record.get("max_official_preflight_executions") or 0)
+        return used < maximum
+    if want == "remote":
+        used = int(record.get("official_remote_executions") or 0)
+        maximum = int(record.get("max_official_remote_executions") or 0)
+        return used < maximum
+    return True
+
+
+def _is_git_ancestor(repo_root: Path, ancestor: str, head: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, head],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def refuse_unauthorized(
@@ -1341,6 +1416,30 @@ def write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
             tmp_path.unlink()
 
 
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def credential_presence() -> dict[str, Any]:
+    raw = os.getenv("DEEPSEEK_API_KEY")
+    return {"source": "env", "present": bool(raw and str(raw).strip())}
+
+
+def assert_clean_worktree(repo_root: Path) -> dict[str, Any]:
+    snapshot = git_snapshot(repo_root)
+    if snapshot["worktree_dirty"]:
+        raise CanaryError("official execution requires a clean worktree")
+    return snapshot
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, int(round((pct / 100.0) * (len(ordered) - 1)))))
+    return float(ordered[index])
+
+
 def build_preflight_payload(
     config: FrozenCanaryConfig,
     *,
@@ -1348,15 +1447,30 @@ def build_preflight_payload(
 ) -> dict[str, Any]:
     identity = dataset_identity(load_dataset_payload(repo_root=repo_root))
     snapshot = git_snapshot(repo_root)
+    record = authorization_record(config.config_hash, repo_root=repo_root) or {}
     return {
         "kind": "preflight",
+        "schema_version": PREFLIGHT_SCHEMA_VERSION,
         "preflight_schema_version": PREFLIGHT_SCHEMA_VERSION,
         "suite": SUITE,
         "dataset_kind": DATASET_KIND,
         "protocol": CITATION_ALIAS_PROTOCOL_VERSION,
         "config_hash": config.config_hash,
+        "dataset_hash": identity["dataset_sha256"],
         "status": "PREFLIGHT_BUILT_NOT_AUTHORIZED",
+        "executed_at": "",
         "exit_code": 2,
+        "execution_commit": snapshot["lumenfin_commit"],
+        "authorization_identity": {
+            "authorization_sha256": (load_authorization(repo_root=repo_root) or {}).get(
+                "authorization_sha256"
+            ),
+            "identity_status": record.get("identity_status"),
+            "preflight_authorized": record.get("preflight_authorized"),
+            "remote_run_authorized": record.get("remote_run_authorized"),
+        },
+        "cases_total": LOCKED_CASE_COUNT,
+        "cases_remaining": LOCKED_CASE_COUNT,
         "cases_executed": 0,
         "remote_request_count": 0,
         "recorded_remote_calls": 0,
@@ -1366,21 +1480,66 @@ def build_preflight_payload(
         "ledger_public_dev_used": False,
         "product_accuracy_claim": False,
         "benchmark_claim": False,
+        "financial_accuracy_claim": False,
+        "retrieval_quality_claim": False,
+        "prompt_retuning_after_result": False,
+        "gold_not_exposed_to_generator": True,
         "case_count": identity["case_count"],
         "dataset_identity": identity,
         "prompt_sha256": prompt_sha256(),
         "alias_protocol_version": CITATION_ALIAS_PROTOCOL_VERSION,
         "final_k": LOCKED_FINAL_K,
-        "gold_not_exposed_to_generator": True,
         "commit": snapshot["lumenfin_commit"],
         "gates": frozen_gate_thresholds(),
         "call_budget": config.field("call_budget"),
+        "credential": credential_presence(),
         "billing_semantics": {
             "at_least_once": True,
             "exactly_once": False,
             "unobserved_inflight_possible": True,
         },
     }
+
+
+def _assert_preflight_success_contract(report: Mapping[str, Any]) -> None:
+    required = (
+        "status",
+        "schema_version",
+        "executed_at",
+        "exit_code",
+        "execution_commit",
+        "config_hash",
+        "dataset_hash",
+        "authorization_identity",
+        "cases_total",
+        "cases_remaining",
+        "remote_request_count",
+        "public_holdout_used",
+        "financebench_used",
+        "gold_not_exposed_to_generator",
+    )
+    missing = [key for key in required if key not in report]
+    if missing:
+        raise CanaryError("preflight report is missing required audit fields")
+    if report.get("status") != "PREFLIGHT_OK":
+        raise CanaryError("preflight status is not PREFLIGHT_OK")
+    if report.get("exit_code") != 0:
+        raise CanaryError("preflight success report must set exit_code 0")
+    if report.get("cases_executed") != 0 or report.get("remote_request_count") != 0:
+        raise CanaryError("preflight success cannot record cases or remote calls")
+    if not str(report.get("executed_at") or ""):
+        raise CanaryError("preflight success must record executed_at")
+    if report.get("public_holdout_used") is not False or report.get("financebench_used") is not False:
+        raise CanaryError("preflight success cannot record reserved eval use")
+
+
+def load_official_preflight(*, repo_root: Path) -> dict[str, Any]:
+    path = repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR / "preflight.json"
+    if not path.is_file():
+        raise CanaryError("successful official preflight is required")
+    report = read_json_object(path, field="official-preflight")
+    _assert_preflight_success_contract(report)
+    return report
 
 
 def run_preflight(
@@ -1397,25 +1556,34 @@ def run_preflight(
         require_published=official,
     )
     dest = Path(output_dir or (repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR))
+    if official:
+        expected = (repo_root / DEFAULT_PREFLIGHT_OUTPUT_DIR).resolve()
+        if dest.resolve() != expected:
+            raise CanaryError("official preflight directory is fixed")
+        refuse_unauthorized(
+            config,
+            repo_root=repo_root,
+            authorization_path=authorization_path,
+            preflight_output_dir=dest,
+            want="preflight",
+        )
+        snapshot = assert_clean_worktree(repo_root)
+        if not credential_presence()["present"]:
+            raise CanaryError("DEEPSEEK_API_KEY is not present")
+    else:
+        snapshot = git_snapshot(repo_root)
     probe = NetworkProbe()
     probe.install()
     try:
-        if official:
-            refuse_unauthorized(
-                config,
-                repo_root=repo_root,
-                authorization_path=authorization_path,
-                preflight_output_dir=dest,
-                want="preflight",
-            )
         payload = build_preflight_payload(config, repo_root=repo_root)
-        if official:
-            raise CanaryError("official synthetic alias preflight is not authorized")
         payload["status"] = "PREFLIGHT_OK"
         payload["exit_code"] = 0
+        payload["executed_at"] = utc_now()
+        payload["execution_commit"] = snapshot["lumenfin_commit"]
         payload["remote_request_count"] = probe.remote_request_count
         if payload["cases_executed"] != 0 or payload["remote_request_count"] != 0:
             raise CanaryError("preflight cannot execute cases or remote calls")
+        _assert_preflight_success_contract(payload)
         assert_output_not_overwritten(dest)
         write_json_atomic(dest / "preflight.json", payload)
         return payload
@@ -1423,6 +1591,231 @@ def run_preflight(
         probe.remove()
         if probe.remote_request_count:
             raise CanaryError("preflight made a remote call")
+
+
+def generate_remote(bound: BoundCase, *, config: FrozenCanaryConfig) -> tuple[str, dict[str, Any]]:
+    from ..llm import DeepSeekChatClient, LLMSettings
+
+    settings = LLMSettings(
+        api_key=(os.getenv("DEEPSEEK_API_KEY") or "").strip() or None,
+        base_url=DEFAULT_CHAT_BASE_URL,
+        model=str(config.field("provider", "model") or DEFAULT_MODEL),
+        timeout_seconds=float(config.field("provider", "timeout_seconds") or 60),
+        max_retries=int(config.field("provider", "max_retries") or 2),
+        retry_backoff_seconds=0.5,
+    )
+    if settings.model != DEFAULT_MODEL:
+        raise CanaryError("live provider model is not the frozen DeepSeek model")
+    if chat_base_url_sha256(settings.base_url) != chat_base_url_sha256():
+        raise CanaryError("live provider endpoint hash drifted")
+    if not settings.api_key:
+        raise CanaryError("DEEPSEEK_API_KEY is not present")
+    client = DeepSeekChatClient(settings)
+    client.mark_usage_start()
+    text = client.chat(
+        SYNTHETIC_ALIAS_SYSTEM_PROMPT,
+        bound.prompt_evidence,
+        temperature=0.0,
+        max_tokens=300,
+    )
+    return text, {
+        "http_attempts": int(getattr(client, "last_attempts", 0) or 0),
+        "prompt_tokens": int(client.usage_since_mark().get("prompt_tokens") or 0),
+        "completion_tokens": int(client.usage_since_mark().get("completion_tokens") or 0),
+    }
+
+
+def _completed_case_ids(output_dir: Path) -> set[str]:
+    completed: set[str] = set()
+    cases_dir = output_dir / "cases"
+    if cases_dir.is_dir():
+        for path in cases_dir.glob("*.json"):
+            completed.add(path.stem)
+    jsonl = output_dir / "per_case.jsonl"
+    if jsonl.is_file():
+        for line in jsonl.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if isinstance(row, Mapping) and row.get("case_id"):
+                completed.add(str(row["case_id"]))
+    return completed
+
+
+def _write_case_record(output_dir: Path, record: Mapping[str, Any]) -> None:
+    case_id = str(record.get("case_id") or "")
+    write_json_atomic(output_dir / "cases" / f"{case_id}.json", record)
+    rows = []
+    jsonl = output_dir / "per_case.jsonl"
+    if jsonl.is_file():
+        for line in jsonl.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+    rows = [row for row in rows if str(row.get("case_id") or "") != case_id]
+    rows.append(dict(record))
+    jsonl.parent.mkdir(parents=True, exist_ok=True)
+    jsonl.write_text(
+        "".join(canonical_dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def run_remote_canary(
+    *,
+    repo_root: Path,
+    config: FrozenCanaryConfig,
+    resume: bool = False,
+    generate_fn: Any = None,
+) -> dict[str, Any]:
+    dest = repo_root / DEFAULT_OFFICIAL_OUTPUT_DIR
+    preflight = load_official_preflight(repo_root=repo_root)
+    snapshot = assert_clean_worktree(repo_root)
+    identity = dataset_identity(load_dataset_payload(repo_root=repo_root))
+    if preflight.get("execution_commit") != snapshot["lumenfin_commit"]:
+        raise CanaryError("official preflight is not bound to this HEAD")
+    if preflight.get("config_hash") != config.config_hash:
+        raise CanaryError("official preflight config hash mismatch")
+    if preflight.get("dataset_hash") != identity["dataset_sha256"]:
+        raise CanaryError("official preflight dataset hash mismatch")
+    expected = resume_identity(config, repo_root=repo_root, output_dir=dest)
+    if resume:
+        manifest_path = dest / "resume_identity.json"
+        if not manifest_path.is_file():
+            raise CanaryError("resume requires a stored resume identity")
+        assert_resume_compatible(read_json_object(manifest_path, field="resume-identity"), expected)
+        if (dest / "resume_used.json").is_file():
+            raise CanaryError("only one transport resume is authorized")
+        write_json_atomic(dest / "resume_used.json", {"used": True, "at": utc_now()})
+    else:
+        assert_output_not_overwritten(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(dest / "resume_identity.json", expected)
+
+    cases = load_cases(repo_root=repo_root)
+    completed = _completed_case_ids(dest) if resume else set()
+    totals = empty_metrics()
+    totals["cases_total"] = LOCKED_CASE_COUNT
+    latencies: list[float] = []
+    case_rows: list[dict[str, Any]] = []
+    recorded_remote = 0
+    logical_calls = 0
+    generate_attempts = 0
+    provider_errors = 0
+
+    for case in cases:
+        if case.case_id in completed:
+            case_path = dest / "cases" / f"{case.case_id}.json"
+            if not case_path.is_file():
+                raise CanaryError("resume is missing an atomic case record")
+            existing = read_json_object(case_path, field="case")
+            case_rows.append(existing)
+            apply_case_metrics(totals, existing.get("metrics") or {})
+            if existing.get("succeeded"):
+                totals["cases_succeeded"] = int(totals["cases_succeeded"]) + 1
+            else:
+                totals["cases_failed"] = int(totals["cases_failed"]) + 1
+            continue
+        bound = bind_case(case)
+        raw_text = ""
+        usage = {"http_attempts": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        started = time.perf_counter()
+        try:
+            if generate_fn is not None:
+                raw_text = str(generate_fn(bound))
+                usage["http_attempts"] = 1
+            else:
+                raw_text, usage = generate_remote(bound, config=config)
+            logical_calls += 1
+            recorded_remote += 1
+            generate_attempts += int(usage.get("http_attempts") or 1)
+        except Exception as exc:
+            provider_errors += 1
+            generate_attempts += int(usage.get("http_attempts") or 1)
+            raw_text = ""
+            scored = score_bound_output(bound, raw_text)
+            scored["metrics"]["provider_error"] = redact_structured_error(str(exc))
+        else:
+            scored = score_bound_output(bound, raw_text)
+        latency = time.perf_counter() - started
+        latencies.append(latency)
+        succeeded = (
+            scored["metrics"]["citation_validation_failed"] is False
+            and (
+                scored["metrics"]["alias_mapping_success"]
+                or scored["metrics"]["incomplete_case_handled"]
+            )
+        )
+        record = {
+            "case_id": case.case_id,
+            "succeeded": succeeded,
+            "latency_seconds": latency,
+            "http_attempts": usage.get("http_attempts"),
+            "metrics": scored["metrics"],
+            "public_fields": scored["public_fields"],
+            "finrun_validation": scored["metrics"].get("finrun_validation"),
+        }
+        _write_case_record(dest, record)
+        case_rows.append(record)
+        apply_case_metrics(totals, scored["metrics"])
+        if succeeded:
+            totals["cases_succeeded"] = int(totals["cases_succeeded"]) + 1
+        else:
+            totals["cases_failed"] = int(totals["cases_failed"]) + 1
+
+    totals["logical_generate_calls"] = logical_calls
+    totals["recorded_remote_calls"] = recorded_remote
+    totals["generate_attempts"] = generate_attempts
+    totals["provider_errors"] = provider_errors
+    totals["latency_p50"] = _percentile(latencies, 50)
+    totals["latency_p95"] = _percentile(latencies, 95)
+    totals["protocol_gate_passed"] = evaluate_protocol_gate(totals)
+    totals["synthetic_evidence_gate_passed"] = evaluate_synthetic_evidence_gate(totals)
+    totals["release_gate_passed"] = evaluate_release_gate(totals)
+    remaining = LOCKED_CASE_COUNT - len(case_rows)
+    summary = {
+        "kind": "official_remote_result",
+        "schema_version": OUTPUT_SCHEMA_VERSION,
+        "status": "CANARY_COMPLETE" if remaining == 0 else "CANARY_INCOMPLETE",
+        "executed_at": utc_now(),
+        "exit_code": 0 if totals["release_gate_passed"] else 2,
+        "execution_commit": snapshot["lumenfin_commit"],
+        "config_hash": config.config_hash,
+        "dataset_hash": identity["dataset_sha256"],
+        "authorization_identity": preflight.get("authorization_identity"),
+        "cases_total": LOCKED_CASE_COUNT,
+        "cases_remaining": remaining,
+        "remote_request_count": recorded_remote,
+        "suite": SUITE,
+        "dataset_kind": DATASET_KIND,
+        "protocol": CITATION_ALIAS_PROTOCOL_VERSION,
+        "product_accuracy_claim": False,
+        "benchmark_claim": False,
+        "financial_accuracy_claim": False,
+        "retrieval_quality_claim": False,
+        "retuning_after_result_forbidden": True,
+        "claim": "live-model synthetic alias protocol compliance",
+        "public_holdout_used": False,
+        "financebench_used": False,
+        "ledger_public_dev_used": False,
+        "gates": frozen_gate_thresholds(),
+        "metrics": totals,
+        "cases": [
+            {
+                "case_id": row["case_id"],
+                "succeeded": row["succeeded"],
+                "metrics": row["metrics"],
+            }
+            for row in case_rows
+        ],
+        "billing_semantics": {
+            "at_least_once": True,
+            "exactly_once": False,
+            "unobserved_inflight_possible": True,
+        },
+    }
+    write_json_atomic(dest / "summary.json", summary)
+    return summary
 
 
 def run_canary(
@@ -1435,6 +1828,7 @@ def run_canary(
     preflight_only: bool = False,
     resume: bool = False,
     official: bool = True,
+    generate_fn: Any = None,
 ) -> dict[str, Any]:
     config = frozen_config or load_frozen_config(
         repo_root / DEFAULT_CONFIG_PATH,
@@ -1443,6 +1837,8 @@ def run_canary(
     )
     if preflight_only and allow_remote:
         raise CanaryError("refusing --allow-remote with --preflight-only")
+    if preflight_only and resume:
+        raise CanaryError("refusing --resume with --preflight-only")
     if official:
         if preflight_only:
             refuse_unauthorized(
@@ -1451,7 +1847,12 @@ def run_canary(
                 authorization_path=authorization_path,
                 want="preflight",
             )
-            raise CanaryError("official synthetic alias preflight is not authorized")
+            return run_preflight(
+                repo_root=repo_root,
+                frozen_config=config,
+                authorization_path=authorization_path,
+                official=True,
+            )
         if not confirm_synthetic_alias_compliance or not allow_remote:
             raise CanaryError("remote canary requires --confirm-synthetic-alias-compliance and --allow-remote")
         refuse_unauthorized(
@@ -1461,7 +1862,17 @@ def run_canary(
             output_dir=repo_root / DEFAULT_OFFICIAL_OUTPUT_DIR,
             want="remote",
         )
-        raise CanaryError("official synthetic alias remote canary is not authorized")
+        record = authorization_record(config.config_hash, repo_root=repo_root) or {}
+        if record.get("requires_successful_preflight") is not False:
+            load_official_preflight(repo_root=repo_root)
+        if resume and record.get("resume_authorized_only_for_transport_interruption") is True:
+            pass
+        return run_remote_canary(
+            repo_root=repo_root,
+            config=config,
+            resume=resume,
+            generate_fn=generate_fn,
+        )
     if preflight_only:
         return run_preflight(
             repo_root=repo_root,
@@ -1470,10 +1881,6 @@ def run_canary(
             official=False,
         )
     raise CanaryError("non-official remote canary is not implemented")
-
-
-def generate_remote(*_args: Any, **_kwargs: Any) -> str:
-    raise CanaryError("remote generate is not authorized this phase")
 
 
 class NetworkProbe:
