@@ -2,7 +2,9 @@
 
 Schema version: **`1.0`**. This is a machine-readable contract, **not** a product
 accuracy claim. It does not retune retrieval and does not authorize opening
-LEDGER `public_holdout`.
+LEDGER `public_holdout`. A later E2E attempt against that split is
+blocked before preflight (no compatible prebuilt index); see
+[`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md).
 
 ## Why this exists
 

@@ -264,3 +264,21 @@ Official commands stay refused (`ONE_SHOT_CONSUMED`).
 python scripts/run_synthetic_alias_compliance_canary.py --preflight-only
 python scripts/run_synthetic_alias_compliance_canary.py --confirm-synthetic-alias-compliance --allow-remote
 ```
+
+## 8e. LEDGER public_holdout E2E (blocked)
+
+Frozen contract only. Not product accuracy. Official preflight and remote
+are default-deny because no compatible prebuilt index exists. Do not
+parse holdout text. Do not embed the holdout corpus.
+
+```powershell
+python -m unittest tests.test_ledger_public_holdout_e2e -v
+python scripts/run_ledger_public_holdout_e2e.py --preflight-only
+```
+
+Expected CLI exit `2` / `PREFLIGHT_BLOCKED`, `remote_request_count=0`,
+`holdout_consumed=false`.
+Tracked ledger:
+[`../data/eval_rag/ledger_public_holdout_e2e_result.json`](../data/eval_rag/ledger_public_holdout_e2e_result.json).
+Protocol:
+[`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md).

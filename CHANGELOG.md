@@ -154,6 +154,13 @@ pre-release. No public Docker image or PyPI upload.
   ledger: `data/eval_rag/synthetic_alias_compliance_result.json`.
   Authorization is closed (`ONE_SHOT_CONSUMED`, executions 1/1). Do not
   retune or rerun. Do not reuse retired LEDGER V5 hash `7db41564…`.
+- Attempted a one-shot LEDGER `public_holdout` E2E against frozen
+  `v0.1.0-rc.5` and blocked it before preflight:
+  `no_compatible_prebuilt_index`. Holdout text was not opened.
+  Authorization stays default-deny. Claim name only: LEDGER
+  public_holdout held-out end-to-end verified task success. This is not
+  a held-out score. Ledger:
+  `data/eval_rag/ledger_public_holdout_e2e_result.json`.
 
 ## 0.1.0rc4 — 2026-08-13
 

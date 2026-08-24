@@ -65,6 +65,9 @@ data/**
 !data/eval_rag/synthetic_alias_compliance_config.json
 !data/eval_rag/synthetic_alias_compliance_authorization.json
 !data/eval_rag/synthetic_alias_compliance_result.json
+!data/eval_rag/ledger_public_holdout_e2e_contract.json
+!data/eval_rag/ledger_public_holdout_e2e_authorization.json
+!data/eval_rag/ledger_public_holdout_e2e_result.json
 !data/.gitkeep
 
 .env

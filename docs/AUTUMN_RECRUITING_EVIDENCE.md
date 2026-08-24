@@ -30,7 +30,9 @@ Recorded confirmation-50 (consumed; do not rerun):
 
 These are **page-level retrieval** scores. They are not answer accuracy,
 not financial Q&A accuracy, and not a product claim. `public_holdout`
-was not opened. Phase 4 remains `NOT_RUN`.
+was not opened. Phase 4 remains `NOT_RUN`. A later one-shot LEDGER
+`public_holdout` E2E attempt stayed blocked: no compatible prebuilt
+index, so the split was not consumed.
 
 ## 3. FinAgentBench mutation
 
@@ -63,7 +65,24 @@ cases). Claim name only:
 Tracked ledger:
 [`../data/eval_rag/synthetic_alias_compliance_result.json`](../data/eval_rag/synthetic_alias_compliance_result.json).
 
-## 6. Why the old LEDGER public/dev support metric is invalid
+## 6. LEDGER public_holdout E2E (blocked, not consumed)
+
+Attempted metric name only:
+**LEDGER public_holdout held-out end-to-end verified task success**.
+
+| Field | Value |
+|-------|-------|
+| status | `BLOCKED_BEFORE_PREFLIGHT` |
+| holdout_consumed | false |
+| official preflight / remote | 0 / 0 |
+| reason | no compatible prebuilt index |
+| document re-embedding | forbidden (budget 0) |
+| config hash | `be89d18d77da01e0f2e3938ecf6c5235887e81720f5defc3f1ed55a45644674e` |
+
+This is not a held-out score and not product accuracy. Details:
+[`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md).
+
+## 7. Why the old LEDGER public/dev support metric is invalid
 
 Sealed exposed public/dev shadow: 22/50 structured answers, 18 unknown
 citations. Recorded `supported_claims=0` is **not** a valid support rate:
@@ -71,7 +90,7 @@ official scoring received empty qrels. A later read-only diagnosis found
 window mismatch (Top-20 / Top-10). There is **no repaired public/dev
 score**. Do not rerun or rescore. `public_holdout` stays closed.
 
-## 7. Reproducible identity
+## 8. Reproducible identity
 
 - LumenFin package: `0.1.0rc5`
 - Tag: `v0.1.0-rc.5`
@@ -79,31 +98,35 @@ score**. Do not rerun or rescore. `public_holdout` stays closed.
 - Dataset: `0d982240…`
 - Implementation ancestor: `f91c474…`
 - Execution HEAD: `030bf725…`
+- Holdout E2E contract: `be89d18d…` (blocked; not executed)
 
-## 8. Do not claim
+## 9. Do not claim
 
 - Product or financial-answer accuracy
 - Held-out product evaluation
 - A repaired LEDGER public/dev score
 - That confirmation-50 Hit@5 is chatbot accuracy
 - That this canary selected a production model or tuned prompts
+- A LEDGER public_holdout E2E success rate (that run never started)
 
-## 9. Resume bullets
+## 10. Resume bullets
 
 - Built a fail-closed financial research agent with planner–critic–repair,
   verified `chunk_id` citations, and an ephemeral E01–E10 alias window.
 - Isolated evaluation from production: default-deny authorization,
-  one-shot preflight/remote budgets, and no retune on exposed sets.
-- Closed a live-model 8-case synthetic alias-compliance canary (8/8,
-  protocol + synthetic evidence gates) without opening `public_holdout`.
+  one-shot budgets, and no retune on exposed sets.
+- Closed an 8-case live-model alias-compliance canary (8/8) and refused a
+  LEDGER `public_holdout` E2E when no rc5-compatible prebuilt index existed,
+  instead of embedding the holdout corpus or replaying public/dev caches.
 
-## 10. 60-second talk
+## 11. 60-second talk
 
 I built LumenFin as a controlled research agent, not a chatbot demo.
 The model never sees stable chunk IDs; it can only cite E01–E10, and
 the program maps those aliases or fail-closes. I kept evaluation
 governance separate from product claims: FinanceBench numbers are
 page-level retrieval, the old LEDGER support=0 is invalid because
-qrels were unbound, and I did not rerun consumed public/dev. The rc5
-close is an 8-case DeepSeek canary on fictional memos that only
-proves alias-protocol compliance, then the grant closes.
+qrels were unbound, and I did not rerun consumed public/dev. I also
+did not open `public_holdout` for a fake E2E score: there is no
+prebuilt holdout index matching rc5 retrieval, and re-embedding the
+corpus was out of budget, so the grant stayed closed.

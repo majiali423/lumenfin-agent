@@ -1,0 +1,19 @@
+{
+  "schema_version": "ledger_public_holdout_e2e_authorization.v1",
+  "kind": "ledger_public_holdout_e2e_authorization",
+  "default_deny": true,
+  "records": {
+    "be89d18d77da01e0f2e3938ecf6c5235887e81720f5defc3f1ed55a45644674e": {
+      "config_hash": "be89d18d77da01e0f2e3938ecf6c5235887e81720f5defc3f1ed55a45644674e",
+      "identity_status": "BLOCKED_BEFORE_PREFLIGHT",
+      "execution_authorized": false,
+      "preflight_authorized": false,
+      "remote_run_authorized": false,
+      "reason": "no_compatible_prebuilt_index",
+      "official_preflight_executions": 0,
+      "official_remote_executions": 0,
+      "dataset_consumed": false,
+      "holdout_consumed": false
+    }
+  }
+}

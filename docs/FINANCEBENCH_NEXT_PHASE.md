@@ -33,6 +33,10 @@ by offline contract tests only. No repaired public/dev score exists.
 An independent synthetic alias-compliance canary ran once and is sealed
 (`ONE_SHOT_CONSUMED`). It does not reuse LEDGER, FinanceBench, or
 holdout data. Do not retune or rerun.
+A later LEDGER `public_holdout` E2E attempt is
+`BLOCKED_BEFORE_PREFLIGHT` (`no_compatible_prebuilt_index`). Holdout
+text was not opened. Do not authorize or run it until a sealed
+rc5-compatible prebuilt index exists.
 
 This protocol starts **after** the sealed exposed test-100 A/B/C ablation.
 It is not a license to change production retrieval.

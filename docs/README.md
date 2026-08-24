@@ -48,6 +48,7 @@ release gate.
 | [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | LEDGER public-dev chain is sealed; do not embed page-parent index; production stays A; further work needs a new unseen holdout |
 | [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer + verified chunk-id citation protocol (`1.0`); synthetic canary, recorded public/dev shadow, and sealed synthetic alias-compliance canary are not accuracy claims |
 | [AUTUMN_RECRUITING_EVIDENCE.md](AUTUMN_RECRUITING_EVIDENCE.md) | Interview-facing evidence summary (retrieval vs product claims; sealed canary) |
+| [LEDGER_PUBLIC_HOLDOUT_E2E.md](LEDGER_PUBLIC_HOLDOUT_E2E.md) | LEDGER public_holdout E2E blocked before preflight (no compatible prebuilt index; not a score) |
 | [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
 | [README_zh.md](README_zh.md) | Legacy Chinese stub — prefer root [../README.zh-CN.md](../README.zh-CN.md) |
 

@@ -114,7 +114,10 @@ lexical reranker）未改。
 - FinanceBench confirmation-50 已**消耗**：页 Hit@10 `0.62`。不要重跑或据此调参。
   聚合：[`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json)。
 - LEDGER `public_dev` 已**封存并停止**。整页 *返回* 仅限 eval；**不要**给
-  page-parent 索引做 embedding。`public_holdout` 未打开。聚合：
+  page-parent 索引做 embedding。`public_holdout` 未打开。一次 held-out E2E
+  尝试因缺少兼容预建索引而**阻塞**：
+  [`docs/LEDGER_PUBLIC_HOLDOUT_E2E.md`](docs/LEDGER_PUBLIC_HOLDOUT_E2E.md)。
+  聚合：
   [`data/eval_rag/holdout/`](data/eval_rag/holdout/)。
 - 协议：[docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) ·
   [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md)。

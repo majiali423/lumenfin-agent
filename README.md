@@ -122,7 +122,10 @@ Production retrieval defaults (chunker, lexical reranker) are unchanged.
   [`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json).
 - LEDGER `public_dev` is **sealed and stopped**. Parent-page *return* is
   eval-only; do **not** embed a page-parent index. `public_holdout` is
-  unopened. Aggregates:
+  unopened. A later held-out E2E attempt is
+  **blocked** (no compatible prebuilt index):
+  [`docs/LEDGER_PUBLIC_HOLDOUT_E2E.md`](docs/LEDGER_PUBLIC_HOLDOUT_E2E.md).
+  Aggregates:
   [`data/eval_rag/holdout/`](data/eval_rag/holdout/).
 - Protocol: [docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) ·
   [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md).

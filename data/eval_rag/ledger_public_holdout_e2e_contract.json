@@ -1,0 +1,74 @@
+{
+  "schema_version": "ledger_public_holdout_e2e_contract.v1",
+  "config_hash": "be89d18d77da01e0f2e3938ecf6c5235887e81720f5defc3f1ed55a45644674e",
+  "kind": "frozen_metric_contract",
+  "suite": "ledger_public_holdout_held_out_e2e",
+  "claim": "LEDGER public_holdout held-out end-to-end verified task success",
+  "dataset_specific": true,
+  "held_out": true,
+  "single_use": true,
+  "general_product_accuracy_claim": false,
+  "product_accuracy_claim": false,
+  "financial_accuracy_claim": false,
+  "benchmark_claim": false,
+  "llm_judge_as_primary": false,
+  "product": {
+    "release_tag": "v0.1.0-rc.5",
+    "product_commit": "31e8680aa89636f1fd897d7aa5ed7ca86317bd73"
+  },
+  "dataset": {
+    "split": "public_holdout",
+    "manifest_path": "data/eval_rag/holdout/ledger_public_manifest.json",
+    "manifest_sha256": "889329d3647a3c4543d12fa0ebae0172969e787bb877f73c2f0aee967a4920d5",
+    "query_ids_sha256": "4457d9268f0eaf14ffff9ab7e847adb9fb787b6283b98874370b3e301047ab88",
+    "company_keys_sha256": "1d5a8e526a6ff682a9cb77288f9c4264a879b5a2719a6e60719a0384d42b3027",
+    "source_queries": 2384,
+    "source_companies": 26,
+    "max_official_cases": 100
+  },
+  "retrieval": {
+    "arm": "A_prod",
+    "final_k": 10,
+    "source_k": 20,
+    "rerank_k": 20,
+    "embedding_provider": "dashscope",
+    "embedding_dimension": 1024,
+    "embedding_model": "text-embedding-v4",
+    "reranker": "qwen3-rerank",
+    "candidate_cache_forbidden": true,
+    "public_dev_index_forbidden": true,
+    "document_reembedding_calls": 0,
+    "requires_compatible_prebuilt_index": true
+  },
+  "generation": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "citation_alias_protocol": "citation_alias_protocol.v1",
+    "structured_answer_schema": "1.0",
+    "scorer_version": "lumenfin_ledger_e2e_scoring.v1",
+    "relative_tolerance": 0.01
+  },
+  "primary_metric": {
+    "name": "strict_verified_e2e_success_rate",
+    "verified_e2e_success": [
+      "answer_correct",
+      "structured_contract_valid",
+      "citation_supported",
+      "provider_success"
+    ],
+    "denominator": "all_selected_holdout_cases",
+    "empty_qrels": "NOT_EVALUABLE",
+    "confidence_interval": "wilson_95"
+  },
+  "call_budget": {
+    "holdout_cases": 100,
+    "deepseek_logical_calls": 100,
+    "query_embedding_calls": 100,
+    "qwen3_rerank_calls": 100,
+    "document_reembedding_calls": 0
+  },
+  "index_gate": {
+    "compatible_prebuilt_index_present": false,
+    "reason": "no_compatible_prebuilt_index"
+  }
+}
