@@ -42,8 +42,13 @@ Holdout questions, gold values, and qrel bodies were not opened.
 - Config hash
   `be89d18d77da01e0f2e3938ecf6c5235887e81720f5defc3f1ed55a45644674e`
 
-Tracked files:
+Tracked v1 files (do not overwrite):
 
 - [`../data/eval_rag/ledger_public_holdout_e2e_contract.json`](../data/eval_rag/ledger_public_holdout_e2e_contract.json)
 - [`../data/eval_rag/ledger_public_holdout_e2e_authorization.json`](../data/eval_rag/ledger_public_holdout_e2e_authorization.json)
 - [`../data/eval_rag/ledger_public_holdout_e2e_result.json`](../data/eval_rag/ledger_public_holdout_e2e_result.json)
+
+A later v2 run, if authorized, uses new versioned files and a sealed
+rc5-compatible document index. See
+[`LEDGER_PUBLIC_HOLDOUT_INDEX.md`](LEDGER_PUBLIC_HOLDOUT_INDEX.md).
+The v1 blocked record stays historical.

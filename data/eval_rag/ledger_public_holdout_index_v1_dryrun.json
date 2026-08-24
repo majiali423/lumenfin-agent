@@ -1,0 +1,156 @@
+{
+  "schema_version": "ledger_public_holdout_index_dryrun.v1",
+  "status": "BUDGET_OK",
+  "product_tag": "v0.1.0-rc.5",
+  "product_commit": "31e8680aa89636f1fd897d7aa5ed7ca86317bd73",
+  "change_kind": "resource_authorization_before_holdout_consumption",
+  "model_or_retrieval_tuning": false,
+  "input_access_audit": {
+    "allowed_fields": [
+      "exchange",
+      "ticker",
+      "company_name",
+      "year",
+      "mmd_text"
+    ],
+    "requested_fields": [
+      "exchange",
+      "ticker",
+      "company_name",
+      "year",
+      "mmd_text"
+    ],
+    "schema_fields": [
+      "query_id",
+      "query_text",
+      "ticker",
+      "exchange",
+      "company_name",
+      "industry",
+      "year",
+      "kpi",
+      "value",
+      "source",
+      "tag",
+      "qrels",
+      "mmd_text"
+    ],
+    "actual_read_fields": [
+      "exchange",
+      "ticker",
+      "company_name",
+      "year",
+      "mmd_text"
+    ],
+    "refused_fields": [
+      "query_text",
+      "value",
+      "qrels",
+      "query_id",
+      "kpi",
+      "gold",
+      "expected",
+      "industry",
+      "source",
+      "tag"
+    ],
+    "projection_used": true,
+    "corpus_document_text_accessed": true,
+    "holdout_query_text_accessed": false,
+    "holdout_gold_accessed": false,
+    "holdout_qrels_accessed": false,
+    "holdout_consumed": false
+  },
+  "corpus": {
+    "holdout_companies": 26,
+    "company_keys_sha256": "1d5a8e526a6ff682a9cb77288f9c4264a879b5a2719a6e60719a0384d42b3027",
+    "reports": 122,
+    "documents": 10895,
+    "blank_pages": 188,
+    "empty_reports": 0,
+    "document_ids_sha256": "bf749b61fde40402c10e523d485b62ca25e48409e22096a8d0a4a61adb7f2a8b",
+    "companies": [
+      "amex:mxc",
+      "nasdaq:apa",
+      "nasdaq:bcpc",
+      "nasdaq:cent",
+      "nasdaq:dwsn",
+      "nasdaq:foxf",
+      "nasdaq:hain",
+      "nasdaq:loan",
+      "nasdaq:lway",
+      "nasdaq:orly",
+      "nasdaq:pnrg",
+      "nasdaq:strt",
+      "nyse:bsm",
+      "nyse:bte",
+      "nyse:emn",
+      "nyse:ftk",
+      "nyse:hlx",
+      "nyse:lea",
+      "nyse:lw",
+      "nyse:mgy",
+      "nyse:neu",
+      "nyse:pump",
+      "nyse:rngr",
+      "nyse:sd",
+      "nyse:sxt",
+      "nyse:wti"
+    ],
+    "snapshot_rows_scanned": 10000,
+    "source_artifact_sha256": "405eb7c805db90258e4246651688b8d8bef89c77d4a4ce2cbcbf9e5fa4bfe9ad"
+  },
+  "estimate": {
+    "chunks": 81376,
+    "embed_chars": 48149838,
+    "estimated_tokens_typical_qwen_style": 12059041,
+    "estimated_tokens_conservative_mixed": 24089164,
+    "estimated_tokens_hard_upper_char": 48149838,
+    "token_estimate_method": "conservative_mixed_v1_cjk1_other_2chars",
+    "token_estimate_notes": [
+      "typical_qwen_style: CJK=1 token, other=4 chars/token",
+      "conservative_mixed: CJK=1 token, other=2 chars/token (budget gate)",
+      "hard_upper_char: 1 token/char; used only as a ceiling, not the gate",
+      "No remote tokenizer was called."
+    ],
+    "estimated_http_requests": 8138,
+    "estimated_fee_cny": 12.0446,
+    "estimated_fee_cny_typical": 6.0295,
+    "estimated_fee_cny_hard_upper": 24.0749,
+    "price_cny_per_million_tokens": 0.5,
+    "price_cny_per_1k_tokens": 0.0005,
+    "price_source": "https://help.aliyun.com/zh/model-studio/text-embedding-v4",
+    "price_region": "dashscope.aliyuncs.com China mainland sync (Beijing / 华北2)",
+    "estimated_disk_mb": 363.79,
+    "oversized_chunks": 0,
+    "within_token_budget": true,
+    "within_http_budget": true,
+    "within_fee_budget": true,
+    "chunker": {
+      "implementation": "lumenfin.rag.chunking.chunk_document",
+      "max_chunk_chars": 900,
+      "overlap_chars": 120
+    }
+  },
+  "rc5_source_sha256": {
+    "src/lumenfin/rag/chunking.py": "6df9fada43a5d281316cd29cd96cb257058711ca7e259bd47d06dd989249003f",
+    "src/lumenfin/rag/embeddings.py": "9d5f0a71c55a0400470df721c843922b67f8cdf2ed4a60197683d181e840909d",
+    "src/lumenfin/rag/milvus_store.py": "46f55991338f186f3ddefb36fc2f50a17ba18404626c1dfd695080091271d9a4",
+    "src/lumenfin/rag/hybrid_retriever.py": "4c479bad839ead10d4c94d917353407abca066f1797f9b9994a29c320051f22b"
+  },
+  "embedding": {
+    "provider": "dashscope",
+    "model": "text-embedding-v4",
+    "dimension": 1024,
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "batch_size": 10
+  },
+  "deepseek_calls_during_index_build": 0,
+  "qwen3_calls_during_index_build": 0,
+  "credential": {
+    "name": "DASHSCOPE_API_KEY",
+    "source": "env",
+    "present": true
+  },
+  "holdout_consumed": false
+}
