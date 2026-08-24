@@ -48,7 +48,7 @@ Tracked v1 files (do not overwrite):
 - [`../data/eval_rag/ledger_public_holdout_e2e_authorization.json`](../data/eval_rag/ledger_public_holdout_e2e_authorization.json)
 - [`../data/eval_rag/ledger_public_holdout_e2e_result.json`](../data/eval_rag/ledger_public_holdout_e2e_result.json)
 
-A later v2 run, if authorized, uses new versioned files and a sealed
-rc5-compatible document index. See
+A later index attempt dry-ran the 26-company corpus and then blocked
+on a live China DashScope outage. See
 [`LEDGER_PUBLIC_HOLDOUT_INDEX.md`](LEDGER_PUBLIC_HOLDOUT_INDEX.md).
-The v1 blocked record stays historical.
+The v1 blocked record stays historical. No v2 E2E started.

@@ -49,7 +49,7 @@ release gate.
 | [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer + verified chunk-id citation protocol (`1.0`); synthetic canary, recorded public/dev shadow, and sealed synthetic alias-compliance canary are not accuracy claims |
 | [AUTUMN_RECRUITING_EVIDENCE.md](AUTUMN_RECRUITING_EVIDENCE.md) | Interview-facing evidence summary (retrieval vs product claims; sealed canary) |
 | [LEDGER_PUBLIC_HOLDOUT_E2E.md](LEDGER_PUBLIC_HOLDOUT_E2E.md) | LEDGER public_holdout E2E v1 blocked before preflight (no compatible prebuilt index; not a score) |
-| [LEDGER_PUBLIC_HOLDOUT_INDEX.md](LEDGER_PUBLIC_HOLDOUT_INDEX.md) | Document-only rc5 index for a later v2 holdout E2E; not a score |
+| [LEDGER_PUBLIC_HOLDOUT_INDEX.md](LEDGER_PUBLIC_HOLDOUT_INDEX.md) | Document-only rc5 index dry-run passed; live China embed blocked; not a score |
 | [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
 | [README_zh.md](README_zh.md) | Legacy Chinese stub — prefer root [../README.zh-CN.md](../README.zh-CN.md) |
 

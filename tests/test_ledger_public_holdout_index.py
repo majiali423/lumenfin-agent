@@ -147,6 +147,24 @@ class ProjectionAndDryRunTests(unittest.TestCase):
         chinese = estimate_tokens("收入利润")
         self.assertEqual(chinese["conservative_mixed"], 4)
 
+    def test_blocked_index_seal_does_not_claim_a_built_index(self) -> None:
+        payload = json.loads(
+            (ROOT / "data" / "eval_rag" / "ledger_public_holdout_index_v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(payload["status"], "BLOCKED_AFTER_DRYRUN")
+        self.assertIs(payload["holdout_consumed"], False)
+        self.assertIs(payload["official_index_built"], False)
+        self.assertIs(payload["phase_b_started"], False)
+        v1 = json.loads(
+            (ROOT / "data" / "eval_rag" / "ledger_public_holdout_e2e_result.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(v1["seal_status"], "BLOCKED_BEFORE_PREFLIGHT")
+        self.assertIs(v1["holdout_consumed"], False)
+
     def test_cli_help_does_not_open_holdout(self) -> None:
         cli = ROOT / "scripts" / "run_ledger_public_holdout_index.py"
         completed = subprocess.run(

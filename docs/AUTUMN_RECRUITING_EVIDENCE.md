@@ -79,8 +79,13 @@ Attempted metric name only:
 | document re-embedding | forbidden (budget 0) |
 | config hash | `be89d18d77da01e0f2e3938ecf6c5235887e81720f5defc3f1ed55a45644674e` |
 
-This is not a held-out score and not product accuracy. Details:
-[`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md).
+A later authorized index attempt completed a zero-label dry-run
+(26 companies / 10,895 pages / 81,376 chunks; conservative fee
+≈ CNY 12.04) and then **fail-closed** before holdout consumption:
+the rc5 China DashScope endpoint was unreachable from the execution
+network. No v2 E2E run started. Details:
+[`LEDGER_PUBLIC_HOLDOUT_INDEX.md`](LEDGER_PUBLIC_HOLDOUT_INDEX.md)
+and [`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md).
 
 ## 7. Why the old LEDGER public/dev support metric is invalid
 

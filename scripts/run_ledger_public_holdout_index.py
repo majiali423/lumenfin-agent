@@ -72,6 +72,21 @@ def _worktree_clean() -> bool:
     return not status.strip()
 
 
+def _index_batch_with_retry(store, batch: list[dict], *, attempts: int = 8) -> dict:
+    last_error = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            return store.index_documents(batch, SESSION_ID)
+        except Exception as exc:  # noqa: BLE001 - transport/resume only
+            last_error = type(exc).__name__
+            if attempt >= attempts:
+                raise HoldoutIndexError(
+                    f"document embed batch failed after {attempts} attempts ({last_error})"
+                ) from exc
+            time.sleep(min(60.0, 2.0 ** attempt))
+    raise HoldoutIndexError("document embed batch failed")
+
+
 def _index_documents(store, documents: list[dict], *, batch_size: int, checkpoint: Path, done: set[str]) -> dict:
     totals = {
         "documents_indexed": 0,
@@ -81,11 +96,12 @@ def _index_documents(store, documents: list[dict], *, batch_size: int, checkpoin
         "embed_chars": 0,
         "billing_semantics": "at_least_once",
         "exactly_once_claimed": False,
+        "outer_transport_retries_used": True,
     }
     pending = [item for item in documents if str(item["document_id"]) not in done]
     for start in range(0, len(pending), batch_size):
         batch = pending[start : start + batch_size]
-        stats = store.index_documents(batch, SESSION_ID)
+        stats = _index_batch_with_retry(store, batch)
         totals["documents_indexed"] += int(stats.get("documents_indexed") or 0)
         totals["chunks_indexed"] += int(stats.get("chunks_indexed") or 0)
         totals["embed_logical_calls"] += int(stats.get("embed_calls") or 0)
@@ -103,6 +119,17 @@ def _index_documents(store, documents: list[dict], *, batch_size: int, checkpoin
                 "totals": totals,
             },
         )
+        if len(done) % 200 == 0 or start + batch_size >= len(pending):
+            print(
+                json.dumps(
+                    {
+                        "progress_documents": len(done),
+                        "progress_total": len(documents),
+                        "chunks_indexed": totals["chunks_indexed"],
+                    }
+                ),
+                flush=True,
+            )
     return totals
 
 

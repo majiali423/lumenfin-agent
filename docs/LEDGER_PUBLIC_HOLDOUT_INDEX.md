@@ -26,9 +26,20 @@ python scripts/run_ledger_public_holdout_index.py --build --allow-remote
 ```
 
 The large Milvus Lite files stay gitignored under
-`outputs/ledger_public_holdout_rc5_index_v1/`. The tracked seal is
-`data/eval_rag/ledger_public_holdout_index_v1.json` after a successful
-build.
+`outputs/ledger_public_holdout_rc5_index_v1/`.
+
+Status: **BLOCKED_AFTER_DRYRUN**. Local cost preflight passed (26
+companies, 10,895 pages, 81,376 chunks, conservative ≈ CNY 12.04).
+Live DashScope `text-embedding-v4` calls to
+`dashscope.aliyuncs.com` failed closed on TLS `ConnectError` after
+retries. The China-region key was present; the international host was
+reachable but rejected the key. No official index was sealed. Holdout
+questions were not opened.
+
+Tracked files:
+
+- [`../data/eval_rag/ledger_public_holdout_index_v1_dryrun.json`](../data/eval_rag/ledger_public_holdout_index_v1_dryrun.json)
+- [`../data/eval_rag/ledger_public_holdout_index_v1.json`](../data/eval_rag/ledger_public_holdout_index_v1.json)
 
 ## v1 E2E remains blocked
 
