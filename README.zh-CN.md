@@ -103,7 +103,9 @@ python scripts\validate_cross_repo.py --profile ci
 ```
 
 摘要记录双方 commit、FinRun schema、profile 与 core/extended mutation 结果。
-LumenFin CI 也会在 pin 的评测器 tag 上运行该门禁。
+LumenFin CI 也会在 pin 的评测器 tag 上运行该门禁。FinAgentBench 是**离线合同 /
+回归门禁**，不是 held-out 产品效果。网页 Run Manifest 的 **Evaluator** 是另
+一套本次运行的本地轻量检查，同样不是 held-out 产品效果。
 
 ### 外部 RAG 评测（FinanceBench + LEDGER）
 
@@ -114,8 +116,9 @@ lexical reranker）未改。
 - FinanceBench confirmation-50 已**消耗**：页 Hit@10 `0.62`。不要重跑或据此调参。
   聚合：[`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json)。
 - LEDGER `public_dev` 已**封存并停止**。整页 *返回* 仅限 eval；**不要**给
-  page-parent 索引做 embedding。`public_holdout` 未打开。一次 held-out E2E
-  尝试因缺少兼容预建索引而**阻塞**：
+  page-parent 索引做 embedding。LEDGER `public_holdout` 一次性 E2E v2：
+  **35/100** 严格核实（Wilson 95% CI [0.264, 0.447]）；dataset-specific、
+  single-use、已消耗；**不是**通用产品准确率：
   [`docs/LEDGER_PUBLIC_HOLDOUT_E2E.md`](docs/LEDGER_PUBLIC_HOLDOUT_E2E.md)。
   聚合：
   [`data/eval_rag/holdout/`](data/eval_rag/holdout/)。

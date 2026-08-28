@@ -265,20 +265,21 @@ python scripts/run_synthetic_alias_compliance_canary.py --preflight-only
 python scripts/run_synthetic_alias_compliance_canary.py --confirm-synthetic-alias-compliance --allow-remote
 ```
 
-## 8e. LEDGER public_holdout E2E (blocked)
+## 8e. LEDGER public_holdout E2E
 
-Frozen contract only. Not product accuracy. Official preflight and remote
-are default-deny because no compatible prebuilt index exists. Do not
-parse holdout text. Do not embed the holdout corpus.
+v1 remains the historical blocked ledger (exit `2` /
+`PREFLIGHT_BLOCKED`). v2 is sealed and consumed — do not re-run remote
+consume. Governance tests only:
 
 ```powershell
-python -m unittest tests.test_ledger_public_holdout_e2e -v
+python -m unittest tests.test_ledger_public_holdout_e2e tests.test_ledger_public_holdout_e2e_v2 tests.test_ledger_public_holdout_e2e_v2_result -v
 python scripts/run_ledger_public_holdout_e2e.py --preflight-only
 ```
 
-Expected CLI exit `2` / `PREFLIGHT_BLOCKED`, `remote_request_count=0`,
-`holdout_consumed=false`.
-Tracked ledger:
-[`../data/eval_rag/ledger_public_holdout_e2e_result.json`](../data/eval_rag/ledger_public_holdout_e2e_result.json).
-Protocol:
+Tracked ledgers:
+[`../data/eval_rag/ledger_public_holdout_e2e_result.json`](../data/eval_rag/ledger_public_holdout_e2e_result.json)
+(v1 blocked),
+[`../data/eval_rag/ledger_public_holdout_e2e_result_v2.json`](../data/eval_rag/ledger_public_holdout_e2e_result_v2.json)
+(v2 sealed). Protocol:
 [`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md).
+Not a general product accuracy claim.

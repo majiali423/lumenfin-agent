@@ -161,6 +161,11 @@ pre-release. No public Docker image or PyPI upload.
   public_holdout held-out end-to-end verified task success. This is not
   a held-out score. Ledger:
   `data/eval_rag/ledger_public_holdout_e2e_result.json`.
+- Sealed one-shot LEDGER `public_holdout` E2E v2 after the compatible rc5
+  index existed: 100 cases, strict verified 35/100 (Wilson 95% CI
+  [0.264, 0.447]). Dataset-specific, single-use, consumed. Not a general
+  product accuracy claim. Do not retune or rerun. Ledger:
+  `data/eval_rag/ledger_public_holdout_e2e_result_v2.json`.
 
 ## 0.1.0rc4 — 2026-08-13
 

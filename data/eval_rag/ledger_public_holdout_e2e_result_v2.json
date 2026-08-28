@@ -1,0 +1,100 @@
+{
+  "result_kind": "ledger_public_holdout_e2e_result_ledger",
+  "result_schema_version": "ledger_public_holdout_e2e_result.v2",
+  "schema_version": "ledger_public_holdout_e2e_result.v2",
+  "seal_status": "SEALED",
+  "claim": "LEDGER public_holdout held-out end-to-end verified task success",
+  "dataset_specific": true,
+  "held_out": true,
+  "single_use": true,
+  "general_product_accuracy_claim": false,
+  "product_accuracy_claim": false,
+  "financial_accuracy_claim": false,
+  "benchmark_claim": false,
+  "product_tag": "v0.1.0-rc.5",
+  "product_commit": "31e8680aa89636f1fd897d7aa5ed7ca86317bd73",
+  "evaluation_harness_commit": "4cb7a5ade811c9e481742c59f703c9e006199326",
+  "execution_commit": "31e8680aa89636f1fd897d7aa5ed7ca86317bd73",
+  "execution_worktree_recorded_clean": false,
+  "execution_note": "Official consume ran against the frozen product pin with an unpublished v2 harness in the worktree. Harness identity is evaluation_harness_commit. This is not an executed_at timestamp.",
+  "config_hash": "233605b6f1d047ea8cd0d2a67a0e912da5df193cde8b909c338c4a424e4de01d",
+  "index_hash": "10cdfdddeb0fdb069cc9aaaef0fde71fa6b7c09501c80f743ce40eff8693fc83",
+  "index_milvus_db_sha256": "10cdfdddeb0fdb069cc9aaaef0fde71fa6b7c09501c80f743ce40eff8693fc83",
+  "index_uri": "outputs/ledger_public_holdout_rc5_index_v1/milvus_lite.db",
+  "index_collection": "lumenfin_ledger_public_holdout_rc5_v1",
+  "selection_hash": "cf2d3355843236943365033b5c7c4658a51172cfd6c6aa588f19b1afeb09b55b",
+  "selection_path": "data/eval_rag/ledger_public_holdout_e2e_selection_v2.json",
+  "contract_path": "data/eval_rag/ledger_public_holdout_e2e_contract_v2.json",
+  "authorization_path": "data/eval_rag/ledger_public_holdout_e2e_authorization_v2.json",
+  "selected_query_ids_sha256": "c2f54a7ffe9fcc8f50946dc3af9bc5efb8ec8d01e049cbf20d481e3026b72d31",
+  "cases_total": 100,
+  "successes": 35,
+  "rate": 0.35,
+  "wilson_95": [0.264, 0.447],
+  "strict_verified_e2e_success": {
+    "n": 100,
+    "successes": 35,
+    "rate": 0.35,
+    "low": 0.2636410465347802,
+    "high": 0.4474573957080203,
+    "method": "wilson_95"
+  },
+  "answer_correct": 37,
+  "structured_contract_valid": 47,
+  "citation_supported": 40,
+  "provider_success": 100,
+  "abstain": 54,
+  "evaluable_coverage": 1.0,
+  "conditional_verified_e2e_success": {
+    "n": 100,
+    "successes": 35,
+    "rate": 0.35,
+    "low": 0.2636410465347802,
+    "high": 0.4474573957080203,
+    "method": "wilson_95"
+  },
+  "call_counts": {
+    "query_embedding_physical_calls": 100,
+    "qwen3_rerank_calls": 100,
+    "deepseek_logical_calls": 100,
+    "document_reembedding_calls": 0
+  },
+  "public_dev_candidate_cache_used": false,
+  "document_reembedding_calls": 0,
+  "holdout_consumed": true,
+  "dataset_consumed": true,
+  "retuning_forbidden": true,
+  "second_fresh_run_forbidden": true,
+  "official_preflight_executions": 1,
+  "official_remote_executions": 1,
+  "raw_status_field": "MISSING",
+  "raw_executed_at_field": "MISSING",
+  "output_dir": "outputs/ledger_public_holdout_e2e_v2",
+  "completion_evidence": {
+    "cases_total": 100,
+    "per_case_rows": 100,
+    "remaining": 0,
+    "query_id_set_match": true,
+    "aggregate_cases": 100,
+    "raw_status_field": "MISSING",
+    "raw_executed_at_field": "MISSING"
+  },
+  "inferred_mtime": {
+    "authoritative": false,
+    "source": "filesystem_mtime_non_authoritative",
+    "aggregate_json": "2026-08-24T16:35:41",
+    "note": "Local filesystem mtime only. Not executed_at."
+  },
+  "official_raw_artifacts": [
+    {
+      "relative_path": "outputs/ledger_public_holdout_e2e_v2/aggregate.json",
+      "size_bytes": 1548,
+      "sha256": "eb25ed7f5618c0f689707165db3a9b682028e6f35985c377de84111150f7fb17"
+    },
+    {
+      "relative_path": "outputs/ledger_public_holdout_e2e_v2/per_case.jsonl",
+      "size_bytes": 97358,
+      "sha256": "c7c4e138751e10cf763e63b5358746fb0fdb2a13fcec08aa734e6781b931ad57"
+    }
+  ]
+}

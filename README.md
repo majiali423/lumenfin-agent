@@ -110,6 +110,10 @@ python scripts\validate_cross_repo.py --profile ci
 
 The summary records both commits, FinRun schema, profile, and core/extended
 mutation results. LumenFin CI also runs this gate at the pinned evaluator tag.
+FinAgentBench is an **offline contract / regression gate**. It is not held-out
+product accuracy. The webpage Run Manifest **Evaluator** is a separate local
+lightweight check of the current analysis run; it is also not held-out product
+accuracy.
 
 ### External RAG eval (FinanceBench + LEDGER)
 
@@ -121,9 +125,10 @@ Production retrieval defaults (chunker, lexical reranker) are unchanged.
   rerun or retune. Aggregate:
   [`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json).
 - LEDGER `public_dev` is **sealed and stopped**. Parent-page *return* is
-  eval-only; do **not** embed a page-parent index. `public_holdout` is
-  unopened. A later held-out E2E attempt is
-  **blocked** (no compatible prebuilt index):
+  eval-only; do **not** embed a page-parent index. LEDGER `public_holdout`
+  one-shot E2E v2: **35/100** strict verified (Wilson 95% CI [0.264, 0.447]);
+  dataset-specific, single-use, consumed; **not** a general product accuracy
+  claim:
   [`docs/LEDGER_PUBLIC_HOLDOUT_E2E.md`](docs/LEDGER_PUBLIC_HOLDOUT_E2E.md).
   Aggregates:
   [`data/eval_rag/holdout/`](data/eval_rag/holdout/).
