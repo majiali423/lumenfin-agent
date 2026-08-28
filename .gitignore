@@ -70,6 +70,7 @@ data/**
 !data/eval_rag/ledger_public_holdout_e2e_result.json
 !data/eval_rag/ledger_public_holdout_index_v1_dryrun.json
 !data/eval_rag/ledger_public_holdout_index_v1.json
+!data/eval_rag/ledger_public_holdout_e2e_selection_v2.json
 !data/eval_rag/ledger_public_holdout_e2e_contract_v2.json
 !data/eval_rag/ledger_public_holdout_e2e_authorization_v2.json
 !data/eval_rag/ledger_public_holdout_e2e_result_v2.json
