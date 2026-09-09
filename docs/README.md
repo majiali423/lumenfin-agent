@@ -1,66 +1,64 @@
-﻿# LumenFin Documentation
+# LumenFin documentation
 
-## Start here
+## Start with the product
 
-| Doc | Purpose |
-|-----|---------|
-| [EVIDENCE_INDEX.md](EVIDENCE_INDEX.md) | Historical scores/hashes; do not treat as live accuracy |
-| [PHASED_CHANGE_SUMMARY.md](PHASED_CHANGE_SUMMARY.md) | Phases 0–9: bugs found and what changed |
-| [RESUME_DRAFT.md](RESUME_DRAFT.md) | Honest resume bullets |
-| [PHASED_IMPROVEMENT_LOG.md](PHASED_IMPROVEMENT_LOG.md) | Per-phase verification log |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Current system spine |
-| [CONFIGURATION.md](CONFIGURATION.md) | Environment variables and fail-closed defaults |
-| [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Install and validation commands |
-| [VALIDATION_COMMANDS.md](VALIDATION_COMMANDS.md) | Supported offline / live / mutation commands |
-| [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md) | Portfolio RC boundary + validated gate summary |
-| [PRODUCTION_BACKUP_RESTORE.md](PRODUCTION_BACKUP_RESTORE.md) | Backup, verification, restore rehearsal, and rollback |
-| [MULTI_TENANCY_BOUNDARY.md](MULTI_TENANCY_BOUNDARY.md) | Tenant isolation scope and gaps |
-| [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Release freeze evidence |
-| [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) | Multi-process queue/worker evidence |
-| [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md) | Provider fault-injection evidence |
-| [DEMO_GUIDE.md](DEMO_GUIDE.md) | Offline portfolio demo and optional live A/B/C walkthrough |
-| [../LICENSE](../LICENSE) | MIT license for LumenFin-owned source |
-| [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) | Dependency, image, provider, and data terms |
+| Document | Purpose |
+|---|---|
+| [Project overview](../README.md) · [中文](../README.zh-CN.md) | Product scenarios, local setup and version status |
+| [Demo guide](DEMO_GUIDE.md) | Offline walkthrough and optional live paths |
+| [90-second presentation](AUTUMN_RECRUITING_DEMO_SCRIPT.md) | A concrete upload, answer and evidence story |
+| [Architecture](ARCHITECTURE.md) | Control flow, data flow and runtime topology |
+| [Design decisions](architecture_decisions.md) | Why these boundaries and technologies |
+| [Interview evidence](AUTUMN_RECRUITING_EVIDENCE.md) | How to explain the validated capabilities |
+| [Resume examples](RESUME_DRAFT.md) | Evidence-backed project descriptions |
 
-## Engineering evidence
+## Install, run and validate
 
-| Doc | Purpose |
-|-----|---------|
-| [ENGINEERING_EVOLUTION.md](ENGINEERING_EVOLUTION.md) | Failure-driven evolution |
-| [FINAL_RESULTS.md](FINAL_RESULTS.md) | Before → After summary |
-| [FINAGENTBENCH_DESIGN.md](FINAGENTBENCH_DESIGN.md) | Evaluation design notes |
-| [ARCHITECTURE_INDEX.md](ARCHITECTURE_INDEX.md) | Full map of current docs |
-
-Optional local portfolio notes may live under `docs/portfolio/` and are not a
-release gate.
+| Document | Purpose |
+|---|---|
+| [Reproducibility](REPRODUCIBILITY.md) | Environment setup and pinned joint evaluation |
+| [Validation commands](VALIDATION_COMMANDS.md) | Independent, joint and optional infrastructure checks |
+| [Configuration](CONFIGURATION.md) | Runtime and provider settings |
+| [Operational limitations](PRODUCTION_LIMITATIONS.md) | Supported boundaries and unverified scenarios |
+| [Tenant isolation](MULTI_TENANCY_BOUNDARY.md) | Authorization scope and remaining gaps |
+| [Backup and restore](PRODUCTION_BACKUP_RESTORE.md) | Recovery rehearsal and rollback |
+| [Observability](OBSERVABILITY.md) | Metrics, privacy and troubleshooting |
+| [Encoding](ENCODING.md) | Windows / UTF-8 behavior |
 
 ## Subsystems
 
-| Doc | Purpose |
-|-----|---------|
-| [architecture_decisions.md](architecture_decisions.md) | Durable design decisions |
-| [RAG_MILVUS.md](RAG_MILVUS.md) | Hybrid RAG / Milvus Lite (dev) and Milvus Server (multi-process) |
-| [MILVUS3_CUTOVER.md](MILVUS3_CUTOVER.md) | Milvus 3.0 volume/cutover contract |
-| [BM25_CUTOVER.md](BM25_CUTOVER.md) | Native BM25 collection and rollback contract |
-| [QWEN3_RERANK.md](QWEN3_RERANK.md) | Controlled Qwen3 rerank rollout, data-egress boundary, evaluation, and rollback |
-| [TICKER_RESOLVE.md](TICKER_RESOLVE.md) | Ticker / company resolution |
-| [HITL_CLARIFICATION.md](HITL_CLARIFICATION.md) | Clarification pause / resume |
-| [INPUT_GUARDRAIL.md](INPUT_GUARDRAIL.md) | Input and upload guards |
-| [MCP.md](MCP.md) | Optional MCP boundary |
-| [evaluation_strategy.md](evaluation_strategy.md) | Internal evaluation strategy |
-| [FINANCEBENCH_EVAL.md](FINANCEBENCH_EVAL.md) | External FinanceBench RAG retrieval eval (test-100 exploratory; confirmation-50 consumed; A/B/C sealed; LEDGER public-dev sealed and stopped; Phase 4 `NOT_RUN`; not product accuracy) |
-| [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md) | LEDGER public-dev chain is sealed; do not embed page-parent index; production stays A; further work needs a new unseen holdout |
-| [STRUCTURED_ANSWER.md](STRUCTURED_ANSWER.md) | Structured answer + verified chunk-id citation protocol (`1.0`); synthetic canary, recorded public/dev shadow, and sealed synthetic alias-compliance canary are not accuracy claims |
-| [AUTUMN_RECRUITING_EVIDENCE.md](AUTUMN_RECRUITING_EVIDENCE.md) | Interview-facing evidence summary (retrieval vs product claims; sealed canary) |
-| [LEDGER_PUBLIC_HOLDOUT_E2E.md](LEDGER_PUBLIC_HOLDOUT_E2E.md) | LEDGER public_holdout E2E: v1 blocked historical; v2 sealed one-shot (35/100 strict verified; not general product accuracy) |
-| [LEDGER_PUBLIC_HOLDOUT_INDEX.md](LEDGER_PUBLIC_HOLDOUT_INDEX.md) | Document-only rc5 index dry-run passed; live China embed blocked; not a score |
-| [ENCODING.md](ENCODING.md) | Windows / UTF-8 notes |
-| [README_zh.md](README_zh.md) | Legacy Chinese stub — prefer root [../README.zh-CN.md](../README.zh-CN.md) |
+| Document | Purpose |
+|---|---|
+| [Hybrid RAG](RAG_MILVUS.md) | Indexing and retrieval |
+| [Index leases](RAG_INDEX_LEASE.md) | Worker ownership and recovery |
+| [Milvus cutover](MILVUS3_CUTOVER.md) · [BM25 cutover](BM25_CUTOVER.md) | Collection migration and rollback |
+| [Qwen3 reranking](QWEN3_RERANK.md) | Controlled rollout and evaluation |
+| [Ticker resolution](TICKER_RESOLVE.md) | Company / ticker mapping |
+| [Clarification](HITL_CLARIFICATION.md) | Pause and resume contract |
+| [Input guardrails](INPUT_GUARDRAIL.md) | Query and upload boundaries |
+| [Structured answers](STRUCTURED_ANSWER.md) | Citation protocol and verification |
+| [Queue and workers](QUEUE_WORKER_INTEGRATION.md) | Multi-process fault-injection evidence |
+| [Provider resilience](PROVIDER_RESILIENCE.md) | Retry, deadlines and failures |
+| [MCP](MCP.md) · [MCP layer](../mcp_layer/README.md) | Optional tool interface |
 
-## Reports
+## Evaluation and historical evidence
 
-- Current: [`../reports/current/`](../reports/current/)
-- Index: [`../reports/README.md`](../reports/README.md)
+[FinAgentBench](https://github.com/majiali423/finagentbench-demo) is the product's
+separate FinRun evaluator. Current product CI, frozen contract tests and sealed
+dataset experiments answer different questions.
 
-Older one-off reports were removed; recover from Git if needed
-([`../reports/README.md`](../reports/README.md)).
+| Document | Purpose |
+|---|---|
+| [Evidence index](EVIDENCE_INDEX.md) | Historical scores, source identities and reports |
+| [Evaluation strategy](evaluation_strategy.md) · [FinAgentBench architecture](https://github.com/majiali423/finagentbench-demo/blob/master/docs/architecture.md) | Evaluation responsibilities and evaluator implementation |
+| [FinanceBench](FINANCEBENCH_EVAL.md) | Historical retrieval experiments |
+| [LEDGER development boundary](FINANCEBENCH_NEXT_PHASE.md) | Sealed development chain and restrictions |
+| [LEDGER index](LEDGER_PUBLIC_HOLDOUT_INDEX.md) · [E2E](LEDGER_PUBLIC_HOLDOUT_E2E.md) | Versioned index and end-to-end evidence |
+| [Frozen RC report](PORTFOLIO_RELEASE_REPORT.md) | Evidence for the release tag still used by compatibility CI |
+
+Historical hashes, scores and regression cases are retained. Current source may
+have evolved beyond the source version used by a sealed experiment.
+Completed phase logs and superseded packaging narratives are available in
+[Git history](https://github.com/majiali423/lumenfin-agent/tree/60e4ed6a06d7afb6fce907413d2359cbf89eae44/docs).
+
+[MIT license](../LICENSE) · [Third-party notices](../THIRD_PARTY_NOTICES.md)

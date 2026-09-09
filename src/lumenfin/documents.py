@@ -428,12 +428,6 @@ def _nearest_document_period(text: str, number_start: int, number_end: int) -> s
     return next(iter(nearest)) if len(nearest) == 1 else None
 
 
-def _looks_already_normalized(value: float, scale: str | None) -> bool:
-    """Deprecated: do not use shape heuristics for normalization state."""
-    del value, scale
-    return False
-
-
 def normalize_extracted_amount(
     raw_value: float,
     *,

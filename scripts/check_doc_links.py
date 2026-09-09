@@ -19,7 +19,7 @@ TARGETS = [
     "docs/DEMO_GUIDE.md",
     "docs/CONFIGURATION.md",
     "docs/REPRODUCIBILITY.md",
-    "docs/ARCHITECTURE_INDEX.md",
+    "docs/AUTUMN_RECRUITING_DEMO_SCRIPT.md",
     "docs/STRUCTURED_ANSWER.md",
     "docs/VALIDATION_COMMANDS.md",
     "docs/AUTUMN_RECRUITING_EVIDENCE.md",
@@ -27,8 +27,8 @@ TARGETS = [
     "docs/LEDGER_PUBLIC_HOLDOUT_INDEX.md",
     "docs/EVIDENCE_INDEX.md",
     "docs/RESUME_DRAFT.md",
-    "docs/PHASED_CHANGE_SUMMARY.md",
-    "docs/PHASED_IMPROVEMENT_LOG.md",
+    "docs/architecture_decisions.md",
+    "docs/evaluation_strategy.md",
 ]
 LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 

@@ -48,7 +48,10 @@ This solves three concrete problems:
 - The audit trail records how the system understood the user request.
 - Missing information, such as an absent company name, is captured explicitly instead of silently defaulting to demo companies.
 
-The current version does not pause the workflow for human clarification. It records missing fields in state first. A later UI/API layer can turn those fields into an interactive clarification step without changing the core workflow.
+The current graph pauses before Supervisor when the planner needs clarification.
+The API stores an application checkpoint and resumes with `user_clarification`;
+the planner checks the completed fields again. See
+[Clarification](HITL_CLARIFICATION.md) for the supported resume contract.
 
 ## 3. Why Lightweight Skills Registry
 
@@ -84,7 +87,15 @@ Most digital annual reports contain extractable text. PyMuPDF is fast, local, an
 
 ## 6b. Fail-loud When Fundamentals Are Missing
 
-Demo sample rows and uploaded PDFs are the only structured inputs for AST ratios. If a company resolves (e.g. `腾讯控股` → `Tencent`) but has neither sample fundamentals nor extractable PDF metrics, retrieval sets `fatal_data_gap` and the graph routes `retrieval → synthesizer` with `workflow_status=incomplete_data`. The synthesizer writes an honest incomplete report and does **not** ask the LLM to invent numbers. FinAgentBench is expected to fail-closed on that export (`structured_source=none`). This is preferred to silent degraded loops through replanner/quant/critic.
+Structured inputs can come from uploaded documents, explicit demo samples, or
+configured issuer SEC/Yahoo providers. Upload-only and live-mode restrictions
+continue to govern which sources are allowed.
+
+TaskSpec decides whether a question requires financial ratios. Missing required
+inputs produce `incomplete_data` and withhold unsupported numerical claims.
+Evidence-backed risk questions can proceed without unrelated ratios. A
+FinAgentBench case that requires checkable financial metrics still fails when
+those metrics are absent; a narrative answer does not satisfy that contract.
 
 OCR is intentionally not part of the MVP because it adds cost, deployment complexity, and another source of extraction error. OCR can be added later for scanned documents.
 
@@ -117,7 +128,7 @@ SQLite keeps local development simple. PostgreSQL is available for a production-
 ```text
 local demo -> SQLite
 service deployment -> PostgreSQL
-async jobs -> Redis/RQ
+async jobs -> Redis queue + application workers
 document-vector retrieval -> Milvus
 ```
 
@@ -125,7 +136,7 @@ The project does not require every infrastructure component to run for the core 
 
 ## 10. Reliability Layers (RC)
 
-Current production reliability is layered (see [ARCHITECTURE_INDEX.md](ARCHITECTURE_INDEX.md)):
+Current production reliability is layered (see [ARCHITECTURE.md](ARCHITECTURE.md)):
 
 1. **Issuer isolation** — uploads expand `issuer_companies` only (no peer fan-out).
 2. **Financial Grounding** — issuer SEC/Yahoo fills AST gaps when uploads are incomplete; `prefer_uploaded_only` still fail-closed.
@@ -133,3 +144,21 @@ Current production reliability is layered (see [ARCHITECTURE_INDEX.md](ARCHITECT
 4. **Fail-closed reporting** — `incomplete_data` withholds invented ratios and verified numeric claims.
 
 Evaluation remains external via FinAgentBench on canonical FinRun export. Do not lower bench thresholds to pass releases.
+
+## 11. Current reliability examples
+
+These are implementation and regression entrypoints for review or interviews.
+They replace the completed phase-by-phase work logs.
+
+| Failure to prevent | Current boundary | Regression entrypoint |
+|---|---|---|
+| Correct internal metrics hide a wrong sentence or table cell | Opt-in FinAgentBench v3 scores visible financial assertions | [Product quality loop](../tests/test_product_quality_loop.py) |
+| A stale worker acknowledges another worker's reservation | Reservation tokens and execution fencing preserve queue ownership | [Redis resilience](../tests/test_redis_queue_resilience.py) |
+| An upload exceeds its limit after being fully buffered | Streamed byte limits and failure cleanup | [Upload limits](../tests/test_upload_limits.py) |
+| A page-2 number inherits the cover's year or page-1 citation | Field periods and original page identities survive parsing and indexing | [Field periods](../tests/test_field_period_binding.py) · [RAG page identity](../tests/test_rag_page_identity.py) |
+| Independent tests import the optional evaluator during collection | Job polling helpers have no evaluator dependency | [Evaluator isolation](../tests/test_skip_joint_without_finagentbench.py) |
+
+Bounded repair remains off by default: its development-set gain came from demo
+sample backfill, which is unsuitable as an implicit live-data repair. The
+[evidence index](EVIDENCE_INDEX.md#product-dev-set-phase-4) preserves the experiment
+boundary and historical source.

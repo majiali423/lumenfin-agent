@@ -13,14 +13,18 @@ lives in the sibling FinAgentBench repository.
 
 ```bash
 python scripts/run_tests.py --fast
+python scripts/run_tests.py --skip-joint
 python scripts/run_portfolio_demo.py
 ```
 
-## 2. Full offline validation (needs working-tree FinAgentBench)
+## 2. Joint product validation (explicit FinAgentBench checkout)
+
+For the published baseline, use evaluator commit
+`40f7599e408f317515583405cb90249b811179c0`. The independent full suite above
+does not require the evaluator.
 
 ```bash
 export FINAGENTBENCH_DIR=/absolute/path/finagentbench-demo
-python scripts/run_tests.py --skip-joint
 python scripts/run_tests.py --joint-only
 ```
 

@@ -1,10 +1,11 @@
 ﻿# LumenFin Final Architecture
 
-Trustworthy Financial Research Agent — architecture for the current
-**published source** `0.1.0rc5` (tag **`v0.1.0-rc.5`**).
-FinRun schema `1.0`, FinAgentBench authoritative pin
-**`v0.1.0-rc.3`**; required CI also fail-closes published
-**`v0.1.0-rc.4`**.
+Financial research Agent architecture for the current source line.
+FinRun schema is `1.0`; product v3 evaluation uses published FinAgentBench
+commit `40f7599e408f317515583405cb90249b811179c0`. Frozen compatibility checks
+retain evaluator tags `v0.1.0-rc.3` / `v0.1.0-rc.4`.
+Package metadata `0.1.0rc5` does not mean the historical rc5 tag includes later
+source fixes. See [version status](../README.md#validation-and-versions).
 
 LumenFin is a portfolio release candidate validated under controlled
 multi-process and deterministic fault-injection conditions. These results
@@ -28,8 +29,9 @@ data is missing**.
 | Operable runtime | PostgreSQL + Redis reliable queues + Milvus Server + provider resilience under multi-process stress |
 
 **Sibling evaluator:** [FinAgentBench](https://github.com/majiali423/finagentbench-demo)
-scores exported `FinRun` traces. Recommended published tag: **`v0.1.0-rc.3`**
-(local sibling checkout optional for offline demos). LumenFin generates;
+scores exported `FinRun` traces. Use the product v3 commit for visible-output
+checks; rc.3 remains a frozen contract check. The evaluator is optional for
+standalone offline demos. LumenFin generates;
 FinAgentBench gates reliability.
 
 Canonical path:
@@ -379,5 +381,5 @@ Quant / risk → Claims → Evidence binding → Report
 | [QUEUE_WORKER_INTEGRATION.md](QUEUE_WORKER_INTEGRATION.md) | Multi-process infra |
 | [PROVIDER_RESILIENCE.md](PROVIDER_RESILIENCE.md) | Provider faults |
 | [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) | Release freeze evidence |
-| [FINAGENTBENCH_DESIGN.md](FINAGENTBENCH_DESIGN.md) | Evaluation design |
+| [FinAgentBench architecture](https://github.com/majiali423/finagentbench-demo/blob/master/docs/architecture.md) | Evaluator design maintained in its own repository |
 | [CONFIGURATION.md](CONFIGURATION.md) | Env / FinAgentBench pin |

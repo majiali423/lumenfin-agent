@@ -38,12 +38,10 @@ class VersionConsistencyTests(unittest.TestCase):
         self.assertIn(PUBLISHED_TAG, readme)
         self.assertNotRegex(readme, r"not tagged and\s+not released")
         self.assertNotIn("current-main regression", readme)
-        self.assertIn("2026-08-13 post-rc4 snapshot", readme)
 
         self.assertIn(PUBLISHED_VERSION, readme_zh)
         self.assertIn(PUBLISHED_TAG, readme_zh)
         self.assertNotRegex(readme_zh, r"尚未打标签、尚未发布")
-        self.assertIn("2026-08-13 post-rc4 快照", readme_zh)
 
         self.assertIn(f"## {PUBLISHED_VERSION} — 2026-08-24", changelog)
         self.assertNotIn("candidate preparation (unpublished)", changelog)

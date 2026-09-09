@@ -166,3 +166,14 @@ fixture FinRuns, no API keys.
 
 **Live:** real LLM, embeddings, SEC/Yahoo/market network access. Provider quota
 or network failure must be classified separately from Agent-quality failure.
+
+## Local troubleshooting
+
+- `DEEPSEEK_API_KEY` authenticates the LLM provider; `MAS_API_KEY` authenticates
+  this application's API. Setting one does not configure the other.
+- Milvus Lite database files have a single-process lock. An API process and a
+  separate CLI process must not open the same local database concurrently. Use
+  one process, separate test databases, or Milvus Server for multiple workers.
+- Inspect the run's `_audit.json` for the planned companies and node results
+  before changing prompts. Provider failures and missing evidence have separate
+  causes; the offline demo can verify the local workflow without live calls.

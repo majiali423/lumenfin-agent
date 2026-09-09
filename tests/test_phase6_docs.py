@@ -1,4 +1,8 @@
-"""Phase 6: README required sections, --fast runner, packaging honesty."""
+"""Release boundaries: evaluator isolation, UTF-8, packaging and CI routing.
+
+README wording and heading order are editorial choices. The documentation link
+checker validates the published navigation without freezing presentation copy.
+"""
 
 from __future__ import annotations
 
@@ -44,38 +48,6 @@ def run_utf8_subprocess(
 
 
 class Phase6DocsTestCase(unittest.TestCase):
-    def test_english_readme_homepage_order(self) -> None:
-        text = (ROOT / "README.md").read_text(encoding="utf-8")
-        headings = [
-            "## Concrete problem",
-            "## Visible result",
-            "## 5-minute offline reproduce",
-            "## Architecture trade-offs",
-            "## Effects, cost, limits",
-            "## Deeper docs",
-        ]
-        positions = [text.find(h) for h in headings]
-        self.assertTrue(all(p >= 0 for p in positions), positions)
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("not independent multi-agent", text)
-        self.assertNotIn("LangGraph node-level durable recovery across processes", text)
-        self.assertIn("wheel does **not** ship the web UI", text)
-
-    def test_chinese_readme_homepage_order(self) -> None:
-        text = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
-        headings = [
-            "## 具体问题",
-            "## 能看见的结果",
-            "## 5 分钟离线复现",
-            "## 架构取舍",
-            "## 效果、成本、边界",
-            "## 更深文档",
-        ]
-        positions = [text.find(h) for h in headings]
-        self.assertTrue(all(p >= 0 for p in positions), positions)
-        self.assertEqual(positions, sorted(positions))
-        self.assertIn("不是彼此独立的多 Agent", text)
-
     def test_run_tests_exposes_fast_flag(self) -> None:
         src = (ROOT / "scripts" / "run_tests.py").read_text(encoding="utf-8")
         self.assertIn('"--fast"', src)
@@ -154,21 +126,6 @@ class Phase6DocsTestCase(unittest.TestCase):
         self.assertIn("FINAGENTBENCH_PRODUCT_REF", ci)
         self.assertIn("Product quality v3", ci)
         self.assertNotIn("deadbeef", ci)
-
-    def test_evidence_and_resume_exist(self) -> None:
-        for rel in (
-            "docs/EVIDENCE_INDEX.md",
-            "docs/RESUME_DRAFT.md",
-            "docs/PHASED_CHANGE_SUMMARY.md",
-        ):
-            path = ROOT / rel
-            self.assertTrue(path.is_file(), rel)
-        evidence = (ROOT / "docs/EVIDENCE_INDEX.md").read_text(encoding="utf-8")
-        self.assertIn("35/100", evidence)
-        self.assertIn("0.62", evidence)
-        resume = (ROOT / "docs/RESUME_DRAFT.md").read_text(encoding="utf-8")
-        self.assertIn("not exactly-once", resume)
-        self.assertIn("default off", resume)
 
 
 if __name__ == "__main__":

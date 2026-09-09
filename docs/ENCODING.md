@@ -37,7 +37,7 @@
 ## README language policy
 
 - Root `README.md` is **English-only** (ASCII punctuation) so it renders cleanly on all Windows editors and GitHub.
-- Chinese positioning lives in `docs/README_zh.md` (UTF-8).
+- Chinese positioning lives in [../README.zh-CN.md](../README.zh-CN.md) (UTF-8).
 - Source files that must match CJK PDF text (e.g. guardrail regex) use **Unicode escapes** (`\uXXXX`) in `.py` files to avoid editor encoding drift.
 
 ## 新增中文文档/注释时

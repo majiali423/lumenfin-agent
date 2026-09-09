@@ -1,7 +1,8 @@
-# Evidence index (historical, do not delete)
+# Evidence index
 
-Homepage READMEs keep the product story short. **Original reports remain.**
-This index only points at them. Do **not** merge rows into one accuracy number.
+Homepage READMEs keep the product story short. Sealed evaluation artifacts and
+release evidence remain; completed work logs are linked at their historical
+Git revision. Do **not** merge rows into one accuracy number.
 Do **not** rerun FinanceBench confirmation-50 or LEDGER public_holdout to tune
 the product.
 
@@ -15,11 +16,12 @@ the product.
 
 ## Dated unit / infra snapshots
 
-Kept in README history and release reports. Treat as **dated**, not HEAD.
+Treat each recorded run as **dated**, not as the result for an untested HEAD.
 
 | Gate | Result | Primary source |
 |------|--------|----------------|
-| LumenFin 2026-09-08 R5 isolated venv | **1061** passed, 2 skipped (~209s) | [PHASED_IMPROVEMENT_LOG.md](PHASED_IMPROVEMENT_LOG.md) R5 |
+| LumenFin source `60e4ed6`, 2026-09-09 | Fast, Offline, Product v3, both frozen contract jobs passed | [Remote CI](https://github.com/majiali423/lumenfin-agent/actions/runs/34329999879) |
+| FinAgentBench source `40f7599`, 2026-09-09 | Test workflow passed | [Remote CI](https://github.com/majiali423/finagentbench-demo/actions/runs/34329922587) |
 | NVIDIA FY2025 excerpt upload gold | 81.453 billion USD OI; SHA256 `7f85d2c3…b68208` | `tests/fixtures/sec/nvda_fy2025_operating_income_gold.json` |
 | LumenFin RC-tag regression (`v0.1.0-rc.3` Linux image) | 495 passed, 2 skipped | [PRODUCTION_LIMITATIONS.md](PRODUCTION_LIMITATIONS.md), [PORTFOLIO_RELEASE_REPORT.md](PORTFOLIO_RELEASE_REPORT.md) |
 | LumenFin 2026-08-13 post-rc4 snapshot | 512 passed, 3 skipped | same |
@@ -34,8 +36,9 @@ Kept in README history and release reports. Treat as **dated**, not HEAD.
 | Evaluator `v0.1.0-rc.4` | fail-closed compatibility lane | CI matrix; does not replace rc3 pin |
 | Native BM25 + Qwen3 synthetic | Top-1/MRR 1.0/1.0 on that canary | **not** FinanceBench |
 
-HEAD test counts belong in [PHASED_IMPROVEMENT_LOG.md](PHASED_IMPROVEMENT_LOG.md)
-and GitHub Actions `ci.yml` on the current commit.
+Use the GitHub Actions run for the exact commit to establish its test status.
+Intermediate local review runs remain in the
+[historical verification log](https://github.com/majiali423/lumenfin-agent/blob/60e4ed6a06d7afb6fce907413d2359cbf89eae44/docs/PHASED_IMPROVEMENT_LOG.md).
 
 ## Retrieval canaries (sealed)
 
@@ -51,7 +54,10 @@ and GitHub Actions `ci.yml` on the current commit.
 
 Hand gold catalog `data/eval_product_dev/catalog_v1.json` (36 items; train/dev/test
 12/16/8). Offline ablation on **dev only**. Test split frozen unscored.
-**Not** an 80%/95% claim. Log: [PHASED_IMPROVEMENT_LOG.md](PHASED_IMPROVEMENT_LOG.md).
+**Not** an 80%/95% claim. Bounded repair stays **off by default** because its
+observed improvement came from demo-sample backfill into a live-empty setup.
+The original ablation table and environment are preserved in the
+[Phase 4 log](https://github.com/majiali423/lumenfin-agent/blob/60e4ed6a06d7afb6fce907413d2359cbf89eae44/docs/PHASED_IMPROVEMENT_LOG.md).
 
 ## Interview / autumn recruiting
 
@@ -64,4 +70,5 @@ Hand gold catalog `data/eval_product_dev/catalog_v1.json` (36 items; train/dev/t
 |--------|------|
 | FinAgentBench `case_lumenfin_diligence` | `b0c9e003d7049ab06bf4a0b5cc9c8acf714d8fd89cf5ae1b16e9825da0dcf5fe` |
 
-More hashes: Phase 0 section of [PHASED_IMPROVEMENT_LOG.md](PHASED_IMPROVEMENT_LOG.md).
+More hashes: Phase 0 of the
+[historical verification log](https://github.com/majiali423/lumenfin-agent/blob/60e4ed6a06d7afb6fce907413d2359cbf89eae44/docs/PHASED_IMPROVEMENT_LOG.md).

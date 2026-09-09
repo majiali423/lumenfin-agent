@@ -1,12 +1,15 @@
 # Reproducibility
 
-Supported **published** environment: Python 3.12, LumenFin `0.1.0rc5`
-(tag `v0.1.0-rc.5`).
+Use Python 3.12 for the current source checkout. The validated product baseline
+is [60e4ed6](https://github.com/majiali423/lumenfin-agent/commit/60e4ed6a06d7afb6fce907413d2359cbf89eae44).
+Package metadata remains `0.1.0rc5`; the historical `v0.1.0-rc.5` tag predates
+the subsequent product fixes.
 
 FinAgentBench versioning (do not conflate):
 
 | Role | Version |
 |------|---------|
+| Product quality v3 | Published evaluator commit `40f7599e408f317515583405cb90249b811179c0` |
 | LumenFin CI **authoritative frozen pin** | FinAgentBench tag `v0.1.0-rc.3` / package `0.1.0rc3` |
 | LumenFin CI **latest published compatibility** | FinAgentBench tag `v0.1.0-rc.4` / package `0.1.0rc4` |
 | Current FinAgentBench **package tag** | `v0.1.0-rc.4` / `0.1.0rc4` (pins producer LumenFin `v0.1.0-rc.3`) |
@@ -16,17 +19,25 @@ Layout is **not** required to be siblings. Product-quality tests use
 `FINAGENTBENCH_DIR` or an editable install. Sibling auto-discovery is off
 unless `LUMENFIN_ALLOW_SIBLING_FAB=1`.
 
-The **v3** `visible_supported_claims` scorer is the current
-`finagentbench-demo` working tree until a real tag exists. Do not invent a
-SHA. Frozen contract pins remain `v0.1.0-rc.3` / `v0.1.0-rc.4`.
+The **v3** `visible_supported_claims` scorer is available at the published
+commit above. Check out that commit in a separate FinAgentBench clone when
+reproducing the baseline. Frozen contract pins remain rc.3 / rc.4 and do not
+substitute for product v3.
 
 ## Install
 
-Solo (fast / offline demo only):
+Solo (fast, full independent regression and offline demo):
 
 ```bash
 cd lumenfin-agent
 python -m venv .venv
+```
+
+Activate `.venv`: PowerShell `.\.venv\Scripts\Activate.ps1`, or POSIX
+`source .venv/bin/activate`.
+Then install into that environment:
+
+```bash
 python -m pip install -r requirements-lock.txt
 python -m pip install -e . --no-deps
 python -m pip check
@@ -44,7 +55,7 @@ python -m pip install -e "$FINAGENTBENCH_DIR"
 ```bash
 cd lumenfin-agent
 python scripts/run_tests.py --fast   # no evaluator
-FINAGENTBENCH_DIR=... python scripts/run_tests.py --skip-joint
+python scripts/run_tests.py --skip-joint  # no evaluator
 FINAGENTBENCH_DIR=... python scripts/run_tests.py --joint-only
 
 cd "$FINAGENTBENCH_DIR"
@@ -57,7 +68,10 @@ LUMENFIN_ROOT=... python scripts/validate_cross_repo.py --profile ci
 Required CI `product-quality` fails closed without a published v3
 `FINAGENTBENCH_PRODUCT_REF` (not rc.3/rc.4). Set that variable after the
 evaluator commit exists; this repo does not change GitHub settings.
-Remote Actions remain unverified until that ref is configured.
+That ref was configured and the
+[2026-09-09 baseline CI](https://github.com/majiali423/lumenfin-agent/actions/runs/34329999879)
+passed. Later working-tree changes need their own validation; do not infer their
+status from this historical run.
 
 ## Live RC Validation
 

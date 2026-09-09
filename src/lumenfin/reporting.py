@@ -221,16 +221,6 @@ def resolve_provenance_home(
     return None, "unresolved"
 
 
-def _provenance_home_doc(
-    row: dict[str, Any],
-    docs: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    home, status = resolve_provenance_home(row, docs)
-    if status != "unique":
-        return None
-    return home
-
-
 def _document_blob(doc: dict[str, Any]) -> str:
     return " ".join(str(doc.get(k) or "") for k in ("excerpt", "text"))[:8000]
 
