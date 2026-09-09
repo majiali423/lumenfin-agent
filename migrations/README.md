@@ -21,6 +21,10 @@ psql $psqlUrl `
 psql $psqlUrl `
     -v ON_ERROR_STOP=1 `
     -f migrations/postgresql/003_add_tenant_ownership.sql
+
+psql $psqlUrl `
+    -v ON_ERROR_STOP=1 `
+    -f migrations/postgresql/004_add_analysis_job_execution.sql
 ```
 
 `MAS_DATABASE_URL` uses SQLAlchemy's `postgresql+psycopg://` scheme, while `psql`
@@ -39,3 +43,11 @@ rows bind to the product default tenant (`default`). Apply it before relying on
 principal-bound job/checkpoint isolation on upgraded PostgreSQL databases.
 Operators who previously used a non-default logical tenant must re-bind data or
 principals explicitly.
+
+`004_add_analysis_job_execution.sql` adds analysis job execution leases
+(`execution_token`, `execution_owner`, `execution_attempt`, `execution_expires`)
+and a minimal outbox (`delivery_state`, `delivery_payload_json`). Existing rows
+default to `delivery_state='published'` so they are not re-enqueued. Rollback is
+to leave the extra columns unused; do not DROP them on a database that already
+has job rows. Startup fails if a non-SQLite `analysis_jobs` table is missing
+these columns.

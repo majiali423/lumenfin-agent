@@ -24,7 +24,7 @@ class QuantitativeMixin:
         payload: dict[str, Any],
         state: FinanceState,
     ) -> dict[str, Any]:
-        market = payload["market_data"]
+        market = payload.get("market_data") or {}
         live_market = state.get("market_snapshots", {}).get(company, {})
         metrics: dict[str, float] = {}
         metric_confidence: dict[str, dict[str, Any]] = {}
@@ -49,6 +49,8 @@ class QuantitativeMixin:
             base_data["r_and_d"] = r_and_d
         if operating_income is not None:
             base_data["operating_income"] = operating_income
+        for abs_key, abs_value in base_data.items():
+            metrics.setdefault(abs_key, float(abs_value))
 
         if len(base_data) >= 3:
             for formula, key in [

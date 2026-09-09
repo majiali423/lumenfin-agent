@@ -159,11 +159,26 @@ class RetrievalArtifactTestCase(unittest.TestCase):
             ),
             confidence=RetrievalConfidence(overall=0.9, market_data=1.0, live_market=1.0, rag_coverage=0.33),
             structured_source="sample_db",
+            fundamental_provenance={
+                "revenue": {
+                    "source": "sec_companyfacts",
+                    "period": "FY2024",
+                    "source_record_id": "sec:apple:revenue:2024",
+                }
+            },
         )
         payload = artifact.to_legacy_payload()
         self.assertEqual(payload["market_data"]["revenue"], 412.0)
         self.assertEqual(payload["provenance"]["structured_source"], "sample_db")
         self.assertAlmostEqual(payload["confidence"]["overall"], 0.9)
+        self.assertEqual(
+            payload["fundamental_provenance"]["revenue"]["source_record_id"],
+            "sec:apple:revenue:2024",
+        )
+        self.assertEqual(
+            artifact.to_dict()["fundamental_provenance"]["revenue"]["period"],
+            "FY2024",
+        )
 
     def test_confidence_scores_penalize_failed_market_and_missing_fundamentals(self) -> None:
         confidence = score_retrieval_confidence(

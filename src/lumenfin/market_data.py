@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+
+from .provider_resilience import redact_provider_message
+
+_NATURAL_PROVIDER_SECRET_RE = re.compile(
+    r"(?i)\b(api[_ -]?key|access[_ -]?key|token|password|secret)"
+    r"\s+(?:is|as|was)\s+([A-Za-z0-9._~+/-]{6,})"
+)
+
+
+def _redact_market_provider_error(message: str) -> str:
+    """Redact provider prose that discloses the submitted credential."""
+    natural_redacted = _NATURAL_PROVIDER_SECRET_RE.sub(
+        r"\1 is [REDACTED]", str(message or "")
+    )
+    return redact_provider_message(natural_redacted, limit=240)
 
 DEFAULT_TICKER_MAP = {
     "Apple": "AAPL",
@@ -118,7 +134,9 @@ class MarketDataClient:
                     )
                 errors.append(f"{provider_name}: empty price")
             except Exception as exc:
-                errors.append(f"{provider_name}: {exc}")
+                errors.append(
+                    f"{provider_name}: {_redact_market_provider_error(str(exc))}"
+                )
 
         stale = self.cache.get_stale(ticker)
         if stale and stale.get("current_price") is not None:

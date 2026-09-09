@@ -477,6 +477,33 @@ def _extract_financial_facts(
     return ranked
 
 
+def source_page_numbers(
+    document: dict[str, Any],
+    pages: list[str],
+    *,
+    raw_page_list: list[str] | None = None,
+) -> list[int]:
+    """Return original file page numbers for ``pages``.
+
+    A one-page expanded context keeps ``document['page']``. A full file uses
+    1-based indexes into ``pages`` so a blank middle page is not compressed.
+    Paragraph splits of body text (no ``pages`` list) stay 1-based local indexes.
+    """
+    if not pages:
+        return []
+    declared = document.get("page")
+    original = raw_page_list if raw_page_list is not None else document.get("pages")
+    has_original_pages = isinstance(original, list) and bool(original)
+    if declared is not None and has_original_pages and len(pages) == 1:
+        try:
+            number = int(declared)
+        except (TypeError, ValueError):
+            number = 0
+        if number >= 1:
+            return [number]
+    return [index for index, _text in enumerate(pages, start=1)]
+
+
 def chunk_document(
     document: dict[str, Any],
     *,
@@ -496,9 +523,11 @@ def chunk_document(
     ``max_chunk_chars - 1``. Table rows and compact financial fact chunks are
     not overlapped, so company-isolated rows stay isolated.
     """
-    pages: list[str] = document.get("pages") or []
+    raw_pages = document.get("pages") if isinstance(document.get("pages"), list) else []
+    pages: list[str] = list(raw_pages)
     if not pages and document.get("text"):
         pages = _split_paragraphs(document["text"])
+    page_numbers = source_page_numbers(document, pages, raw_page_list=raw_pages)
 
     chunks: list[dict[str, Any]] = []
     issuers = list(
@@ -512,7 +541,7 @@ def chunk_document(
     document_id = document.get("document_id", "unknown")
     filename = document.get("filename", "unknown")
 
-    for page_number, page_text in enumerate(pages, start=1):
+    for page_number, page_text in zip(page_numbers, pages):
         table_parts = _split_table_page(page_text, detected_companies=tag_pool)
         if table_parts:
             paragraphs = table_parts
@@ -567,7 +596,7 @@ def chunk_document(
             issuers=issuers or tag_pool,
             document_id=document_id,
             filename=filename,
-            page_offset=max(1, len(pages)),
+            page_offset=max(page_numbers) if page_numbers else 1,
         )
         # Dedupe: for same metric+period, keep higher-ranked (consolidated > segment).
         existing = {

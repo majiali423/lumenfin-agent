@@ -117,6 +117,20 @@ class MarketDataClientTestCase(unittest.TestCase):
         self.assertIsNone(snap["current_price"])
         self.assertIn("401", snap.get("error", ""))
 
+    def test_provider_error_does_not_persist_disclosed_api_key(self) -> None:
+        client = MarketDataClient(
+            provider="alphavantage",
+            alphavantage_api_key="configured-secret",
+            fallback_provider="alphavantage",
+        )
+        disclosure = RuntimeError(
+            "We have detected your API key as ABCDEF1234567890 and applied a rate limit"
+        )
+        with patch.object(client, "_fetch_from_alphavantage", side_effect=disclosure):
+            snap = client.fetch_company_snapshot("NVIDIA")
+        self.assertNotIn("ABCDEF1234567890", snap.get("error", ""))
+        self.assertIn("[REDACTED]", snap.get("error", ""))
+
     def test_stale_cache_when_providers_fail(self) -> None:
         client = MarketDataClient(provider="yahoo", cache_ttl_seconds=1)
         with patch.object(client, "_fetch_from_yahoo", return_value=_yahoo_snapshot()):

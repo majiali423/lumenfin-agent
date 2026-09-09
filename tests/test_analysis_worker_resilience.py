@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 import unittest
 from dataclasses import replace
@@ -25,10 +26,13 @@ if str(SRC) not in sys.path:
 # Keep worker tests isolated from developer or production environment settings.
 os.environ.setdefault("APP_ENV", "test")
 
+from lumenfin.database import AnalysisJob, JobExecutionRefused
 from lumenfin.llm import LocalFallbackLLMClient
 from lumenfin.queueing import RedisQueueManager
 from lumenfin.service import LumenFinAnalysisService
 from lumenfin.worker import process_reserved_analysis_message
+from redis.exceptions import RedisError
+from sqlalchemy.orm import Session
 from tests.support.fakes import FakeMarketDataClient
 from tests.test_graph_routing import build_test_config
 from tests.test_redis_queue_resilience import _ListRedis
@@ -308,6 +312,215 @@ class AnalysisWorkerRecoveryTestCase(unittest.TestCase):
         self.assertEqual(job["status"], "completed")
         self.assertEqual(job["result"]["final_report"], "canonical-result-1")
         self.assertEqual(service.analyze_calls, 1)
+
+    def test_running_lease_blocks_second_claim_and_stolen_fail_write(self) -> None:
+        service = _service(self.root)
+        job_id = f"job-{uuid4().hex[:8]}"
+        query = "Compare Apple and Microsoft"
+        thread_id = f"thread-{job_id}"
+        service.repository.create_job(job_id, thread_id=thread_id, query=query)
+        first = service.repository.begin_job_execution(
+            job_id,
+            thread_id=thread_id,
+            query=query,
+            worker_id="worker-a",
+            lease_seconds=60,
+            execution_token="token-a",
+        )
+        self.assertEqual(first.action, "run")
+        second = service.repository.begin_job_execution(
+            job_id,
+            thread_id=thread_id,
+            query=query,
+            worker_id="worker-b",
+            lease_seconds=60,
+            execution_token="token-b",
+        )
+        self.assertEqual(second.action, "busy")
+        with self.assertRaises(JobExecutionRefused) as ctx:
+            service.run_job(
+                job_id,
+                query=query,
+                thread_id=thread_id,
+                export_artifacts=False,
+                execution_owner="worker-b",
+                execution_token="token-b",
+                lease_seconds=60,
+            )
+        self.assertEqual(ctx.exception.action, "busy")
+        self.assertEqual(service.analyze_calls, 0)
+        stolen = service.repository.update_job_status(
+            job_id,
+            status="failed",
+            error_message="should-not-stick",
+            execution_token="token-b",
+        )
+        self.assertFalse(stolen)
+        job = service.get_job(job_id, tenant_id="default")
+        assert job is not None
+        self.assertEqual(job["status"], "running")
+        self.assertIsNone(job["error_message"])
+
+    def test_missing_job_refuses_execute(self) -> None:
+        service = _service(self.root)
+        queue = self._queue(service)
+        queue.enqueue(
+            {
+                "job_id": "missing-job",
+                "query": "Compare Apple and Microsoft",
+                "thread_id": "thread-missing",
+                "export_artifacts": False,
+            }
+        )
+        reserved = queue.reserve(timeout_seconds=1, worker_id="worker-a")
+        assert reserved is not None
+        action = process_reserved_analysis_message(
+            queue=queue,
+            service=service,
+            reserved=reserved,
+            worker_id="worker-a",
+        )
+        self.assertEqual(action, "requeued")
+        self.assertEqual(service.analyze_calls, 0)
+
+    def test_expired_lease_can_be_claimed_and_old_token_cannot_fail(self) -> None:
+        service = _service(self.root)
+        job_id = f"job-{uuid4().hex[:8]}"
+        query = "Compare Apple and Microsoft"
+        thread_id = f"thread-{job_id}"
+        service.repository.create_job(job_id, thread_id=thread_id, query=query)
+        first = service.repository.begin_job_execution(
+            job_id,
+            thread_id=thread_id,
+            query=query,
+            worker_id="worker-a",
+            lease_seconds=60,
+            execution_token="old-token",
+        )
+        self.assertEqual(first.action, "run")
+        with Session(service.repository.engine) as session:
+            row = session.get(AnalysisJob, job_id)
+            assert row is not None
+            row.execution_expires = 0
+            session.commit()
+        second = service.repository.begin_job_execution(
+            job_id,
+            thread_id=thread_id,
+            query=query,
+            worker_id="worker-b",
+            lease_seconds=60,
+            execution_token="new-token",
+        )
+        self.assertEqual(second.action, "run")
+        self.assertEqual(second.execution_token, "new-token")
+        self.assertFalse(
+            service.repository.update_job_status(
+                job_id,
+                status="failed",
+                error_message="late-fail",
+                execution_token="old-token",
+            )
+        )
+        job = service.get_job(job_id, tenant_id="default")
+        assert job is not None
+        self.assertEqual(job["status"], "running")
+        self.assertIsNone(job["error_message"])
+
+    def test_two_threads_cannot_both_claim_pending_job(self) -> None:
+        service = _service(self.root)
+        job_id = f"job-{uuid4().hex[:8]}"
+        query = "Compare Apple and Microsoft"
+        thread_id = f"thread-{job_id}"
+        service.repository.create_job(job_id, thread_id=thread_id, query=query)
+        barrier = threading.Barrier(2)
+        actions: list[str] = []
+        lock = threading.Lock()
+
+        def worker(name: str, token: str) -> None:
+            barrier.wait()
+            claim = service.repository.begin_job_execution(
+                job_id,
+                thread_id=thread_id,
+                query=query,
+                worker_id=name,
+                lease_seconds=60,
+                execution_token=token,
+            )
+            with lock:
+                actions.append(claim.action)
+
+        first = threading.Thread(target=worker, args=("worker-a", "token-a"))
+        second = threading.Thread(target=worker, args=("worker-b", "token-b"))
+        first.start()
+        second.start()
+        first.join()
+        second.join()
+        self.assertEqual(sorted(actions), ["busy", "run"])
+        job = service.get_job(job_id, tenant_id="default")
+        assert job is not None
+        self.assertEqual(job["status"], "running")
+        winner = job["execution_token"]
+        late = "token-a" if winner == "token-b" else "token-b"
+        self.assertFalse(
+            service.repository.update_job_status(
+                job_id,
+                status="completed",
+                result={"final_report": "stale"},
+                execution_token=late,
+            )
+        )
+
+    def test_outbox_republish_after_enqueue_failure_is_at_least_once(self) -> None:
+        service = _service(self.root)
+        created = service.submit_job(
+            "Compare Apple and Microsoft",
+            thread_id="outbox-thread",
+            tenant_id="default",
+        )
+        with patch.object(RedisQueueManager, "enqueue", side_effect=RedisError("redis down")):
+            self.assertEqual(
+                service.try_publish_job(created["job_id"], tenant_id="default"),
+                "redis-pending",
+            )
+        pending = service.get_job(created["job_id"], tenant_id="default")
+        assert pending is not None
+        self.assertEqual(pending["status"], "pending")
+        self.assertEqual(pending["delivery_state"], "pending")
+        self.assertIsInstance(pending["delivery_payload"], dict)
+
+        published = service.republish_undelivered_jobs()
+        self.assertEqual(published, 1)
+        stored = service.get_job(created["job_id"], tenant_id="default")
+        assert stored is not None
+        self.assertEqual(stored["delivery_state"], "published")
+
+        queue = self._queue(service)
+        self.assertEqual(queue.depths()["pending"], 1)
+        reserved = queue.reserve(timeout_seconds=1, worker_id="worker-a")
+        assert reserved is not None
+        action = process_reserved_analysis_message(
+            queue=queue,
+            service=service,
+            reserved=reserved,
+            worker_id="worker-a",
+        )
+        self.assertEqual(action, "acked")
+        self.assertEqual(service.analyze_calls, 1)
+
+        queue.enqueue(dict(stored["delivery_payload"]))
+        reserved = queue.reserve(timeout_seconds=1, worker_id="worker-b")
+        assert reserved is not None
+        action = process_reserved_analysis_message(
+            queue=queue,
+            service=service,
+            reserved=reserved,
+            worker_id="worker-b",
+        )
+        self.assertEqual(action, "acked")
+        self.assertEqual(service.analyze_calls, 1)
+        done = service.get_job(created["job_id"], tenant_id="default")
+        assert done is not None
+        self.assertEqual(done["status"], "completed")
 
 
 if __name__ == "__main__":

@@ -80,6 +80,10 @@ class ClarifyRequest(BaseModel):
         default=False,
         description="When true, return the full internal run state. Default is a compact summary only.",
     )
+    job_id: Optional[str] = Field(
+        default=None,
+        description="Optional analysis job to refresh after clarification (same thread).",
+    )
 
 
 class HealthResponse(BaseModel):
@@ -162,6 +166,8 @@ class JobResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: str
     updated_at: str
+    workflow_status: Optional[str] = None
+    audit_log: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DocumentReceipt(BaseModel):

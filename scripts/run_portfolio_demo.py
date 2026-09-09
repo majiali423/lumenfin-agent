@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
+import tomllib
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,13 +20,10 @@ for path in (ROOT, SRC):
         sys.path.insert(0, str(path))
 
 # Force offline/test contract before AppConfig import side effects.
-os.environ.setdefault("APP_ENV", "test")
-os.environ.setdefault("DATA_MODE", "demo")
-os.environ.setdefault("ALLOW_LOCAL_FALLBACK", "true")
-os.environ.setdefault("MAS_FETCH_LIVE_FUNDAMENTALS", "false")
-os.environ.setdefault("MAS_FETCH_SEC_FUNDAMENTALS", "false")
-os.environ.setdefault("DEEPSEEK_API_KEY", "")
-os.environ.setdefault("DASHSCOPE_API_KEY", "")
+# Overwrite credential keys so a leftover process env cannot reach live providers.
+from scripts.offline_env import apply_offline_env
+
+apply_offline_env()
 
 from lumenfin import LumenFinAgentSystem
 from lumenfin.config import AppConfig
@@ -66,6 +63,12 @@ OFFLINE_MARKET_FIXTURES: dict[str, dict[str, Any]] = {
         "industry": "Semiconductors",
     },
 }
+
+
+def _source_version() -> str:
+    """Read the version from this checkout instead of stale installed metadata."""
+    payload = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return str((payload.get("project") or {}).get("version") or "unknown")
 
 
 class OfflineMarketDataClient:
@@ -437,7 +440,8 @@ def main() -> int:
     ]
     failed = [d for d in demos if d.get("status") != "pass"]
     summary = {
-        "portfolio_demo": "v0.1.0-rc.3",
+        "portfolio_demo": "offline-a-b-c-v1",
+        "source_version": _source_version(),
         "mode": "offline",
         "live_providers": False,
         "status": "pass" if not failed else "fail",

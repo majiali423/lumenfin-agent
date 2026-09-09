@@ -12,6 +12,8 @@ from ..observability import StepTimer, merge_telemetry
 from ..rag.hybrid_retriever import HybridEvidenceRetriever
 from ..state import FinanceState
 from .critic import CriticMixin
+from .bounded_loop import BoundedRepairMixin
+from .dependencies import RuntimeDependencies
 from .guardrail import InputGuardrailMixin
 from .planner import PlannerMixin
 from .quantitative import QuantitativeMixin
@@ -27,8 +29,10 @@ class AgentRuntime(
     QuantitativeMixin,
     RiskMixin,
     CriticMixin,
+    BoundedRepairMixin,
     SynthesisMixin,
 ):
+    """LangGraph node host. Mixins consume ``RuntimeDependencies``; this class supplies them."""
     def __init__(
         self,
         session_memory: SessionMemory,
@@ -49,6 +53,11 @@ class AgentRuntime(
         data_mode: str = "demo",
         fetch_live_fundamentals: bool = False,
         fetch_sec_fundamentals: bool = False,
+        task_spec_gating: bool = True,
+        bounded_repair_enabled: bool = False,
+        bounded_repair_deadline_seconds: float = 2.0,
+        bounded_repair_max_steps: int = 2,
+        bounded_repair_max_tool_calls: int = 3,
     ) -> None:
         self.session_memory = session_memory
         self.knowledge_memory = knowledge_memory
@@ -68,6 +77,14 @@ class AgentRuntime(
         self.data_mode = data_mode if data_mode in {"demo", "live"} else "demo"
         self.fetch_live_fundamentals = bool(fetch_live_fundamentals)
         self.fetch_sec_fundamentals = bool(fetch_sec_fundamentals)
+        self.task_spec_gating = bool(task_spec_gating)
+        self.bounded_repair_enabled = bool(bounded_repair_enabled)
+        self.bounded_repair_deadline_seconds = max(0.2, float(bounded_repair_deadline_seconds))
+        self.bounded_repair_max_steps = max(1, int(bounded_repair_max_steps))
+        self.bounded_repair_max_tool_calls = max(1, int(bounded_repair_max_tool_calls))
+
+    def dependencies(self) -> RuntimeDependencies:
+        return self
 
     def _record(
         self,

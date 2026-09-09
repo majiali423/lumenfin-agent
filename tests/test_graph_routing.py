@@ -13,6 +13,7 @@ if str(SRC) not in sys.path:
 
 from lumenfin.config import AppConfig
 from lumenfin.graph import (
+    route_after_bounded_repair,
     route_after_critic,
     route_after_repair,
     route_after_retrieval,
@@ -51,6 +52,7 @@ def build_test_config(root: Path) -> AppConfig:
         allow_sqlite_dev=False,
         max_upload_bytes=20 * 1024 * 1024,
         max_upload_files=5,
+        max_upload_total_bytes=20 * 1024 * 1024 * 5,
         llm=LLMSettings(api_key=None, base_url="https://api.deepseek.com", model="deepseek-chat", timeout_seconds=45),
         rag_enabled=True,
         milvus_uri=str(root / "data" / f"milvus_{uuid4().hex[:8]}.db"),
@@ -148,6 +150,10 @@ class GraphRoutingTestCase(unittest.TestCase):
     def test_retrieval_routes_to_quant_when_healthy(self) -> None:
         state = {"fatal_data_gap": False, "replan_reason": None}
         self.assertEqual(route_after_retrieval(state), "quant")
+
+    def test_bounded_repair_routes_to_quant_after_fill(self) -> None:
+        state = {"fatal_data_gap": False, "task_spec": {"requires_ast_ratios": True, "skip_quant": False}}
+        self.assertEqual(route_after_bounded_repair(state), "quant")
 
 
 if __name__ == "__main__":

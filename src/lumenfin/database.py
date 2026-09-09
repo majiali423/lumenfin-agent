@@ -1,10 +1,13 @@
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
+from uuid import uuid4
 
 from sqlalchemy import BigInteger, Integer, Text, and_, create_engine, delete, inspect, or_, select, update
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -17,8 +20,37 @@ class JobRedeliveryConflict(ValueError):
     """Same job_id redelivered with a mismatched thread_id/query fingerprint."""
 
 
+class JobExecutionRefused(RuntimeError):
+    """Worker must not execute this job (missing, busy, or stolen lease)."""
+
+    def __init__(self, action: str, job_id: str, message: str = "") -> None:
+        self.action = action
+        self.job_id = job_id
+        super().__init__(message or f"Job {job_id} execution refused: {action}")
+
+
+@dataclass(frozen=True)
+class JobClaimResult:
+    action: Literal["run", "skip_completed", "missing", "busy"]
+    execution_token: str | None = None
+    execution_attempt: int = 0
+    execution_owner: str | None = None
+
+
 class Base(DeclarativeBase):
     pass
+
+
+def create_schema_engine(database_url: str, db_path: Optional[Path] = None) -> Engine:
+    """Create tables from ORM metadata without constructing application repositories.
+
+    PostgreSQL upgrade paths must run SQL migrations before JobRepository validation.
+    """
+    if database_url.startswith("sqlite:///") and db_path is not None:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(engine)
+    return engine
 
 
 class WorkflowCheckpoint(Base):
@@ -51,6 +83,12 @@ class AnalysisJob(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+    execution_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    execution_owner: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    execution_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    execution_expires: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    delivery_state: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    delivery_payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class RagDocument(Base):
@@ -98,9 +136,10 @@ class JobRepository:
     def __init__(self, database_url: str, db_path: Optional[Path] = None) -> None:
         if database_url.startswith("sqlite:///") and db_path is not None:
             db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(database_url, future=True)
-        Base.metadata.create_all(self.engine)
+        self.engine = create_schema_engine(database_url, db_path=db_path)
         self._ensure_sqlite_tenant_columns()
+        self._ensure_sqlite_job_execution_columns()
+        self._validate_external_job_execution_columns()
 
     def _ensure_sqlite_tenant_columns(self) -> None:
         if not str(self.engine.url).startswith("sqlite"):
@@ -119,6 +158,58 @@ class JobRepository:
                     "ALTER TABLE workflow_checkpoints ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
                 )
 
+    def _ensure_sqlite_job_execution_columns(self) -> None:
+        if not str(self.engine.url).startswith("sqlite"):
+            return
+        additions = (
+            ("execution_token", "ALTER TABLE analysis_jobs ADD COLUMN execution_token TEXT"),
+            ("execution_owner", "ALTER TABLE analysis_jobs ADD COLUMN execution_owner TEXT"),
+            (
+                "execution_attempt",
+                "ALTER TABLE analysis_jobs ADD COLUMN execution_attempt INTEGER NOT NULL DEFAULT 0",
+            ),
+            ("execution_expires", "ALTER TABLE analysis_jobs ADD COLUMN execution_expires INTEGER"),
+            (
+                "delivery_state",
+                "ALTER TABLE analysis_jobs ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'published'",
+            ),
+            (
+                "delivery_payload_json",
+                "ALTER TABLE analysis_jobs ADD COLUMN delivery_payload_json TEXT",
+            ),
+        )
+        with self.engine.begin() as conn:
+            job_rows = conn.exec_driver_sql("PRAGMA table_info(analysis_jobs)").fetchall()
+            job_cols = {str(row[1]) for row in job_rows}
+            if not job_rows:
+                return
+            for name, ddl in additions:
+                if name not in job_cols:
+                    conn.exec_driver_sql(ddl)
+
+    def _validate_external_job_execution_columns(self) -> None:
+        if str(self.engine.url).startswith("sqlite"):
+            return
+        schema = inspect(self.engine)
+        if not schema.has_table("analysis_jobs"):
+            return
+        columns = {str(column["name"]) for column in schema.get_columns("analysis_jobs")}
+        required = {
+            "execution_token",
+            "execution_owner",
+            "execution_attempt",
+            "execution_expires",
+            "delivery_state",
+            "delivery_payload_json",
+        }
+        missing = sorted(required - columns)
+        if missing:
+            raise RuntimeError(
+                "Database schema is missing analysis_jobs execution/delivery columns "
+                f"({', '.join(missing)}). Apply "
+                "migrations/postgresql/004_add_analysis_job_execution.sql with psql before starting LumenFin."
+            )
+
     def create_job(
         self,
         job_id: str,
@@ -126,6 +217,8 @@ class JobRepository:
         query: str,
         *,
         tenant_id: str = "default",
+        delivery_payload: Optional[dict[str, Any]] = None,
+        delivery_state: str = "pending",
     ) -> None:
         now = utc_now()
         with Session(self.engine) as session:
@@ -142,6 +235,14 @@ class JobRepository:
                     error_message=None,
                     created_at=now,
                     updated_at=now,
+                    execution_token=None,
+                    execution_owner=None,
+                    execution_attempt=0,
+                    execution_expires=None,
+                    delivery_state=delivery_state,
+                    delivery_payload_json=(
+                        json.dumps(delivery_payload, ensure_ascii=False) if delivery_payload is not None else None
+                    ),
                 )
             )
             session.commit()
@@ -154,26 +255,79 @@ class JobRepository:
         result: Optional[dict[str, Any]] = None,
         artifacts: Optional[dict[str, str]] = None,
         error_message: Optional[str] = None,
-    ) -> None:
+        execution_token: Optional[str] = None,
+    ) -> bool:
+        now = utc_now()
+        values: dict[str, Any] = {"status": status, "error_message": error_message, "updated_at": now}
+        if llm_backend is not None:
+            values["llm_backend"] = llm_backend
+        if result is not None:
+            values["result_json"] = json.dumps(result, ensure_ascii=False)
+        if artifacts is not None:
+            values["artifacts_json"] = json.dumps(artifacts, ensure_ascii=False)
+        clauses = [AnalysisJob.job_id == job_id]
+        if execution_token is not None:
+            clauses.append(AnalysisJob.execution_token == execution_token)
+        if status != "completed":
+            clauses.append(AnalysisJob.status != "completed")
+        else:
+            clauses.append(AnalysisJob.status.in_(("running", "pending")))
         with Session(self.engine) as session:
             job = session.get(AnalysisJob, job_id)
             if job is None:
-                return
-            # Never downgrade a completed analysis job (at-least-once redelivery).
+                return False
+            if execution_token is not None and str(job.execution_token or "") != str(execution_token):
+                return False
             if job.status == "completed" and status != "completed":
-                return
+                return False
             if job.status == "completed" and status == "completed" and job.result_json:
-                return
-            job.status = status
-            if llm_backend is not None:
-                job.llm_backend = llm_backend
-            if result is not None:
-                job.result_json = json.dumps(result, ensure_ascii=False)
-            if artifacts is not None:
-                job.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
-            job.error_message = error_message
-            job.updated_at = utc_now()
+                return True
+            executed = session.execute(update(AnalysisJob).where(*clauses).values(**values))
             session.commit()
+            return int(executed.rowcount or 0) == 1
+
+    def replace_job_analysis_result(
+        self,
+        job_id: str,
+        *,
+        thread_id: str,
+        tenant_id: str,
+        result: dict[str, Any],
+        artifacts: Optional[dict[str, str]] = None,
+        llm_backend: Optional[str] = None,
+    ) -> bool:
+        """HITL/clarify may replace this job only while it is awaiting clarification."""
+        tenant = (tenant_id or "default").strip() or "default"
+        values: dict[str, Any] = {
+            "result_json": json.dumps(result, ensure_ascii=False),
+            "updated_at": utc_now(),
+            "status": "completed",
+            "error_message": None,
+        }
+        if artifacts is not None:
+            values["artifacts_json"] = json.dumps(artifacts, ensure_ascii=False)
+        if llm_backend is not None:
+            values["llm_backend"] = llm_backend
+        with Session(self.engine) as session:
+            job = session.get(AnalysisJob, job_id)
+            if job is None:
+                return False
+            if str(job.thread_id or "") != str(thread_id) or str(job.tenant_id or "") != tenant:
+                return False
+            stored = json.loads(job.result_json) if job.result_json else {}
+            if str(stored.get("workflow_status") or "") != "needs_clarification":
+                return False
+            executed = session.execute(
+                update(AnalysisJob)
+                .where(
+                    AnalysisJob.job_id == job_id,
+                    AnalysisJob.thread_id == thread_id,
+                    AnalysisJob.tenant_id == tenant,
+                )
+                .values(**values)
+            )
+            session.commit()
+            return int(executed.rowcount or 0) == 1
 
     def begin_job_execution(
         self,
@@ -181,22 +335,18 @@ class JobRepository:
         *,
         thread_id: str,
         query: str,
-    ) -> str:
-        """Claim a job for execution.
-
-        Returns:
-            ``run`` — caller should execute analysis
-            ``skip_completed`` — job already completed with matching identity
-            ``missing`` — job row does not exist
-
-        Raises:
-            JobRedeliveryConflict — same job_id already completed (or stored)
-            with a different thread_id/query fingerprint.
-        """
+        worker_id: str | None = None,
+        lease_seconds: int = 10,
+        execution_token: str | None = None,
+    ) -> JobClaimResult:
+        """Claim a job for execution with an owner+token lease."""
+        owner = (worker_id or "").strip() or f"local-{uuid4().hex[:8]}"
+        token = (execution_token or "").strip() or uuid4().hex
+        now = int(time.time())
         with Session(self.engine) as session:
             job = session.get(AnalysisJob, job_id)
             if job is None:
-                return "missing"
+                return JobClaimResult(action="missing")
             stored_thread = str(job.thread_id or "")
             stored_query = str(job.query or "")
             if stored_thread != str(thread_id) or stored_query != str(query):
@@ -206,12 +356,99 @@ class JobRepository:
                     f"(stored_thread_id={stored_thread!r}, payload_thread_id={thread_id!r})"
                 )
             if job.status == "completed":
-                return "skip_completed"
-            job.status = "running"
-            job.error_message = None
+                return JobClaimResult(action="skip_completed")
+            executed = session.execute(
+                update(AnalysisJob)
+                .where(
+                    AnalysisJob.job_id == job_id,
+                    AnalysisJob.thread_id == str(thread_id),
+                    AnalysisJob.query == str(query),
+                    AnalysisJob.status != "completed",
+                    or_(
+                        AnalysisJob.status != "running",
+                        AnalysisJob.execution_expires.is_(None),
+                        AnalysisJob.execution_expires <= now,
+                    ),
+                )
+                .values(
+                    status="running",
+                    error_message=None,
+                    execution_owner=owner,
+                    execution_token=token,
+                    execution_attempt=AnalysisJob.execution_attempt + 1,
+                    execution_expires=now + max(1, int(lease_seconds)),
+                    updated_at=utc_now(),
+                )
+            )
+            session.commit()
+            if int(executed.rowcount or 0) != 1:
+                latest = session.get(AnalysisJob, job_id)
+                if latest is None:
+                    return JobClaimResult(action="missing")
+                if latest.status == "completed":
+                    return JobClaimResult(action="skip_completed")
+                return JobClaimResult(
+                    action="busy",
+                    execution_token=latest.execution_token,
+                    execution_attempt=int(latest.execution_attempt or 0),
+                    execution_owner=latest.execution_owner,
+                )
+            claimed = session.get(AnalysisJob, job_id)
+            attempt = int(claimed.execution_attempt or 0) if claimed is not None else 1
+            return JobClaimResult(
+                action="run",
+                execution_token=token,
+                execution_attempt=attempt,
+                execution_owner=owner,
+            )
+
+    def renew_job_execution(
+        self,
+        job_id: str,
+        *,
+        execution_token: str,
+        lease_seconds: int,
+    ) -> bool:
+        now = int(time.time())
+        with Session(self.engine) as session:
+            result = session.execute(
+                update(AnalysisJob)
+                .where(
+                    AnalysisJob.job_id == job_id,
+                    AnalysisJob.execution_token == execution_token,
+                    AnalysisJob.status == "running",
+                )
+                .values(
+                    execution_expires=now + max(1, int(lease_seconds)),
+                    updated_at=utc_now(),
+                )
+            )
+            session.commit()
+            return int(result.rowcount or 0) == 1
+
+    def mark_job_published(self, job_id: str) -> bool:
+        with Session(self.engine) as session:
+            job = session.get(AnalysisJob, job_id)
+            if job is None:
+                return False
+            job.delivery_state = "published"
             job.updated_at = utc_now()
             session.commit()
-            return "run"
+            return True
+
+    def list_unpublished_jobs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        with Session(self.engine) as session:
+            stmt = (
+                select(AnalysisJob)
+                .where(
+                    AnalysisJob.delivery_state == "pending",
+                    AnalysisJob.status == "pending",
+                    AnalysisJob.delivery_payload_json.is_not(None),
+                )
+                .order_by(AnalysisJob.created_at.asc())
+                .limit(limit)
+            )
+            return [self._row_to_dict(row) for row in session.scalars(stmt).all()]
 
     def get_job(self, job_id: str, *, tenant_id: str) -> Optional[dict[str, Any]]:
         tenant = (tenant_id or "").strip() or "default"
@@ -243,6 +480,15 @@ class JobRepository:
             "error_message": row.error_message,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
+            "execution_token": getattr(row, "execution_token", None),
+            "execution_owner": getattr(row, "execution_owner", None),
+            "execution_attempt": int(getattr(row, "execution_attempt", 0) or 0),
+            "delivery_state": getattr(row, "delivery_state", None) or "pending",
+            "delivery_payload": (
+                json.loads(row.delivery_payload_json)
+                if getattr(row, "delivery_payload_json", None)
+                else None
+            ),
         }
 
 

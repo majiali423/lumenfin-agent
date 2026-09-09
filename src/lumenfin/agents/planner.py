@@ -4,6 +4,7 @@ from ..clarification import merge_clarification_into_query
 from ..planning import build_query_plan
 from ..skills import get_skill_specs
 from ..state import FinanceState
+from ..task_spec import task_spec_from_plan
 from ..tools import (
     canonicalize_companies,
     derive_target_symbols,
@@ -31,6 +32,11 @@ class PlannerMixin:
                 "skill_specs": get_skill_specs(required_skills),
                 "missing_fields": query_plan.missing_fields,
                 "clarification_questions": query_plan.clarification_questions,
+                "task_spec": task_spec_from_plan(
+                    query_plan.to_dict(),
+                    max_repair_steps=int(getattr(self, "bounded_repair_max_steps", 2)),
+                    max_tool_calls=int(getattr(self, "bounded_repair_max_tool_calls", 3)),
+                ).to_dict(),
                 "workflow_status": "running",
             }
             detail = (

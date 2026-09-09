@@ -16,12 +16,6 @@ from .binding import (
     _prefer_refs_for_values,
     _verify_numeric,
 )
-from .build import (
-    _build_growth_claim,
-    binding_summary,
-    build_claims,
-    format_verified_claims_ledger,
-)
 from .models import (
     FORMULA_INPUTS,
     METRIC_ALIASES,
@@ -87,3 +81,18 @@ __all__ = [
     "parse_period_identity",
     "verified_by_entity",
 ]
+
+_BUILD_EXPORTS = {
+    "_build_growth_claim",
+    "binding_summary",
+    "build_claims",
+    "format_verified_claims_ledger",
+}
+
+
+def __getattr__(name: str):
+    if name in _BUILD_EXPORTS:
+        from . import build as _build
+
+        return getattr(_build, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

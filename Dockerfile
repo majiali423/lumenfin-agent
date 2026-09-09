@@ -42,4 +42,4 @@ EXPOSE 8000
 
 USER ${APP_UID}:${APP_GID}
 
-CMD ["python", "start_api.py"]
+CMD ["python", "start_api.py", "serve"]

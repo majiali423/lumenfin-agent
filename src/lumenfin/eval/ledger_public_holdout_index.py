@@ -110,7 +110,18 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def sha256_path(path: Path) -> str:
-    return sha256_bytes(path.read_bytes())
+    target = Path(path)
+    if target.is_dir():
+        digest = hashlib.sha256()
+        for file_path in sorted(p for p in target.rglob("*") if p.is_file()):
+            if file_path.name.upper() == "LOCK":
+                continue
+            rel = file_path.relative_to(target).as_posix().encode("utf-8")
+            digest.update(rel)
+            digest.update(b"\0")
+            digest.update(file_path.read_bytes())
+        return digest.hexdigest()
+    return sha256_bytes(target.read_bytes())
 
 
 def ids_sha256(values: list[str] | tuple[str, ...] | set[str]) -> str:
@@ -144,20 +155,33 @@ def estimate_tokens(text: str) -> dict[str, int]:
     }
 
 
-def assert_rc5_sources(*, repo_root: Path) -> dict[str, str]:
+def git_rc5_source_hashes(*, repo_root: Path) -> dict[str, str]:
+    """SHA-256 of RC5_SOURCE_FILES at PRODUCT_COMMIT (Git objects, not worktree)."""
     hashes: dict[str, str] = {}
     for rel in RC5_SOURCE_FILES:
-        current = sha256_path(repo_root / rel)
         shown = subprocess.check_output(
             ["git", "show", f"{PRODUCT_COMMIT}:{rel.as_posix()}"],
             cwd=repo_root,
         )
-        if current != sha256_bytes(shown):
-            raise HoldoutIndexError(f"source {rel.as_posix()} differs from rc5")
-        hashes[rel.as_posix()] = current
+        hashes[rel.as_posix()] = sha256_bytes(shown)
     if hashlib.sha256(SPLIT_SALT.encode("utf-8")).hexdigest() != SPLIT_SALT_SHA256:
         raise HoldoutIndexError("split salt does not match frozen manifest")
     return hashes
+
+
+def assert_rc5_sources(*, repo_root: Path, tree_root: Path | None = None) -> dict[str, str]:
+    """Require ``tree_root`` (default: working tree) to match Git objects at rc5.
+
+    Official seal/index entrypoints must keep the default so a dirty or drifted
+    tree cannot be sealed as rc5. Tests may pass an isolated snapshot directory.
+    """
+    expected = git_rc5_source_hashes(repo_root=repo_root)
+    tree = tree_root or repo_root
+    for rel, expected_hash in expected.items():
+        current = sha256_path(tree / Path(rel))
+        if current != expected_hash:
+            raise HoldoutIndexError(f"source {rel} differs from rc5")
+    return expected
 
 
 def assert_clean_projection(columns: tuple[str, ...]) -> None:
@@ -413,7 +437,11 @@ def run_dry_run(
     official: bool = True,
     salt: str = SPLIT_SALT,
 ) -> dict[str, Any]:
-    source_hashes = assert_rc5_sources(repo_root=repo_root)
+    source_hashes = (
+        assert_rc5_sources(repo_root=repo_root)
+        if official
+        else git_rc5_source_hashes(repo_root=repo_root)
+    )
     reports, audit, rows_seen = scan_holdout_reports(snapshot, salt=salt)
     documents, stats = materialize_documents(reports)
     identity = {

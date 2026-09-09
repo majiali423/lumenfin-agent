@@ -24,9 +24,10 @@ dependencies = [
   "pymupdf",
   "openpyxl>=3.1.0",
   "python-multipart",
+  "prometheus-client==0.26.0",
   "pydantic>=2.0",
   "yfinance",
-  "pymilvus[milvus_lite]==3.0.0",
+  "pymilvus==3.0.0",
   "milvus-lite==3.1.0",
   "jieba==0.42.1",
   "mcp>=1.2.0",
@@ -36,6 +37,10 @@ dependencies = [
 mcp-agent = [
   "langchain-openai>=0.3.0",
   "langchain-core>=0.3.0",
+]
+dev = [
+  "ruff>=0.8.0",
+  "mypy>=1.13.0",
 ]
 
 [build-system]
@@ -47,3 +52,18 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+src = ["src"]
+extend-exclude = ["test_artifacts", "outputs", "data"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = false
+exclude = ["tests/", "scripts/", "eval/"]
+

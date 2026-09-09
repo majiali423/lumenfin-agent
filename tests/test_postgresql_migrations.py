@@ -28,6 +28,7 @@ class PostgreSQLMigrationManifestTests(unittest.TestCase):
                 "001_add_workflow_checkpoint_revision.sql",
                 "002_add_rag_index_lease.sql",
                 "003_add_tenant_ownership.sql",
+                "004_add_analysis_job_execution.sql",
             ],
         )
 
@@ -44,6 +45,25 @@ class PostgreSQLMigrationManifestTests(unittest.TestCase):
             len(re.findall(r"^CREATE INDEX IF NOT EXISTS ", sql, flags=re.MULTILINE)),
             2,
         )
+
+    def test_job_execution_migration_is_repeat_safe(self) -> None:
+        sql = (
+            ROOT / "migrations" / "postgresql" / "004_add_analysis_job_execution.sql"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("ALTER TABLE analysis_jobs", sql)
+        self.assertEqual(sql.count("ADD COLUMN IF NOT EXISTS execution_token"), 1)
+        self.assertEqual(sql.count("ADD COLUMN IF NOT EXISTS delivery_state"), 1)
+        self.assertIn("DEFAULT 'published'", sql)
+        self.assertIn("delivery_payload_json", sql)
+
+    def test_bootstrap_does_not_construct_job_repository(self) -> None:
+        import inspect
+
+        runner = _load_migration_runner()
+        source = inspect.getsource(runner.bootstrap_tables)
+        self.assertNotIn("JobRepository", source)
+        self.assertIn("create_schema_engine", source)
 
 
 if __name__ == "__main__":

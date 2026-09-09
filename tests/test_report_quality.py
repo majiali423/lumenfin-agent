@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin import LumenFinAgentSystem
+from lumenfin.agents.synthesis import metric_verification_status_label
 from lumenfin.llm import LocalFallbackLLMClient
 from lumenfin.reporting import (
     build_analyst_executive_summary,
@@ -25,6 +26,17 @@ from tests.test_graph_routing import build_test_config
 
 
 class ReportQualityHelpersTestCase(unittest.TestCase):
+    def test_unverified_metric_status_never_renders_as_verified(self) -> None:
+        self.assertEqual(
+            metric_verification_status_label("Computed (unverified)"),
+            "Computed (unverified)",
+        )
+        self.assertEqual(metric_verification_status_label("Verified"), "Verified")
+        self.assertNotEqual(
+            metric_verification_status_label("Computed (unverified)"),
+            "Verified",
+        )
+
     def test_parse_requested_fiscal_year(self) -> None:
         self.assertEqual(parse_requested_fiscal_year("FY2024 profitability"), 2024)
         self.assertEqual(parse_requested_fiscal_year("Compare Apple 2024 vs Microsoft"), 2024)
@@ -115,6 +127,33 @@ class ReportQualityHelpersTestCase(unittest.TestCase):
         self.assertIn("Operating Margin", summary)
         self.assertNotIn("Apple:", summary)  # capsule-only; no per-company claim dump
         self.assertIn("\n-", summary)  # multiline bullets, not one jammed paragraph
+
+    def test_peer_summary_withholds_unverified_metric_ranking(self) -> None:
+        state = {
+            "companies": ["NVIDIA", "AMD"],
+            "financial_metrics": {
+                "NVIDIA": {"operating_margin": 0.62},
+                "AMD": {"operating_margin": 0.11},
+            },
+            "claims": [
+                {
+                    "entity": "NVIDIA",
+                    "metric_name": "operating_margin",
+                    "verification": "rejected",
+                },
+                {
+                    "entity": "AMD",
+                    "metric_name": "operating_margin",
+                    "verification": "verified",
+                },
+            ],
+        }
+        matrix = "\n".join(format_peer_metric_matrix(state))
+        summary = build_analyst_executive_summary(state, [], brief=False)
+        self.assertIn("n/a", matrix)
+        self.assertIn("comparison withheld", summary)
+        self.assertNotIn("NVIDIA**", summary)
+        self.assertNotIn("62.0% >", summary)
 
     def test_brief_filters_unknown_supply_and_thesis(self) -> None:
         class _C:

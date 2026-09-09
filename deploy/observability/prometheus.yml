@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: lumenfin-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["lumenfin-api:8000"]
+
+  - job_name: lumenfin-analysis-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["lumenfin-worker:9101"]
+
+  - job_name: lumenfin-index-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["lumenfin-index-worker:9102"]

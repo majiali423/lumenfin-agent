@@ -160,6 +160,52 @@ class SecFundamentalsTests(unittest.TestCase):
         self.assertEqual(payload["structured_source"], "sec_companyfacts")
         self.assertAlmostEqual(payload["market_data"]["revenue"], 130.497, places=3)
 
+    def test_same_end_comparative_row_does_not_change_metric_fiscal_year(self) -> None:
+        def annual(value: float, *, fy: int, filed: str) -> dict:
+            return {
+                "end": "2025-01-26",
+                "val": value,
+                "fy": fy,
+                "fp": "FY",
+                "form": "10-K",
+                "filed": filed,
+                "accn": f"accn-{fy}",
+            }
+
+        facts = {
+            "entityName": "NVIDIA CORP",
+            "facts": {"us-gaap": {
+                "Revenues": {"units": {"USD": [annual(130_497_000_000, fy=2025, filed="2025-02-26")] }},
+                "OperatingIncomeLoss": {"units": {"USD": [
+                    annual(81_453_000_000, fy=2025, filed="2025-02-26"),
+                    annual(81_453_000_000, fy=2026, filed="2026-02-25"),
+                ]}},
+                "ResearchAndDevelopmentExpense": {"units": {"USD": [
+                    annual(12_914_000_000, fy=2025, filed="2025-02-26"),
+                    annual(12_914_000_000, fy=2026, filed="2026-02-25"),
+                ]}},
+                "DepreciationAndAmortization": {"units": {"USD": [
+                    annual(1_864_000_000, fy=2025, filed="2025-02-26"),
+                    annual(1_864_000_000, fy=2026, filed="2026-02-25"),
+                ]}},
+            }},
+        }
+        response = MagicMock(status_code=200)
+        response.json.return_value = facts
+        response.raise_for_status = MagicMock()
+        client = MagicMock()
+        client.get.return_value = response
+        with patch("lumenfin.sec_fundamentals.resolve_cik", return_value="0001045810"):
+            payload = fetch_sec_companyfacts_fundamentals(
+                "NVDA", client=client, prefer_fiscal_year=2025
+            )
+        assert payload is not None
+        for metric in ("revenue", "operating_income", "r_and_d", "ebitda"):
+            self.assertEqual(payload["fundamental_provenance"][metric]["period"], "FY2025")
+        self.assertEqual(
+            payload["fundamentals_meta"]["period_end_source"], "sec_companyfacts"
+        )
+
     def test_retrieve_prefers_sec_over_yahoo(self) -> None:
         sec = {
             "market_data": {"revenue": 1.0, "operating_income": 0.4, "r_and_d": 0.2},

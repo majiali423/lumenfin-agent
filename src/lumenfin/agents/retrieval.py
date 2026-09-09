@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from ..artifacts import RetrievalArtifact, RetrievalProvenance, score_retrieval_confidence
-from ..documents import is_trusted_ast_amount, normalize_metric_hints_to_billion_usd
+from ..documents import expand_document_page_contexts, is_trusted_ast_amount, normalize_metric_hints_to_billion_usd
 from ..fundamentals import is_plausible_revenue_billion_usd
 from ..input_guardrail import sanitize_retrieval_hits
 from ..market_data import summarize_market_snapshots
@@ -12,8 +12,9 @@ from ..metrics_schema import set_fundamental
 from ..parallel import map_in_parallel
 from ..rag.dedupe import dedupe_cross_company_rag_hits
 from ..rag.telemetry import summarize_rag_telemetry
-from ..reporting import requested_fiscal_year_from_state
+from ..reporting import requested_fiscal_year_from_state, stamp_document_extracted_provenance
 from ..state import FinanceState
+from ..task_spec import task_spec_from_state
 from ..tools import (
     build_coverage_matrix,
     has_computable_fundamentals,
@@ -114,7 +115,11 @@ class RetrievalMixin:
             }
         payload["live_market"] = live_market
         payload["source_documents"] = document_summary["source_documents"]
-        if document_summary["metric_hints"]:
+        field_bound = str(payload.get("structured_source") or "") == "document_extracted" and any(
+            isinstance(row, dict) and row.get("source") == "document_extracted"
+            for row in (payload.get("fundamental_provenance") or {}).values()
+        )
+        if document_summary["metric_hints"] and not field_bound:
             doc_text = "\n".join(
                 str(doc.get("text") or doc.get("excerpt") or "")
                 for doc in document_contexts
@@ -163,6 +168,12 @@ class RetrievalMixin:
                     ),
                 }
                 applied_abs = True
+            if applied_abs:
+                payload["fundamental_provenance"] = stamp_document_extracted_provenance(
+                    payload.get("fundamental_provenance"),
+                    document_contexts,
+                    company=company,
+                )
             # Prefer document label only when upload alone provided the AST spine.
             # Issuer SEC/Yahoo gap-fill must keep sec_companyfacts / yahoo_fundamentals.
             if applied_abs and any(
@@ -178,7 +189,8 @@ class RetrievalMixin:
             ]
         if payload["source_documents"] and payload["supply_chain"]["risk_level"] == "unknown":
             excerpt = " ".join(doc.get("excerpt", "") for doc in payload["source_documents"])
-            payload["supply_chain"]["risk_level"] = "medium" if has_supply_chain_signal(excerpt) else "low"
+            if has_supply_chain_signal(excerpt):
+                payload["supply_chain"]["risk_level"] = "medium"
 
         profile_prompt = (
             f"Provide a concise ~150-word enterprise profile for {company} covering: "
@@ -282,6 +294,11 @@ class RetrievalMixin:
             structured_source=structured_source,  # type: ignore[arg-type]
             appendix=appendix,
             fundamentals_meta=dict(payload.get("fundamentals_meta") or {}),
+            fundamental_provenance={
+                str(key): dict(value)
+                for key, value in (payload.get("fundamental_provenance") or {}).items()
+                if isinstance(value, dict)
+            },
             provider_errors=list(payload.get("provider_errors") or []),
             rag_meta=dict(rag_meta),
         )
@@ -289,7 +306,9 @@ class RetrievalMixin:
     def retrieval(self, state: FinanceState) -> FinanceState:
         with self._track_step("retrieval") as timer:
             include_appendix = state.get("appendix_search_done", False)
-            document_contexts = state.get("document_contexts", [])
+            document_contexts = expand_document_page_contexts(state.get("document_contexts", []))
+            if document_contexts:
+                state["document_contexts"] = document_contexts
             rag_index_stats = dict(state.get("rag_index_stats", {}))
             session_id = state.get("thread_id", "default-session")
             retrieval_query = state["query"]
@@ -416,7 +435,10 @@ class RetrievalMixin:
 
             provider_error_summary = summarize_provider_errors(provider_errors)
 
-            fatal_data_gap = bool(retrieved_docs) and not computable_companies
+            spec = task_spec_from_state({**state, "query_plan": query_plan})
+            missing_ratios = bool(retrieved_docs) and not computable_companies
+            gating = bool(getattr(self, "task_spec_gating", True))
+            fatal_data_gap = missing_ratios and (spec.requires_ast_ratios if gating else True)
             company_names = list(retrieved_docs.keys())
             coverage_matrix = build_coverage_matrix(company_names, retrieved_docs)
             partial_data_gap = is_partial_compare_gap(company_names, coverage_matrix)
@@ -491,6 +513,12 @@ class RetrievalMixin:
                     else None
                 )
                 data_gap_detail = ""
+            if missing_ratios and not fatal_data_gap:
+                data_gap_detail = (
+                    "Structured revenue/EBITDA/R&D inputs are missing; TaskSpec does not require AST ratios. "
+                    "Narrative or risk claims may proceed. Numeric margin claims remain blocked."
+                )
+                replan_reason = None
 
             update: FinanceState = {
                 "retrieved_docs": retrieved_docs,
@@ -504,6 +532,7 @@ class RetrievalMixin:
                 "retrieval_provenance": retrieval_provenance,
                 "source_resolution": source_resolution,
                 "fatal_data_gap": fatal_data_gap,
+                "task_spec": spec.to_dict(),
                 "partial_data_gap": partial_data_gap,
                 "data_gap_detail": data_gap_detail,
                 "coverage_matrix": coverage_matrix,

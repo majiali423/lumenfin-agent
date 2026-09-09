@@ -301,8 +301,14 @@ def _fact_for_period(
     tags: tuple[str, ...],
     *,
     prefer_end: str | None,
+    prefer_fiscal_year: int | None = None,
 ) -> tuple[float, str, dict[str, Any]] | None:
-    """Prefer a fact ending on prefer_end; else latest annual across tags."""
+    """Prefer a fact matching both fiscal-year identity and period end.
+
+    Companyfacts may repeat a prior-year fact in a later filing while labelling the
+    row with the later filing's ``fy``. Choosing the latest-filed same-end row can
+    therefore mix FY identities across formula inputs.
+    """
     if prefer_end:
         for tag in tags:
             concept = gaap.get(tag)
@@ -319,14 +325,25 @@ def _fact_for_period(
             ]
             if not matches:
                 continue
-            best = sorted(matches, key=lambda item: str(item.get("filed") or ""))[-1]
+            exact = [
+                item
+                for item in matches
+                if prefer_fiscal_year is not None
+                and _item_fiscal_year(item) == int(prefer_fiscal_year)
+            ]
+            pool = exact or matches
+            # Without an exact FY label, prefer the original/earliest filing for
+            # this period end rather than a later comparative restatement row.
+            best = sorted(pool, key=lambda item: str(item.get("filed") or ""))[
+                -1 if exact else 0
+            ]
             try:
                 value = float(best["val"])
             except (TypeError, ValueError, KeyError):
                 continue
             if value == value:
                 return value, tag, best
-    return _fact_from_tags(gaap, tags)
+    return _fact_from_tags(gaap, tags, prefer_fiscal_year=prefer_fiscal_year)
 
 
 def _to_billions(value: float | None) -> float | None:
@@ -407,9 +424,25 @@ def fetch_sec_companyfacts_fundamentals(
         revenue_raw, revenue_tag, revenue_meta = revenue_hit
         prefer_end = str(revenue_meta.get("end") or "") or None
 
-        op_hit = _fact_for_period(gaap, _OP_INCOME_TAGS, prefer_end=prefer_end)
-        rd_hit = _fact_for_period(gaap, _RD_TAGS, prefer_end=prefer_end)
-        depr_hit = _fact_for_period(gaap, _DEPR_TAGS, prefer_end=prefer_end)
+        selected_fiscal_year = _item_fiscal_year(revenue_meta)
+        op_hit = _fact_for_period(
+            gaap,
+            _OP_INCOME_TAGS,
+            prefer_end=prefer_end,
+            prefer_fiscal_year=selected_fiscal_year,
+        )
+        rd_hit = _fact_for_period(
+            gaap,
+            _RD_TAGS,
+            prefer_end=prefer_end,
+            prefer_fiscal_year=selected_fiscal_year,
+        )
+        depr_hit = _fact_for_period(
+            gaap,
+            _DEPR_TAGS,
+            prefer_end=prefer_end,
+            prefer_fiscal_year=selected_fiscal_year,
+        )
 
         revenue = _to_billions(revenue_raw)
         market_data: dict[str, float] = {"revenue": float(revenue)} if revenue is not None else {}
@@ -532,6 +565,7 @@ def fetch_sec_companyfacts_fundamentals(
                 "requested_fiscal_year": prefer_fiscal_year,
                 "period_alignment": period_alignment,
                 "period_end": period_end,
+                "period_end_source": "sec_companyfacts",
                 "form": revenue_meta.get("form"),
                 "filed": revenue_meta.get("filed"),
                 "unit": "billion_usd",

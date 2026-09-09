@@ -110,13 +110,18 @@ class Claim:
 
     def render_with_citation(self, *, humanize: bool = False) -> str:
         cite = self.primary_citation
-        if cite and humanize:
+        if not cite:
+            return self.statement
+        body = str(self.statement or "").rstrip()
+        if body.endswith((".", "。")):
+            body = body[:-1].rstrip()
+        if humanize:
             from ..reporting import humanize_citation
 
-            cite = humanize_citation(cite)
-        if cite:
-            return f"{self.statement} [{cite}]"
-        return self.statement
+            label = humanize_citation(cite)
+            if label and label != cite:
+                return f"{body} ({label}) [{cite}]."
+        return f"{body} [{cite}]."
 
 
 def claim_to_dict(claim: Claim) -> dict[str, Any]:

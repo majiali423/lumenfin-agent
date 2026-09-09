@@ -31,6 +31,8 @@ _FACTUAL_PERIOD_SOURCES = frozenset(
         "table_header",
         "structured_table",
         "filing_fact",
+        "sample_db",
+        "sample_catalog",
     }
 )
 _ASSUMED_PERIOD_SOURCES = frozenset(

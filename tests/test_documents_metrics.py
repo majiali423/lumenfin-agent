@@ -15,6 +15,7 @@ from lumenfin.documents import (
     extract_metric_hints_for_company,
     normalize_metric_hints_to_billion_usd,
 )
+from lumenfin.reporting import filing_body_fiscal_stamp
 from lumenfin.tools import summarize_document_context
 
 
@@ -67,6 +68,33 @@ class MetricNumberParsingTestCase(unittest.TestCase):
             detect_statement_scale("Consolidated Statements of Income (In millions)"),
             "million",
         )
+        self.assertEqual(
+            detect_statement_scale("Selected consolidated financial facts (USD millions):"),
+            "million",
+        )
+
+    def test_filing_body_period_ignores_filename_only(self) -> None:
+        stamp = filing_body_fiscal_stamp(
+            [
+                {
+                    "filename": "nvda_fy2025_10k_excerpt.pdf",
+                    "citation": "nvda_fy2025_10k_excerpt.pdf#p1",
+                    "detected_companies": ["NVIDIA"],
+                    "excerpt": "Fiscal year ended: 2025-01-26. Operating income 81453.",
+                    "text": "",
+                }
+            ],
+            company="NVIDIA",
+        )
+        self.assertIsNotNone(stamp)
+        assert stamp is not None
+        self.assertEqual(stamp["period"], "FY2025")
+        self.assertEqual(stamp["period_source"], "document_text")
+        filename_only = filing_body_fiscal_stamp(
+            [{"filename": "nvda_fy2025_10k_excerpt.pdf", "excerpt": "No year here.", "text": ""}],
+            company="NVIDIA",
+        )
+        self.assertIsNone(filename_only)
 
     def test_normalize_hints_scales_sec_millions_and_rejects_absurd(self) -> None:
         hints = normalize_metric_hints_to_billion_usd(

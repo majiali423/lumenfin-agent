@@ -25,10 +25,13 @@ from lumenfin.eval.ledger_public_holdout_index import (
     budget_ok,
     estimate_from_documents,
     estimate_tokens,
+    git_rc5_source_hashes,
     iter_projected_corpus_rows,
     materialize_documents,
     run_dry_run,
     scan_holdout_reports,
+    RC5_SOURCE_FILES,
+    sha256_path,
 )
 
 
@@ -71,6 +74,18 @@ def _tickers_for_both_splits() -> tuple[str, str]:
             by_role[role] = ticker
         index += 1
     return by_role[PUBLIC_DEV], by_role[PUBLIC_HOLDOUT]
+
+
+def _materialize_rc5_sources(dest: Path) -> Path:
+    for rel in RC5_SOURCE_FILES:
+        blob = subprocess.check_output(
+            ["git", "show", f"{PRODUCT_COMMIT}:{rel.as_posix()}"],
+            cwd=ROOT,
+        )
+        path = dest / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(blob)
+    return dest
 
 
 class ProjectionAndDryRunTests(unittest.TestCase):
@@ -133,11 +148,43 @@ class ProjectionAndDryRunTests(unittest.TestCase):
             self.assertNotIn("secret-gold-tag", dumped)
             self.assertNotIn("999.0", dumped)
 
-    def test_rc5_sources_match_product_commit(self) -> None:
-        hashes = assert_rc5_sources(repo_root=ROOT)
-        self.assertEqual(len(hashes), 4)
+    def test_rc5_git_objects_match_sealed_index_hashes(self) -> None:
+        sealed = json.loads(
+            (ROOT / "data" / "eval_rag" / "ledger_public_holdout_index_v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        from_git = git_rc5_source_hashes(repo_root=ROOT)
+        self.assertEqual(from_git, sealed["rc5_source_sha256"])
+        self.assertEqual(sealed["product_commit"], PRODUCT_COMMIT)
         self.assertEqual(PRODUCT_TAG, "v0.1.0-rc.5")
-        self.assertEqual(PRODUCT_COMMIT, "31e8680aa89636f1fd897d7aa5ed7ca86317bd73")
+        self.assertEqual(len(from_git), 4)
+
+    def test_assert_rc5_sources_accepts_commit_snapshot_and_rejects_tamper(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            snapshot = _materialize_rc5_sources(Path(tmp) / "rc5")
+            hashes = assert_rc5_sources(repo_root=ROOT, tree_root=snapshot)
+            self.assertEqual(len(hashes), 4)
+            victim = snapshot / RC5_SOURCE_FILES[0]
+            victim.write_bytes(victim.read_bytes() + b"\n")
+            with self.assertRaisesRegex(HoldoutIndexError, "chunking.py"):
+                assert_rc5_sources(repo_root=ROOT, tree_root=snapshot)
+
+    def test_official_assert_rc5_sources_has_no_default_bypass(self) -> None:
+        import inspect
+
+        params = inspect.signature(assert_rc5_sources).parameters
+        self.assertEqual(params["tree_root"].default, None)
+        work = sha256_path(ROOT / RC5_SOURCE_FILES[0])
+        pinned = git_rc5_source_hashes(repo_root=ROOT)[RC5_SOURCE_FILES[0].as_posix()]
+        if work != pinned:
+            with self.assertRaisesRegex(HoldoutIndexError, "differs from rc5"):
+                assert_rc5_sources(repo_root=ROOT)
+        else:
+            self.assertEqual(
+                assert_rc5_sources(repo_root=ROOT)[RC5_SOURCE_FILES[0].as_posix()],
+                pinned,
+            )
 
     def test_token_bounds_are_conservative(self) -> None:
         english = estimate_tokens("abcd" * 10)
@@ -147,16 +194,28 @@ class ProjectionAndDryRunTests(unittest.TestCase):
         chinese = estimate_tokens("收入利润")
         self.assertEqual(chinese["conservative_mixed"], 4)
 
-    def test_blocked_index_seal_does_not_claim_a_built_index(self) -> None:
+    def test_index_seal_matches_current_audited_state(self) -> None:
         payload = json.loads(
             (ROOT / "data" / "eval_rag" / "ledger_public_holdout_index_v1.json").read_text(
                 encoding="utf-8"
             )
         )
-        self.assertEqual(payload["status"], "BLOCKED_AFTER_DRYRUN")
         self.assertIs(payload["holdout_consumed"], False)
-        self.assertIs(payload["official_index_built"], False)
-        self.assertIs(payload["phase_b_started"], False)
+        if payload["status"] == "BLOCKED_AFTER_DRYRUN":
+            self.assertIs(payload["official_index_built"], False)
+            self.assertIs(payload["phase_b_started"], False)
+        else:
+            self.assertEqual(payload["status"], "SEALED")
+            self.assertGreater(payload["build"]["documents_indexed"], 0)
+            self.assertEqual(
+                payload["build"]["chunks_indexed"],
+                payload["canary"]["row_count"],
+            )
+            self.assertEqual(
+                payload["canary"]["row_count"],
+                payload["canary"]["expected_chunks"],
+            )
+            self.assertIs(payload["canary"]["holdout_query_used"], False)
         v1 = json.loads(
             (ROOT / "data" / "eval_rag" / "ledger_public_holdout_e2e_result.json").read_text(
                 encoding="utf-8"

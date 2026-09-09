@@ -14,6 +14,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from lumenfin.eval.holdout import HoldoutError
+from lumenfin.eval.ledger_public_holdout_index import PRODUCT_COMMIT
+from tests.support.git_sources import (
+    EVALUATOR_SOURCE_RELPATHS,
+    HYBRID_ORCHESTRATOR_RELPATH,
+    hash_posix_sources_at_revision,
+    hash_text_file_at_revision,
+)
 
 SEALED_RESULT = (
     ROOT
@@ -373,20 +380,18 @@ class LedgerHybridStratifiedTests(unittest.TestCase):
             payload["comparison"]["paired_counts"]["R_page"]["hit_at_10"],
             {"gain": 41, "loss": 4, "unchanged": 205},
         )
-        cli = _load_cli()
-        source_hash = hashlib.sha256(
-            (
-                ROOT / "scripts" / "run_ledger_public_dev_hybrid_stratified.py"
-            )
-            .read_text(encoding="utf-8")
-            .replace("\r\n", "\n")
-            .encode()
-        ).hexdigest()
-        self.assertEqual(payload["orchestrator_source_sha256"], source_hash)
+        historical_eval = hash_posix_sources_at_revision(
+            ROOT, PRODUCT_COMMIT, EVALUATOR_SOURCE_RELPATHS
+        )
         self.assertEqual(
             payload["child_run_config"]["evaluator_source_sha256"],
-            cli.child_cli._evaluator_source_sha256(),
+            historical_eval,
         )
+        self.assertEqual(
+            payload["orchestrator_source_sha256"],
+            hash_text_file_at_revision(ROOT, PRODUCT_COMMIT, HYBRID_ORCHESTRATOR_RELPATH),
+        )
+        # Current worktree may differ; sealed evidence is bound to PRODUCT_COMMIT Git objects.
         self.assertRegex(payload["per_case_sha256"], r"^[0-9a-f]{64}$")
         serialized = json.dumps(payload)
         self.assertNotIn("query_text", serialized)

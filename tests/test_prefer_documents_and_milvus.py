@@ -59,6 +59,19 @@ class PreferDocumentMetricsTestCase(unittest.TestCase):
         self.assertTrue(payload["fundamentals_meta"].get("live_fallback_used"))
         self.assertIn("lacked AST-computable", payload["fundamentals_meta"].get("fallback_reason", ""))
 
+    def test_sample_catalog_year_is_independent_of_query(self) -> None:
+        exact = retrieve_company_payload("Apple", allow_sample_data=True, prefer_fiscal_year=2025)
+        self.assertEqual(exact["fundamentals_meta"]["fiscal_year"], 2025)
+        self.assertEqual(exact["fundamentals_meta"]["period_alignment"], "exact")
+        self.assertEqual(exact["fundamentals_meta"]["period_source"], "sample_db")
+        revenue = exact["fundamental_provenance"]["revenue"]
+        self.assertEqual(revenue["period"], "FY2025")
+        self.assertTrue(revenue["source_record_id"].startswith("sample_catalog:Apple:revenue:"))
+        self.assertIn("lumenfin:sample_db:Apple:FY2025", revenue["citation"])
+        mismatch = retrieve_company_payload("Apple", allow_sample_data=True, prefer_fiscal_year=2024)
+        self.assertEqual(mismatch["fundamentals_meta"]["period_alignment"], "fallback_latest")
+        self.assertEqual(mismatch["fundamentals_meta"]["fiscal_year"], 2025)
+
     def test_prefer_uploaded_only_blocks_sample_and_live_backfill(self) -> None:
         docs = [
             {

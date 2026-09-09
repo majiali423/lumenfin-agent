@@ -116,6 +116,228 @@ def parse_requested_fiscal_year(*texts: Any) -> int | None:
     return None
 
 
+def document_field_locator(doc: dict[str, Any], field: str) -> tuple[str | None, str]:
+    """Return (citation, source_record_id) for a value extracted from one document."""
+    raw_cite = str(doc.get("citation") or doc.get("filename") or "").strip() or None
+    page = doc.get("page")
+    if page is None and raw_cite:
+        match = re.search(r"#p(\d+)", raw_cite, flags=re.I)
+        if match:
+            page = int(match.group(1))
+    if raw_cite and page is not None and "#p" not in raw_cite.lower():
+        raw_cite = f"{raw_cite}#p{page}"
+    doc_id = str(doc.get("document_id") or "").strip()
+    if not doc_id and raw_cite:
+        doc_id = Path(raw_cite.split("#", 1)[0]).stem
+    if not doc_id:
+        doc_id = "upload"
+    loc = f"p{page}" if page is not None else "loc-unknown"
+    return raw_cite, f"document:{doc_id}:{loc}:{field}"
+
+
+_SOURCE_RECORD_RE = re.compile(
+    r"^document:(?P<doc_id>.+):(?P<loc>p\d+|loc-unknown):(?P<field>[^:]+)$",
+    re.IGNORECASE,
+)
+
+
+def parse_document_source_record_id(record: str | None) -> dict[str, str] | None:
+    """Split ``document:{id}:{pN|loc-unknown}:{field}`` without dropping the location."""
+    match = _SOURCE_RECORD_RE.match(str(record or "").strip())
+    if not match:
+        return None
+    return {
+        "doc_id": match.group("doc_id"),
+        "loc": match.group("loc").lower(),
+        "field": match.group("field"),
+    }
+
+
+def _citation_file_page(citation: str | None) -> tuple[str, str | None]:
+    raw = str(citation or "").strip().replace("\\", "/").lower()
+    page = None
+    match = re.search(r"#p(\d+)\s*$", raw)
+    if match:
+        page = match.group(1)
+        raw = raw[: match.start()]
+    name = Path(raw).name if raw else ""
+    return name, page
+
+
+def resolve_provenance_home(
+    row: dict[str, Any],
+    docs: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str]:
+    """Locate the page that owns a field. Never pick the first prefix match.
+
+    Returns ``(doc, status)`` where status is ``unique``, ``ambiguous``, or
+    ``unresolved``. Citation file+page wins; ``source_record_id`` must agree on
+    document id **and** location. Shared ``document_id`` alone is not a match.
+    """
+    if not docs:
+        return None, "unresolved"
+    cite = str(row.get("citation") or "").strip()
+    record = parse_document_source_record_id(row.get("source_record_id"))
+    cite_file, cite_page = _citation_file_page(cite)
+
+    citation_hits: list[dict[str, Any]] = []
+    record_hits: list[dict[str, Any]] = []
+    for doc in docs:
+        loc_cite, loc_id = document_field_locator(doc, str(record["field"] if record else "field"))
+        loc_file, loc_page = _citation_file_page(loc_cite)
+        parsed_loc = parse_document_source_record_id(loc_id)
+        if cite_file and loc_file == cite_file and cite_page and loc_page == cite_page:
+            citation_hits.append(doc)
+        if record and parsed_loc:
+            if (
+                parsed_loc["doc_id"].lower() == record["doc_id"].lower()
+                and parsed_loc["loc"] == record["loc"]
+            ):
+                record_hits.append(doc)
+
+    if cite_file and cite_page:
+        if len(citation_hits) > 1:
+            return None, "ambiguous"
+        if len(citation_hits) == 1:
+            home = citation_hits[0]
+            if record and record_hits and home not in record_hits:
+                return None, "ambiguous"
+            return home, "unique"
+        if record_hits:
+            if len(record_hits) == 1:
+                return record_hits[0], "unique"
+            return None, "ambiguous"
+        return None, "unresolved"
+
+    if record:
+        if len(record_hits) == 1:
+            return record_hits[0], "unique"
+        if len(record_hits) > 1:
+            return None, "ambiguous"
+        return None, "unresolved"
+
+    if len(docs) == 1:
+        return docs[0], "unique"
+    return None, "unresolved"
+
+
+def _provenance_home_doc(
+    row: dict[str, Any],
+    docs: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    home, status = resolve_provenance_home(row, docs)
+    if status != "unique":
+        return None
+    return home
+
+
+def _document_blob(doc: dict[str, Any]) -> str:
+    return " ".join(str(doc.get(k) or "") for k in ("excerpt", "text"))[:8000]
+
+
+def _docs_for_company(
+    document_contexts: list[dict[str, Any]] | None,
+    *,
+    company: str | None,
+) -> list[dict[str, Any]]:
+    docs: list[dict[str, Any]] = []
+    for doc in document_contexts or []:
+        if not isinstance(doc, dict):
+            continue
+        detected = doc.get("detected_companies") or []
+        if company and detected and company not in detected:
+            continue
+        docs.append(doc)
+    return docs
+
+
+def filing_body_fiscal_stamp(
+    document_contexts: list[dict[str, Any]] | None,
+    *,
+    company: str | None = None,
+) -> dict[str, Any] | None:
+    """FY stamp from a single covering filing body — never from the filename.
+
+    Distinct FY labels across pages/files yield None. Body text such as
+    ``Fiscal year ended: 2025-01-26`` is ``document_text``.
+    """
+    from .documents import unique_statement_period
+
+    docs = _docs_for_company(document_contexts, company=company)
+    labels: list[str] = []
+    citation = None
+    for doc in docs:
+        unique = unique_statement_period(_document_blob(doc))
+        if unique:
+            labels.append(unique)
+        if citation is None:
+            citation, _ = document_field_locator(doc, "period")
+    unique_labels = list(dict.fromkeys(labels))
+    if len(unique_labels) != 1:
+        return None
+    period = unique_labels[0]
+    return {
+        "period": period,
+        "period_type": "annual",
+        "period_source": "document_text",
+        "period_alignment": "exact",
+        "citation": citation,
+    }
+
+
+def stamp_document_extracted_provenance(
+    provenance: dict[str, Any] | None,
+    document_contexts: list[dict[str, Any]] | None,
+    *,
+    company: str | None = None,
+) -> dict[str, Any]:
+    """Bind missing field periods only from the field's own document.
+
+    Cover-page / other-file years are not copied onto a number. Query and
+    filename years are never written as ``exact`` facts. ``source_record_id``
+    locates file + page + field rather than company + guessed FY.
+    """
+    from .documents import unique_statement_period
+
+    out = dict(provenance or {})
+    docs = _docs_for_company(document_contexts, company=company)
+    for key, row in list(out.items()):
+        if not isinstance(row, dict):
+            continue
+        patched = dict(row)
+        home, location_status = resolve_provenance_home(patched, docs)
+        patched["location_status"] = location_status
+        if location_status != "unique":
+            if not patched.get("period"):
+                patched.setdefault("period_source", patched.get("period_source") or "unknown")
+                patched.setdefault("period_alignment", patched.get("period_alignment") or "unknown")
+            out[key] = patched
+            continue
+        if not patched.get("period"):
+            blob = _document_blob(home) if home is not None else ""
+            unique = unique_statement_period(blob) if blob else None
+            if unique:
+                patched["period"] = unique
+                patched.setdefault("period_type", "annual")
+                patched["period_source"] = "document_text"
+                patched["period_alignment"] = "exact"
+            else:
+                patched.setdefault("period_source", patched.get("period_source") or "unknown")
+                patched.setdefault("period_alignment", patched.get("period_alignment") or "unknown")
+        if home is not None:
+            cite, record_id = document_field_locator(home, key)
+            existing_cite = str(patched.get("citation") or "").strip()
+            if not existing_cite:
+                patched["citation"] = cite
+            elif cite and "#p" in str(cite).lower() and "#p" not in existing_cite.lower():
+                patched["citation"] = cite
+            existing_id = str(patched.get("source_record_id") or "")
+            if not existing_id or existing_id.startswith("document_extracted:"):
+                patched["source_record_id"] = record_id
+        out[key] = patched
+    return out
+
+
 def infer_fiscal_year_from_documents(
     document_contexts: list[dict[str, Any]] | None,
     *,
@@ -490,6 +712,26 @@ def _fmt_metric_value(value: Any, *, is_pct: bool) -> str:
     return f"{float(value):.2f}x"
 
 
+def _verified_metric_contract(state: dict[str, Any], company: str, metric: str) -> bool:
+    """Require verified claim binding when a claim ledger is present."""
+    contract_present = "claims" in state or "verified_claims" in state
+    if not contract_present:
+        return True
+    candidates = state.get("verified_claims") or state.get("claims") or []
+    for claim in candidates:
+        if isinstance(claim, dict):
+            entity = str(claim.get("entity") or "")
+            metric_name = str(claim.get("metric_name") or "")
+            verification = str(claim.get("verification") or "")
+        else:
+            entity = str(getattr(claim, "entity", "") or "")
+            metric_name = str(getattr(claim, "metric_name", "") or "")
+            verification = str(getattr(claim, "verification", "") or "")
+        if entity == company and metric_name == metric and verification == "verified":
+            return True
+    return False
+
+
 def format_peer_metric_matrix(state: dict[str, Any] | None) -> list[str]:
     """Wide compare table with explicit n/a cells when a peer lacks a metric."""
     state = state or {}
@@ -513,7 +755,9 @@ def format_peer_metric_matrix(state: dict[str, Any] | None) -> list[str]:
         for company in companies:
             metrics = metrics_by_company.get(company) or {}
             value = metrics.get(key)
-            if isinstance(value, (int, float)):
+            if isinstance(value, (int, float)) and _verified_metric_contract(
+                state, company, key
+            ):
                 cells.append(_fmt_metric_value(value, is_pct=is_pct))
                 present.append(company)
             else:
@@ -543,7 +787,9 @@ def format_comparison_capsule(state: dict[str, Any] | None) -> list[str]:
         missing: list[str] = []
         for company in companies:
             value = (metrics_by_company.get(company) or {}).get(key)
-            if isinstance(value, (int, float)):
+            if isinstance(value, (int, float)) and _verified_metric_contract(
+                state, company, key
+            ):
                 scored.append((company, float(value)))
             else:
                 missing.append(company)

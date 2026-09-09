@@ -342,7 +342,9 @@ def parse_upload_documents(file_path: Path) -> list[dict[str, Any]]:
     if suffix == ".pdf":
         ctx = parse_pdf_document(path)
         ctx["source_type"] = "pdf"
-        return [ctx]
+        from .documents import expand_document_page_contexts
+
+        return expand_document_page_contexts([ctx])
     if suffix in {".htm", ".html"}:
         from .sec_html import parse_sec_html_document
 

@@ -1,0 +1,14 @@
+{
+  "id": "nvda_multipage_cover_fy2025_oi_unspecified_v1",
+  "source_file": "tests/fixtures/sec/derived/nvda_cover_fy2025_oi_unspecified.pdf",
+  "source_sha256": "710c37612bbd3977f17c67136339b2efdc30d7d038885a989358c8b88037a893",
+  "source_note": "Two-page synthetic filing: cover FY2025, page 2 operating income 32.972 billion USD with no local period. Must not inherit cover FY as exact.",
+  "company": "NVIDIA",
+  "period": null,
+  "cover_period": "FY2025",
+  "metric": "operating_income",
+  "unit": "billion_usd",
+  "currency": "USD",
+  "value_billion_usd": 32.972,
+  "page": 2
+}

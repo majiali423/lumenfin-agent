@@ -110,6 +110,7 @@ class AppConfig:
     allow_sqlite_dev: bool
     max_upload_bytes: int
     max_upload_files: int
+    max_upload_total_bytes: int
     llm: LLMSettings
     rag_enabled: bool
     milvus_uri: str
@@ -155,6 +156,10 @@ class AppConfig:
     embedding_max_inflight_per_process: int
     market_data_max_inflight_per_process: int
     provider_acquire_timeout_seconds: float
+    task_spec_gating: bool = True
+    bounded_repair_enabled: bool = False
+    bounded_repair_max_steps: int = 2
+    bounded_repair_max_tool_calls: int = 3
 
     def allows_sample_data(self) -> bool:
         return self.data_mode == "demo"
@@ -241,6 +246,15 @@ class AppConfig:
             allow_sqlite_dev=allow_sqlite_dev,
             max_upload_bytes=int(os.getenv("MAS_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024))),
             max_upload_files=int(os.getenv("MAS_MAX_UPLOAD_FILES", "5")),
+            max_upload_total_bytes=int(
+                os.getenv(
+                    "MAS_MAX_UPLOAD_TOTAL_BYTES",
+                    str(
+                        int(os.getenv("MAS_MAX_UPLOAD_FILES", "5"))
+                        * int(os.getenv("MAS_MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+                    ),
+                )
+            ),
             llm=LLMSettings.from_env(),
             rag_enabled=os.getenv("MAS_RAG_ENABLED", "true").lower() in {"1", "true", "yes"},
             milvus_uri=os.getenv("MAS_MILVUS_URI", "data/milvus_lite.db"),
@@ -343,4 +357,10 @@ class AppConfig:
             provider_acquire_timeout_seconds=float(
                 os.getenv("MAS_PROVIDER_ACQUIRE_TIMEOUT_SECONDS", "5")
             ),
+            task_spec_gating=os.getenv("MAS_TASK_SPEC_GATING", "true").strip().lower()
+            in {"1", "true", "yes"},
+            bounded_repair_enabled=os.getenv("MAS_BOUNDED_REPAIR", "false").strip().lower()
+            in {"1", "true", "yes"},
+            bounded_repair_max_steps=max(1, int(os.getenv("MAS_BOUNDED_REPAIR_MAX_STEPS", "2"))),
+            bounded_repair_max_tool_calls=max(1, int(os.getenv("MAS_BOUNDED_REPAIR_MAX_TOOL_CALLS", "3"))),
         )

@@ -1,0 +1,12 @@
+{
+  "id": "product_quality_gold_apple_ebitda_v1",
+  "source": "Hand-authored from SAMPLE_FINANCIAL_DATA Apple FY2025 (ebitda 141.2 / revenue 412.0). Not copied from a model run.",
+  "expected_entities": ["Apple"],
+  "expected_metric": {
+    "entity": "Apple",
+    "name": "ebitda_margin",
+    "min": 0.34,
+    "max": 0.35,
+    "period": "FY2025"
+  }
+}

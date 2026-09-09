@@ -6,15 +6,18 @@ from uuid import uuid4
 
 from .checkpoint_store import WorkflowCheckpointRepository
 from .config import AppConfig
-from .database import JobRepository, RagDocumentRepository
+from .database import JobExecutionRefused, JobRepository, RagDocumentRepository
+from .uploads import save_upload_payloads
 from .data_ingest import structured_metrics_to_document_contexts
 from .document_ingest import parse_upload_documents
 from .graph import LumenFinAgentSystem
 from .llm import BaseLLMClient, fork_llm_client
 from .market_data import MarketDataClient
+from .monitoring import instrument_workflow
 from .providers.registry import ProviderRegistry, build_provider_registry
 from .provider_resilience import redact_provider_message
 from .queueing import RedisQueueManager
+from redis.exceptions import RedisError
 from .rag.factory import build_document_indexer, build_rag_store
 from .rag.indexer import IndexReceipt, summarize_index_receipts
 from .reporting import export_run_artifacts
@@ -178,6 +181,7 @@ class LumenFinAnalysisService:
             tenant_id=tenant_id or self.config.rag_tenant_id,
         )
 
+    @instrument_workflow("analyze")
     def analyze(
         self,
         query: str,
@@ -273,6 +277,7 @@ class LumenFinAnalysisService:
             }
         return packaged
 
+    @instrument_workflow("clarify")
     def clarify(
         self,
         thread_id: str,
@@ -280,6 +285,7 @@ class LumenFinAnalysisService:
         export_artifacts: bool = True,
         *,
         tenant_id: str | None = None,
+        job_id: str | None = None,
     ) -> dict:
         tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
         system = self._system_for(thread_id)
@@ -301,7 +307,7 @@ class LumenFinAnalysisService:
             expected_revision=int(record["revision"]),
             tenant_id=tenant,
         )
-        return self._package_response(
+        packaged = self._package_response(
             thread_id,
             query,
             system,
@@ -309,6 +315,16 @@ class LumenFinAnalysisService:
             export_artifacts,
             checkpoint=committed_checkpoint,
         )
+        if job_id:
+            self.repository.replace_job_analysis_result(
+                job_id,
+                thread_id=thread_id,
+                tenant_id=tenant,
+                result=packaged["result"],
+                artifacts=packaged.get("artifacts") or {},
+                llm_backend=packaged.get("llm_backend"),
+            )
+        return packaged
 
     def get_checkpoint(self, thread_id: str, *, tenant_id: str | None = None) -> dict | None:
         tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
@@ -379,15 +395,29 @@ class LumenFinAnalysisService:
         thread_id: str | None = None,
         *,
         tenant_id: str | None = None,
+        export_artifacts: bool = True,
+        document_paths: list[str] | None = None,
+        output_format: str | None = None,
     ) -> dict:
         actual_thread_id = thread_id or f"run-{uuid4().hex[:8]}"
         job_id = f"job-{uuid4().hex[:10]}"
         tenant = (tenant_id or self.config.rag_tenant_id).strip() or "default"
+        payload = {
+            "job_id": job_id,
+            "query": query,
+            "thread_id": actual_thread_id,
+            "export_artifacts": export_artifacts,
+            "document_paths": document_paths or [],
+            "output_format": output_format,
+            "tenant_id": tenant,
+        }
         self.repository.create_job(
             job_id=job_id,
             thread_id=actual_thread_id,
             query=query,
             tenant_id=tenant,
+            delivery_payload=payload,
+            delivery_state="pending" if self.config.redis_url else "local",
         )
         return {
             "job_id": job_id,
@@ -427,7 +457,44 @@ class LumenFinAnalysisService:
                 "tenant_id": (tenant_id or self.config.rag_tenant_id).strip() or "default",
             }
         )
+        self.repository.mark_job_published(job_id)
         return True
+
+    def try_publish_job(self, job_id: str, *, tenant_id: str) -> str:
+        """Publish a pending job to Redis, or report the fallback backend.
+
+        Returns:
+            ``redis`` — message was enqueued
+            ``redis-pending`` — Redis is configured but enqueue failed; outbox remains
+            ``background-task`` — no Redis URL
+        """
+        if not self.config.redis_url:
+            return "background-task"
+        job = self.repository.get_job(job_id, tenant_id=tenant_id)
+        payload = (job or {}).get("delivery_payload") if job else None
+        if not isinstance(payload, dict):
+            return "redis-pending"
+        try:
+            self.enqueue_job(
+                job_id,
+                str(payload.get("query") or ""),
+                str(payload.get("thread_id") or ""),
+                bool(payload.get("export_artifacts", True)),
+                payload.get("document_paths") or [],
+                payload.get("output_format"),
+                tenant_id=str(payload.get("tenant_id") or tenant_id),
+            )
+            return "redis"
+        except (ConnectionError, OSError, TimeoutError, RedisError):
+            return "redis-pending"
+
+    def republish_undelivered_jobs(self, *, limit: int = 50) -> int:
+        published = 0
+        for job in self.repository.list_unpublished_jobs(limit=limit):
+            backend = self.try_publish_job(job["job_id"], tenant_id=str(job.get("tenant_id") or "default"))
+            if backend == "redis":
+                published += 1
+        return published
 
     def run_job(
         self,
@@ -438,6 +505,11 @@ class LumenFinAnalysisService:
         document_paths: list[str] | None = None,
         output_format: str | None = None,
         tenant_id: str | None = None,
+        *,
+        execution_owner: str | None = None,
+        execution_token: str | None = None,
+        lease_seconds: int | None = None,
+        on_lease_renew: object | None = None,
     ) -> None:
         """Execute an analysis job with at-least-once safe completion semantics.
 
@@ -449,13 +521,20 @@ class LumenFinAnalysisService:
         Idempotent skip requires matching ``job_id`` + ``thread_id`` + ``query``.
         A completed job with a mismatched identity raises ``JobRedeliveryConflict``.
         """
+        lease = int(lease_seconds if lease_seconds is not None else self.config.redis_reclaim_idle_seconds)
         claim = self.repository.begin_job_execution(
             job_id,
             thread_id=thread_id,
             query=query,
+            worker_id=execution_owner,
+            lease_seconds=lease,
+            execution_token=execution_token,
         )
-        if claim == "skip_completed":
+        if claim.action == "skip_completed":
             return
+        if claim.action in {"missing", "busy"}:
+            raise JobExecutionRefused(claim.action, job_id)
+        token = claim.execution_token
         try:
             response = self.analyze(
                 query=query,
@@ -465,6 +544,8 @@ class LumenFinAnalysisService:
                 output_format=output_format,
                 tenant_id=tenant_id,
             )
+            if callable(on_lease_renew):
+                on_lease_renew()
             # Mark completed only after analyze persisted checkpoint/artifacts.
             self.repository.update_job_status(
                 job_id=job_id,
@@ -473,17 +554,21 @@ class LumenFinAnalysisService:
                 result=response["result"],
                 artifacts=response["artifacts"],
                 error_message=None,
+                execution_token=token,
             )
+        except JobExecutionRefused:
+            raise
         except Exception as exc:
             self.repository.update_job_status(
                 job_id=job_id,
                 status="failed",
                 error_message=redact_provider_message(str(exc)),
+                execution_token=token,
             )
             raise
 
     def get_job(self, job_id: str, *, tenant_id: str) -> dict | None:
-        """Tenant-scoped job lookup. ``tenant_id`` is required (secure-by-default)."""
+        """Tenant-scoped job lookup. Checkpoint overlay is not used: same thread_id can host later jobs."""
         tenant = tenant_id.strip() or "default"
         return self.repository.get_job(job_id, tenant_id=tenant)
 
@@ -493,24 +578,10 @@ class LumenFinAnalysisService:
         return self.repository.list_jobs(limit=limit, tenant_id=tenant)
 
     def save_uploaded_files(self, files: list[tuple[str, bytes]]) -> list[str]:
-        # Keep in sync with document_ingest parsers (.xls is accepted by older clients but not parsed).
-        allowed_suffixes = {".pdf", ".md", ".txt", ".csv", ".xlsx", ".json", ".htm", ".html"}
-        if len(files) > self.config.max_upload_files:
-            raise ValueError(
-                f"Too many uploads: {len(files)} files exceeds limit of {self.config.max_upload_files}."
-            )
-        self.config.upload_dir.mkdir(parents=True, exist_ok=True)
-        saved_paths: list[str] = []
-        for filename, content in files:
-            suffix = Path(filename).suffix.lower()
-            if suffix not in allowed_suffixes:
-                raise ValueError(f"Unsupported upload type for '{filename}'. Allowed: {sorted(allowed_suffixes)}")
-            if len(content) > self.config.max_upload_bytes:
-                raise ValueError(
-                    f"Upload '{filename}' is {len(content)} bytes; max is {self.config.max_upload_bytes}."
-                )
-            unique_name = f"{uuid4().hex[:8]}_{Path(filename).name}"
-            target_path = self.config.upload_dir / unique_name
-            target_path.write_bytes(content)
-            saved_paths.append(str(target_path))
-        return saved_paths
+        return save_upload_payloads(
+            files,
+            upload_dir=self.config.upload_dir,
+            max_files=self.config.max_upload_files,
+            max_file_bytes=self.config.max_upload_bytes,
+            max_total_bytes=self.config.max_upload_total_bytes,
+        )

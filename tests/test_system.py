@@ -460,7 +460,8 @@ class OfflineSystemTestCase(unittest.TestCase):
 
         steps = [event["step"] for event in result["audit_log"]]
         self.assertIn("retrieval", steps)
-        self.assertIn("quant", steps)
+        self.assertIn("psychologist", steps)
+        self.assertNotIn("quant", steps)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             artifacts = export_run_artifacts(result, Path(tmp_dir), "test-replanner-offline")
@@ -480,7 +481,6 @@ class OfflineSystemTestCase(unittest.TestCase):
             "query_planner",
             "supervisor",
             "retrieval",
-            "quant",
             "psychologist",
             "critic",
             "claim_binder",

@@ -17,11 +17,12 @@ from ..checkpoint_store import CheckpointConflictError
 from ..llm import BaseLLMClient, shutdown_llm_http_clients
 from ..logging_utils import configure_logging, request_logging_middleware
 from ..market_data import MarketDataClient, probe_market_provider
+from ..monitoring import prometheus_http_middleware, render_metrics
 from ..provider_resilience import close_shared_http_clients, redact_provider_message
-from ..reporting import build_run_manifest, load_run_manifest
 from ..service import LumenFinAnalysisService
-from ..structured_answer import public_structured_answer_fields
+from ..uploads import http_status_for_upload_error, read_uploads_chunked
 from .auth import AuthenticatedPrincipal, build_api_key_dependency, resolve_effective_tenant
+from .responses import analyze_response, public_job
 from .schemas import (
     AnalyzeDataRequest,
     AnalyzeRequest,
@@ -92,6 +93,7 @@ def create_app(
         lifespan=_app_lifespan,
     )
     app.middleware("http")(request_logging_middleware)
+    app.middleware("http")(prometheus_http_middleware)
 
     static_dir = Path(__file__).resolve().parent.parent.parent.parent / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
@@ -111,6 +113,17 @@ def create_app(
     @app.get("/")
     def root() -> RedirectResponse:
         return RedirectResponse(url="/static/index.html")
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics() -> Response:
+        """Prometheus scrape endpoint; never includes prompts or identifiers."""
+        return render_metrics(
+            redis_url=app_config.redis_url,
+            queue_names=(
+                app_config.redis_queue_name,
+                app_config.redis_index_queue_name,
+            ),
+        )
 
     @app.middleware("http")
     async def _worker_identity_headers(request, call_next):
@@ -362,97 +375,14 @@ def create_app(
             "milvus_uri": app_config.milvus_uri,
             "embedding_provider": app_config.embedding_provider,
             "market_data_provider": app_config.market_data_provider,
+            "data_mode": app_config.data_mode,
         }
-
-    def _compact_state(result: dict) -> dict:
-        compact = {
-            "run_id": result.get("run_id"),
-            "thread_id": result.get("thread_id"),
-            "companies": result.get("companies"),
-            "workflow_status": result.get("workflow_status"),
-            "degraded_mode": result.get("degraded_mode"),
-            "data_mode": result.get("data_mode") or app_config.data_mode,
-            "llm_backend": result.get("llm_backend"),
-            "clarification_questions": result.get("clarification_questions", []),
-        }
-        structured = public_structured_answer_fields(result)
-        if structured is not None:
-            compact["answer"] = structured["answer"]
-            compact["citations"] = structured["citations"]
-            compact["structured_answer_schema_version"] = structured[
-                "structured_answer_schema_version"
-            ]
-        return compact
 
     def _public_job(job: dict) -> dict:
-        public = dict(job)
-        result = job.get("result")
-        if isinstance(result, dict):
-            public_result = _compact_state(result)
-            for key in (
-                "final_report",
-                "executive_summary",
-                "compliance_summary",
-                "chart_data",
-            ):
-                if key in result:
-                    public_result[key] = result.get(key)
-            public["result"] = public_result
-        if public.get("error_message"):
-            public["error_message"] = redact_provider_message(
-                str(public["error_message"])
-            )
-        return public
+        return public_job(job, data_mode=app_config.data_mode)
 
     def _to_response(payload: dict, *, include_state: bool = False) -> AnalyzeResponse:
-        result = payload["result"]
-        artifacts = payload.get("artifacts", {})
-        run_manifest = load_run_manifest(artifacts) or build_run_manifest(
-            result,
-            thread_id=payload["thread_id"],
-            llm_backend=payload.get("llm_backend"),
-            artifact_paths=artifacts,
-            embedding_provider=app_config.embedding_provider,
-            rag_enabled=app_config.rag_enabled,
-            market_provider=app_config.market_data_provider,
-        )
-        checkpoint = payload.get("checkpoint")
-        if checkpoint and "state" in checkpoint:
-            checkpoint = {
-                "thread_id": checkpoint.get("thread_id"),
-                "workflow_status": checkpoint.get("workflow_status"),
-                "last_node": checkpoint.get("last_node"),
-                "clarification_questions": checkpoint.get("clarification_questions"),
-                "revision": checkpoint.get("revision"),
-                "created_at": checkpoint.get("created_at"),
-                "updated_at": checkpoint.get("updated_at"),
-            }
-        structured = public_structured_answer_fields(result)
-        return AnalyzeResponse(
-            thread_id=payload["thread_id"],
-            llm_backend=payload["llm_backend"],
-            workflow_status=payload.get("workflow_status", result.get("workflow_status", "completed")),
-            clarification_questions=result.get("clarification_questions", []),
-            final_report=result.get("final_report", ""),
-            executive_summary=result.get("executive_summary"),
-            compliance_summary=result.get("compliance_summary"),
-            audit_log=result.get("audit_log", []),
-            artifacts=artifacts,
-            state=result if include_state else _compact_state(result),
-            chart_data=result.get("chart_data"),
-            run_telemetry=result.get("run_telemetry"),
-            run_manifest=run_manifest,
-            provider_health=payload.get("provider_health"),
-            checkpoint=checkpoint,
-            degraded=bool(payload.get("degraded")),
-            provider_degraded=payload.get("provider_degraded"),
-            provider_call_summary=payload.get("provider_call_summary"),
-            answer=None if structured is None else structured["answer"],
-            citations=[] if structured is None else structured["citations"],
-            structured_answer_schema_version=(
-                None if structured is None else structured["structured_answer_schema_version"]
-            ),
-        )
+        return analyze_response(payload, app_config=app_config, include_state=include_state)
 
     @app.post("/api/v1/analyze", response_model=AnalyzeResponse)
     def analyze(
@@ -486,6 +416,7 @@ def create_app(
                 clarification=payload.clarification,
                 export_artifacts=payload.export_artifacts,
                 tenant_id=tenant_id,
+                job_id=payload.job_id,
             )
         except CheckpointConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -530,15 +461,21 @@ def create_app(
     ) -> AnalyzeResponse:
         tenant_id = resolve_effective_tenant(principal, None)
         try:
-            uploaded_files = [
-                (upload.filename or "document.pdf", await upload.read()) for upload in files
-            ]
+            uploaded_files = await read_uploads_chunked(
+                files,
+                max_files=app_config.max_upload_files,
+                max_file_bytes=app_config.max_upload_bytes,
+                max_total_bytes=app_config.max_upload_total_bytes,
+            )
             saved_paths = await run_in_threadpool(
                 service.save_uploaded_files,
                 uploaded_files,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=413, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=http_status_for_upload_error(exc),
+                detail=str(exc),
+            ) from exc
         try:
             response = await run_in_threadpool(
                 service.analyze,
@@ -565,15 +502,21 @@ def create_app(
     ) -> DocumentIndexResponse:
         effective_tenant = resolve_effective_tenant(principal, tenant_id)
         try:
-            uploaded_files = [
-                (upload.filename or "document.pdf", await upload.read()) for upload in files
-            ]
+            uploaded_files = await read_uploads_chunked(
+                files,
+                max_files=app_config.max_upload_files,
+                max_file_bytes=app_config.max_upload_bytes,
+                max_total_bytes=app_config.max_upload_total_bytes,
+            )
             saved_paths = await run_in_threadpool(
                 service.save_uploaded_files,
                 uploaded_files,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=413, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=http_status_for_upload_error(exc),
+                detail=str(exc),
+            ) from exc
         if async_mode:
             receipts = await run_in_threadpool(
                 service.enqueue_document_paths,
@@ -660,26 +603,25 @@ def create_app(
         )
 
     @app.post("/api/v1/jobs", response_model=SubmitJobResponse, status_code=202)
-    def submit_job(
+    async def submit_job(
         payload: SubmitJobRequest,
         background_tasks: BackgroundTasks,
         principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> SubmitJobResponse:
         tenant_id = resolve_effective_tenant(principal, None)
-        created = service.submit_job(
-            query=payload.query,
-            thread_id=payload.thread_id,
-            tenant_id=tenant_id,
+        created = await run_in_threadpool(
+            lambda: service.submit_job(
+                query=payload.query,
+                thread_id=payload.thread_id,
+                tenant_id=tenant_id,
+                export_artifacts=payload.export_artifacts,
+                output_format=payload.output_format,
+            )
         )
-        queued = service.enqueue_job(
-            created["job_id"],
-            payload.query,
-            created["thread_id"],
-            payload.export_artifacts,
-            output_format=payload.output_format,
-            tenant_id=tenant_id,
+        queued = await run_in_threadpool(
+            lambda: service.try_publish_job(created["job_id"], tenant_id=tenant_id)
         )
-        if not queued:
+        if queued == "background-task":
             background_tasks.add_task(
                 service.run_job,
                 created["job_id"],
@@ -690,7 +632,10 @@ def create_app(
                 payload.output_format,
                 tenant_id,
             )
-        return SubmitJobResponse(**{k: v for k, v in created.items() if k != "tenant_id"}, queue_backend="redis" if queued else "background-task")
+        return SubmitJobResponse(
+            **{k: v for k, v in created.items() if k != "tenant_id"},
+            queue_backend=queued,
+        )
 
     @app.post("/api/v1/jobs/upload", response_model=SubmitJobResponse, status_code=202)
     async def submit_upload_job(
@@ -703,18 +648,36 @@ def create_app(
         principal: AuthenticatedPrincipal = Depends(auth_dependency),
     ) -> SubmitJobResponse:
         tenant_id = resolve_effective_tenant(principal, None)
-        saved_paths = service.save_uploaded_files([(upload.filename or "document.pdf", await upload.read()) for upload in files])
-        created = service.submit_job(query=query, thread_id=thread_id, tenant_id=tenant_id)
-        queued = service.enqueue_job(
-            created["job_id"],
-            query,
-            created["thread_id"],
-            export_artifacts,
-            document_paths=saved_paths,
-            output_format=output_format,
-            tenant_id=tenant_id,
+        try:
+            uploaded_files = await read_uploads_chunked(
+                files,
+                max_files=app_config.max_upload_files,
+                max_file_bytes=app_config.max_upload_bytes,
+                max_total_bytes=app_config.max_upload_total_bytes,
+            )
+            saved_paths = await run_in_threadpool(
+                service.save_uploaded_files,
+                uploaded_files,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status_for_upload_error(exc),
+                detail=str(exc),
+            ) from exc
+        created = await run_in_threadpool(
+            lambda: service.submit_job(
+                query=query,
+                thread_id=thread_id,
+                tenant_id=tenant_id,
+                export_artifacts=export_artifacts,
+                document_paths=saved_paths,
+                output_format=output_format,
+            )
         )
-        if not queued:
+        queued = await run_in_threadpool(
+            lambda: service.try_publish_job(created["job_id"], tenant_id=tenant_id)
+        )
+        if queued == "background-task":
             background_tasks.add_task(
                 service.run_job,
                 created["job_id"],
@@ -725,7 +688,10 @@ def create_app(
                 output_format,
                 tenant_id,
             )
-        return SubmitJobResponse(**{k: v for k, v in created.items() if k != "tenant_id"}, queue_backend="redis" if queued else "background-task")
+        return SubmitJobResponse(
+            **{k: v for k, v in created.items() if k != "tenant_id"},
+            queue_backend=queued,
+        )
 
     @app.get("/api/v1/jobs/{job_id}", response_model=JobResponse)
     def get_job(

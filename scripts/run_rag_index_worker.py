@@ -18,9 +18,10 @@ if str(SRC) not in sys.path:
 
 from lumenfin.config import AppConfig
 from lumenfin.llm import shutdown_llm_http_clients
+from lumenfin.monitoring import record_worker_job, start_worker_metrics_server
 from lumenfin.provider_resilience import close_shared_http_clients
 from lumenfin.provider_resilience import redact_provider_message
-from lumenfin.queueing import RedisQueueManager
+from lumenfin.queueing import RedisQueueManager, ReservationHeartbeat
 from lumenfin.service import LumenFinAnalysisService
 from lumenfin.stdio import configure_stdio_utf8
 from redis.exceptions import RedisError
@@ -66,6 +67,7 @@ def main() -> int:
         return 1
 
     worker_id = (os.getenv("MAS_WORKER_ID") or f"index-{os.getpid()}").strip()
+    start_worker_metrics_server("index-worker")
     queue = _queue_from_config(config)
     stop_event = threading.Event()
 
@@ -100,16 +102,18 @@ def main() -> int:
         document_id = str(payload.get("document_id") or "")
         tenant_id = str(payload.get("tenant_id") or config.rag_tenant_id)
         if not document_id:
-            queue.retry(reserved.message_id, worker_id, "missing document_id")
+            result = queue.retry_reserved(reserved, "missing document_id")
+            record_worker_job(queue.queue_name, result.action)
             print(f"NACK message_id={reserved.message_id}: missing document_id")
             return True
         try:
-            receipt = service.process_document_index(document_id, tenant_id=tenant_id)
+            heartbeat_interval = max(0.05, queue.reclaim_idle_seconds / 3)
+            with ReservationHeartbeat(queue, reserved, interval_seconds=heartbeat_interval):
+                receipt = service.process_document_index(document_id, tenant_id=tenant_id)
         except Exception as exc:  # noqa: BLE001 - convert to retry/dead-letter
             safe_error = redact_provider_message(str(exc))
-            result = queue.retry(
-                reserved.message_id,
-                worker_id,
+            result = queue.retry_reserved(
+                reserved,
                 f"exception: {safe_error}",
             )
             print(
@@ -119,6 +123,7 @@ def main() -> int:
             )
             if result.action == "requeued":
                 time.sleep(config.redis_retry_backoff_seconds)
+            record_worker_job(queue.queue_name, result.action)
             return True
 
         print(
@@ -127,14 +132,15 @@ def main() -> int:
             f"message_id={reserved.message_id} attempt={reserved.attempt}"
         )
         if _should_ack(receipt):
-            acked = queue.ack(reserved.message_id, worker_id)
+            acked = queue.ack_reserved(reserved)
+            record_worker_job(queue.queue_name, "acked" if acked else "ack_miss")
             print(f"ACK message_id={reserved.message_id} ok={acked}")
             return True
 
         error = redact_provider_message(
             str(receipt.get("error") or receipt.get("status") or "index_incomplete")
         )
-        result = queue.retry(reserved.message_id, worker_id, error)
+        result = queue.retry_reserved(reserved, error)
         print(
             f"Retry/DLQ message_id={reserved.message_id} action={result.action} "
             f"attempt={result.attempt} error={error}"
@@ -143,6 +149,7 @@ def main() -> int:
             time.sleep(max(config.redis_retry_backoff_seconds, 0.5))
         elif result.action == "requeued":
             time.sleep(config.redis_retry_backoff_seconds)
+        record_worker_job(queue.queue_name, result.action)
         return True
 
     try:

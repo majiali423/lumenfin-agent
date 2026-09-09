@@ -1,82 +1,25 @@
 from __future__ import annotations
 
-import ast
 import json
 import re
 from pathlib import Path
 from typing import Any
 
-from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
+from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA, SAMPLE_FUNDAMENTALS_FISCAL_YEAR
 from .documents import normalize_metric_hints_to_billion_usd
 from .market_data import DEFAULT_TICKER_MAP
 from .metrics_schema import get_fundamental, normalize_market_data, set_fundamental
 from .fundamentals import is_plausible_revenue_billion_usd
-from .reporting import annotate_upload_period_meta
-
-
-class SafeExpressionEvaluator(ast.NodeVisitor):
-    allowed_nodes = (
-        ast.Expression,
-        ast.BinOp,
-        ast.Add,
-        ast.Sub,
-        ast.Mult,
-        ast.Div,
-        ast.Pow,
-        ast.Load,
-        ast.Name,
-        ast.Constant,
-        ast.UnaryOp,
-        ast.USub,
-    )
-
-    def __init__(self, variables: dict[str, float]) -> None:
-        self.variables = variables
-
-    def visit(self, node: ast.AST) -> float:
-        if not isinstance(node, self.allowed_nodes):
-            raise ValueError(f"Unsafe node detected: {type(node).__name__}")
-        return super().visit(node)
-
-    def visit_Expression(self, node: ast.Expression) -> float:
-        return self.visit(node.body)
-
-    def visit_BinOp(self, node: ast.BinOp) -> float:
-        left = self.visit(node.left)
-        right = self.visit(node.right)
-        if isinstance(node.op, ast.Add):
-            return left + right
-        if isinstance(node.op, ast.Sub):
-            return left - right
-        if isinstance(node.op, ast.Mult):
-            return left * right
-        if isinstance(node.op, ast.Div):
-            return left / right
-        if isinstance(node.op, ast.Pow):
-            return left**right
-        raise ValueError("Unsupported operator")
-
-    def visit_UnaryOp(self, node: ast.UnaryOp) -> float:
-        operand = self.visit(node.operand)
-        if isinstance(node.op, ast.USub):
-            return -operand
-        raise ValueError("Unsupported unary operator")
-
-    def visit_Name(self, node: ast.Name) -> float:
-        if node.id not in self.variables:
-            raise KeyError(node.id)
-        return self.variables[node.id]
-
-    def visit_Constant(self, node: ast.Constant) -> float:
-        if not isinstance(node.value, (int, float)):
-            raise ValueError("Only numeric constants are allowed")
-        return float(node.value)
-
-
-def safe_execute_formula(formula: str, variables: dict[str, float]) -> float:
-    tree = ast.parse(formula, mode="eval")
-    evaluator = SafeExpressionEvaluator(variables)
-    return round(evaluator.visit(tree), 4)
+from .quant_contract import (
+    AST_RATIO_KEYS,
+    build_coverage_matrix,
+    classify_quant_status,
+    has_computable_fundamentals,
+    is_partial_compare_gap,
+    non_comparable_companies,
+)
+from .reporting import annotate_upload_period_meta, document_field_locator, stamp_document_extracted_provenance
+from .safe_formula import SafeExpressionEvaluator, safe_execute_formula
 
 
 def resolve_safe_formula(formula: str, variables: dict[str, float], backend: str = "local") -> float:
@@ -185,7 +128,9 @@ def retrieve_company_payload(
     When ``prefer_uploaded_only`` is True, steps 2–4 are skipped so sparse uploads
     fail loud instead of silently backfilling from live providers.
     """
-    doc_contexts = document_contexts or []
+    from .documents import expand_document_page_contexts
+
+    doc_contexts = expand_document_page_contexts(document_contexts or [])
     document_payload = _payload_from_documents(company, doc_contexts, include_appendix=include_appendix)
     # Upload "present for this company" only when the issuer is explicitly detected
     # (empty detected_companies must not attribute the PDF to every peer).
@@ -214,6 +159,11 @@ def retrieve_company_payload(
             prefer_fiscal_year=prefer_fiscal_year,
         )
         result["fundamentals_meta"] = meta
+        result["fundamental_provenance"] = stamp_document_extracted_provenance(
+            result.get("fundamental_provenance"),
+            doc_contexts,
+            company=company,
+        )
         return _finalize_company_payload(result)
 
     # Upload-only mode: never invent numbers from SEC/Yahoo/sample.
@@ -370,12 +320,44 @@ def retrieve_company_payload(
     has_sample_data = allow_sample_data and company in SAMPLE_FINANCIAL_DATA
     if has_sample_data:
         payload = SAMPLE_FINANCIAL_DATA[company]
+        catalog_year = SAMPLE_FUNDAMENTALS_FISCAL_YEAR
+        period_label = f"FY{catalog_year}"
+        alignment = (
+            "exact"
+            if prefer_fiscal_year is None or int(prefer_fiscal_year) == int(catalog_year)
+            else "fallback_latest"
+        )
+        sample_meta = {
+            "provider": "sample_db",
+            "period": period_label,
+            "fiscal_year": catalog_year,
+            "fiscal_year_source": "sample_catalog",
+            "period_source": "sample_db",
+            "period_alignment": alignment,
+        }
+        if prefer_fiscal_year is not None:
+            sample_meta["requested_fiscal_year"] = int(prefer_fiscal_year)
+        sample_provenance = {
+            key: {
+                "source": "sample_db",
+                "confidence": "high",
+                "period": period_label,
+                "period_type": "annual",
+                "period_source": "sample_db",
+                "period_alignment": alignment,
+                "citation": f"lumenfin:sample_db:{company}:{period_label}",
+                "source_record_id": f"sample_catalog:{company}:{key}:{period_label}",
+            }
+            for key in ("revenue", "ebitda", "r_and_d", "operating_income")
+            if get_fundamental(payload["market_data"], key) is not None
+        }
         result = {
             "market_data": dict(payload["market_data"]),
             "supply_chain": dict(payload["supply_chain"]),
             "earnings_call_quotes": list(payload["earnings_call_quotes"]),
             "structured_source": "sample_db",
-            "fundamentals_meta": {"provider": "sample_db", "period": "demo_latest"},
+            "fundamentals_meta": sample_meta,
+            "fundamental_provenance": sample_provenance,
         }
         filled: list[str] = []
         doc_md = document_payload.get("market_data") or {}
@@ -425,11 +407,14 @@ def _payload_from_documents(
     include_appendix: bool,
 ) -> dict[str, Any]:
     from .documents import (
+        expand_document_page_contexts,
         extract_metric_amounts_for_company,
         extract_metric_hint_meta,
         is_trusted_ast_amount,
         normalize_metric_hints_to_billion_usd,
     )
+
+    doc_contexts = expand_document_page_contexts(doc_contexts)
 
     market_data: dict[str, float] = {}
     supply_chain_signals: list[str] = []
@@ -525,7 +510,7 @@ def _payload_from_documents(
                 float(meta.get("normalized_value", value))
             ):
                 continue
-            set_fundamental(market_data, key, float(meta.get("normalized_value", value)))
+            cite, record_id = document_field_locator(doc, base)
             period_value = meta.get("period")
             period_type = meta.get("period_type") or meta.get("period_hint")
             if isinstance(period_value, str) and period_value.lower() in {
@@ -536,6 +521,28 @@ def _payload_from_documents(
             }:
                 period_type = period_value.lower()
                 period_value = None
+            existing = fundamental_provenance.get(base)
+            if (
+                existing
+                and existing.get("period")
+                and period_value
+                and existing.get("period") != period_value
+            ):
+                market_data.pop(base, None)
+                market_data.pop(f"{base}_2025", None)
+                fundamental_provenance[base] = {
+                    "source": "document_extracted",
+                    "confidence": "low",
+                    "normalization_source": meta.get("normalization_source"),
+                    "period": None,
+                    "period_type": period_type,
+                    "period_source": "ambiguous",
+                    "period_alignment": "unknown",
+                    "citation": existing.get("citation") or cite,
+                    "source_record_id": existing.get("source_record_id") or record_id,
+                }
+                continue
+            set_fundamental(market_data, key, float(meta.get("normalized_value", value)))
             fundamental_provenance[base] = {
                 "source": (
                     "provider_metadata"
@@ -550,17 +557,11 @@ def _payload_from_documents(
                 "period_end": meta.get("period_end"),
                 "period_source": meta.get("period_source") or meta.get("provider"),
                 "period_alignment": meta.get("period_alignment"),
-                "citation": meta.get("citation") or doc.get("citation") or doc.get("filename"),
+                "citation": meta.get("citation") or cite,
                 "source_record_id": (
                     meta.get("source_record_id")
                     or meta.get("provider_record_id")
-                    or doc.get("source_record_id")
-                    or doc.get("table_id")
-                    or (
-                        f"document:{doc.get('document_id')}:{base}"
-                        if doc.get("document_id")
-                        else None
-                    )
+                    or record_id
                 ),
             }
 
@@ -570,6 +571,13 @@ def _payload_from_documents(
         lowered_text = text.lower()
         if has_supply_chain_signal(lowered_text):
             supply_chain_signals.append("PDF 文档中包含供应链相关讨论。")
+
+    if fundamental_provenance:
+        fundamental_provenance = stamp_document_extracted_provenance(
+            fundamental_provenance,
+            doc_contexts,
+            company=company,
+        )
 
     return {
         "market_data": market_data,
@@ -660,74 +668,6 @@ def canonicalize_companies(companies: list[str]) -> list[str]:
         _append_unique_company(canonical, cleaned)
     return canonical
 
-
-def has_computable_fundamentals(payload: dict[str, Any] | None) -> bool:
-    """True when AST quant can compute at least one core ratio from structured inputs."""
-    market = (payload or {}).get("market_data") or {}
-    revenue = get_fundamental(market, "revenue")
-    if revenue in (None, 0):
-        return False
-    return any(
-        get_fundamental(market, key) is not None
-        for key in ("ebitda", "operating_income", "r_and_d")
-    )
-
-
-AST_RATIO_KEYS = ("ebitda_margin", "r_and_d_intensity", "operating_margin")
-
-
-def classify_quant_status(metrics: dict[str, float] | None) -> str:
-    """Classify per-company quant output for peer-comparison coverage."""
-    values = metrics or {}
-    if any(key in values for key in AST_RATIO_KEYS):
-        return "ast_ok"
-    if values:
-        return "market_only"
-    return "uncomputable"
-
-
-def build_coverage_matrix(
-    companies: list[str],
-    retrieved_docs: dict[str, dict[str, Any]],
-    financial_metrics: dict[str, dict[str, float]] | None = None,
-) -> dict[str, dict[str, Any]]:
-    matrix: dict[str, dict[str, Any]] = {}
-    for company in companies:
-        payload = retrieved_docs.get(company) or {}
-        metrics = (financial_metrics or {}).get(company) or {}
-        has_structured = has_computable_fundamentals(payload)
-        if metrics:
-            quant_status = classify_quant_status(metrics)
-            comparable = quant_status == "ast_ok"
-        elif has_structured:
-            quant_status = "pending"
-            comparable = True
-        elif payload.get("market_data") or (payload.get("live_market") or {}).get("current_price"):
-            quant_status = "pending_market"
-            comparable = False
-        else:
-            quant_status = "uncomputable"
-            comparable = False
-        matrix[company] = {
-            "structured_source": str(payload.get("structured_source") or "none"),
-            "has_computable_fundamentals": has_structured,
-            "quant_status": quant_status,
-            "ast_ratios": quant_status == "ast_ok",
-            "comparable": comparable,
-        }
-    return matrix
-
-
-def is_partial_compare_gap(companies: list[str], coverage_matrix: dict[str, dict[str, Any]]) -> bool:
-    """True when a multi-company run has both comparable and non-comparable peers."""
-    if len(companies) <= 1:
-        return False
-    comparable = [company for company in companies if (coverage_matrix.get(company) or {}).get("comparable")]
-    return bool(comparable) and len(comparable) < len(companies)
-
-
-def non_comparable_companies(companies: list[str], coverage_matrix: dict[str, dict[str, Any]]) -> list[str]:
-    return [company for company in companies if not (coverage_matrix.get(company) or {}).get("comparable")]
 
 def _extract_companies_via_llm(query: str, llm_client: Any) -> list[str]:
     try:
@@ -865,6 +805,8 @@ def summarize_document_context(document_contexts: list[dict[str, Any]], company:
             {
                 "document_id": doc.get("document_id"),
                 "filename": doc.get("filename"),
+                "citation": doc.get("citation"),
+                "page": doc.get("page"),
                 "excerpt": doc.get("excerpt", "")[:1200],
             }
         )
@@ -1044,6 +986,48 @@ def build_chart_data(
     """Build structured chart data for frontend visualization."""
     colors = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2"]
 
+    # Keep the dashboard summary in the public chart payload. API responses use a
+    # compact state by default, so the browser cannot safely derive these values
+    # from internal ``financial_metrics`` / ``risk_scores`` fields.
+    ebitda_margins = [
+        metrics.get("ebitda_margin")
+        for company in companies
+        if isinstance((metrics := financial_metrics.get(company, {})).get("ebitda_margin"), (int, float))
+    ]
+    company_risk_averages: list[float] = []
+    for company in companies:
+        scores = risk_scores.get(company, {})
+        numeric_scores = [
+            float(value)
+            for value in scores.values()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
+        if numeric_scores:
+            company_risk_averages.append(sum(numeric_scores) / len(numeric_scores))
+    covered_sentiments = [
+        sentiment_analysis[company]
+        for company in companies
+        if isinstance(sentiment_analysis.get(company), dict)
+        and sentiment_analysis[company].get("label")
+    ]
+    summary_stats = {
+        "company_count": len(companies),
+        "avg_ebitda_margin": (
+            round(sum(ebitda_margins) / len(ebitda_margins), 6) if ebitda_margins else None
+        ),
+        "ebitda_company_count": len(ebitda_margins),
+        "avg_risk_score": (
+            round(sum(company_risk_averages) / len(company_risk_averages), 4)
+            if company_risk_averages
+            else None
+        ),
+        "risk_company_count": len(company_risk_averages),
+        "bullish_count": sum(
+            1 for sentiment in covered_sentiments if sentiment.get("label") == "bullish"
+        ),
+        "sentiment_company_count": len(covered_sentiments),
+    }
+
     # 1. Financial metrics comparison bar chart
     metric_keys = ["ebitda_margin", "r_and_d_intensity", "operating_margin", "estimated_net_margin"]
     metric_labels = {"ebitda_margin": "EBITDA Margin %", "r_and_d_intensity": "R&D Intensity %",
@@ -1097,6 +1081,7 @@ def build_chart_data(
                       for e in audit_log]
 
     return {
+        "summary_stats": summary_stats,
         "metrics_comparison": metrics_comparison,
         "risk_radar": risk_radar,
         "sentiment_distribution": sentiment_data,

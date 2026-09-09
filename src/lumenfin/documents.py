@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
-
-import fitz
 
 
 COMPANY_HINTS = {
@@ -76,6 +74,8 @@ def detect_companies_from_text(text: str, filename: str = "") -> list[str]:
 
 
 def parse_pdf_document(file_path: Path) -> dict[str, Any]:
+    import fitz
+
     from .document_entity import resolve_document_entities
 
     doc = fitz.open(file_path)
@@ -115,6 +115,58 @@ def parse_pdf_document(file_path: Path) -> dict[str, Any]:
         "per_company_metric_hint_meta": per_company_meta,
         "source_type": "pdf",
     }
+
+
+def expand_document_page_contexts(
+    document_contexts: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Split a multi-page file into page contexts that share ``document_id``.
+
+    Location lives in ``page`` / ``citation`` / ``source_record_id``, not in a
+    per-page document id. File-level metric hints extracted from concatenated
+    pages are dropped so each page is re-read locally.
+    """
+    expanded: list[dict[str, Any]] = []
+    for doc in document_contexts or []:
+        if not isinstance(doc, dict):
+            continue
+        pages = doc.get("pages")
+        if not isinstance(pages, list) or len(pages) <= 1:
+            expanded.append(doc)
+            continue
+        filename = str(doc.get("filename") or doc.get("citation") or "upload").split("#", 1)[0]
+        doc_id = str(doc.get("document_id") or Path(filename).stem or "upload")
+        for index, page_text in enumerate(pages, start=1):
+            text = str(page_text or "")
+            if not text.strip():
+                continue
+            page_doc = {
+                key: value
+                for key, value in doc.items()
+                if key
+                not in {
+                    "metric_hints",
+                    "metric_hint_meta",
+                    "per_company_metric_hints",
+                    "per_company_metric_hint_meta",
+                    "pages",
+                    "text",
+                    "excerpt",
+                    "citation",
+                    "page",
+                    "page_count",
+                }
+            }
+            page_doc["document_id"] = doc_id
+            page_doc["filename"] = Path(filename).name
+            page_doc["page"] = index
+            page_doc["text"] = text
+            page_doc["excerpt"] = text[:4000]
+            page_doc["pages"] = [text]
+            page_doc["page_count"] = 1
+            page_doc["citation"] = f"{Path(filename).name}#p{index}"
+            expanded.append(page_doc)
+    return expanded
 
 
 # Absolute metrics that live on LumenFin's billion-USD scale after normalization.
@@ -228,6 +280,8 @@ def detect_statement_scale(text: str) -> str | None:
         r"\(\s*in\s+millions(?:\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros))?\s*\)"
         r"|\bin\s+millions\s+of\s+(?:u\.?s\.?\s+)?(?:dollars|usd|eur|euros)\b"
         r"|\b\(millions\)\b"
+        r"|\(\s*(?:u\.?s\.?\s*)?(?:usd|dollars?)\s+millions?\s*\)"
+        r"|\b(?:u\.?s\.?\s*)?usd\s+millions?\b"
         r"|单位[：:]\s*百万",
         lowered,
     ):
@@ -310,7 +364,12 @@ def _document_metric_label_spans(text: str) -> list[tuple[int, int, str]]:
 def _document_metric_context_bounds(
     text: str, metric_start: int, metric_end: int
 ) -> tuple[int, int]:
-    """Bound one metric's context so periods cannot cross another metric label."""
+    """Bound one metric so a same-sentence prefix period can bind, but others cannot.
+
+    Left bound is the end of the previous metric label (or start of text), not the
+    current label. ``FY2024 operating income was 32.972`` must keep FY2024.
+    Sentence boundaries are applied by the caller via local context.
+    """
     spans = _document_metric_label_spans(text)
     current = [
         span for span in spans
@@ -326,7 +385,26 @@ def _document_metric_context_bounds(
         (start for start, _, _ in spans if start >= current_end and start != current_start),
         default=len(text or ""),
     )
-    return max(previous_end, current_start), next_start
+    return previous_end, next_start
+
+
+def unique_statement_period(text: str) -> str | None:
+    """Return a covering FY when the text has exactly one statement period.
+
+    Filename years and SEC accession/filed dates are ignored. ``Fiscal year
+    ended: 2025-01-26`` counts as FY2025. Two distinct FY labels → None.
+    """
+    labels: list[str] = []
+    for match in re.finditer(r"\bFY\s*(20\d{2})\b", text or "", re.I):
+        labels.append(f"FY{match.group(1)}")
+    for match in re.finditer(
+        r"(?:fiscal\s+year|year)\s+ended[:\s]+(20\d{2})-\d{2}-\d{2}",
+        text or "",
+        re.I,
+    ):
+        labels.append(f"FY{match.group(1)}")
+    unique = list(dict.fromkeys(labels))
+    return unique[0] if len(unique) == 1 else None
 
 
 def _nearest_document_period(text: str, number_start: int, number_end: int) -> str | None:
@@ -647,6 +725,13 @@ def _parse_raw_metric_number(
             # Large unitless magnitudes may still project as inferred_million (low confidence).
             if abs(value) < _UNITLESS_MILLION_FLOOR:
                 continue
+        if concrete_period and re.fullmatch(r"20\d{2}-\d{2}-\d{2}", concrete_period):
+            mapped = unique_statement_period(local_context)
+            concrete_period = mapped
+        if not concrete_period:
+            inherited = unique_statement_period(local_context)
+            if inherited:
+                concrete_period = inherited
         return normalize_extracted_amount(
             value,
             raw_scale=scale,
@@ -679,27 +764,132 @@ def _extract_metric_amounts_raw(
                 prefix = lowered[max(0, kw_match.start() - 160) : kw_match.start()]
                 local_scale = detect_statement_scale(prefix) or doc_scale
                 local_currency = detect_statement_currency(prefix) or doc_currency
-                window_start = kw_match.start()
-                context = text[window_start : kw_match.end() + 200]
+                # Include the local prefix so "FY2024 operating income was …" binds FY2024.
+                prefix_start = max(0, kw_match.start() - 180)
+                context = text[prefix_start : kw_match.end() + 200]
                 amount = _parse_raw_metric_number(
                     context,
                     document_scale=local_scale,
                     document_currency=local_currency,
                     period_hint=period_hint,
-                    metric_start=0,
-                    metric_end=kw_match.end() - window_start,
+                    metric_start=kw_match.start() - prefix_start,
+                    metric_end=kw_match.end() - prefix_start,
                 )
                 if amount is not None:
-                    amounts[metric] = amount
+                    prior = amounts.get(metric)
+                    if (
+                        prior is not None
+                        and prior.period
+                        and amount.period
+                        and prior.period != amount.period
+                    ):
+                        amounts[metric] = replace(
+                            amount,
+                            period=None,
+                            period_source="ambiguous",
+                            period_alignment="unknown",
+                            confidence="low",
+                        )
+                    else:
+                        amounts[metric] = amount
                     metric_found = True
                     break
             if metric_found:
                 break
+    column_hits = extract_period_column_amounts(text, document_scale=doc_scale)
+    for metric, by_period in column_hits.items():
+        if len(by_period) > 1:
+            amounts[metric] = replace(
+                next(iter(by_period.values())),
+                period=None,
+                period_source="ambiguous",
+                period_alignment="unknown",
+                confidence="low",
+            )
+            continue
+        period, amount = next(iter(by_period.items()))
+        existing = amounts.get(metric)
+        if existing and existing.period and existing.period != period:
+            amounts[metric] = replace(
+                amount,
+                period=None,
+                period_source="ambiguous",
+                period_alignment="unknown",
+                confidence="low",
+            )
+        else:
+            amounts.setdefault(metric, amount)
     return amounts
 
 
 def extract_metric_amounts(text: str) -> dict[str, ExtractedAmount]:
     return _extract_metric_amounts_raw(text)
+
+
+def extract_period_column_amounts(
+    text: str,
+    *,
+    document_scale: str | None = None,
+) -> dict[str, dict[str, ExtractedAmount]]:
+    """Parse metric rows under a multi-year FY header.
+
+    Example::
+
+        FY2024    FY2025
+        Operating income  32.972  81.453
+    """
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    out: dict[str, dict[str, ExtractedAmount]] = {}
+    fy_token = re.compile(r"\bFY\s*(20\d{2})\b", re.I)
+    number_token = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
+    for index, line in enumerate(lines):
+        years = [f"FY{match.group(1)}" for match in fy_token.finditer(line)]
+        if len(years) < 2:
+            continue
+        window = lines[index + 1 : index + 5]
+        for candidate in window:
+            metric_name = None
+            lowered = candidate.lower()
+            for metric, keywords in _METRIC_KEYWORDS:
+                if any(re.search(kw, lowered) for kw in keywords):
+                    metric_name = metric
+                    break
+            numbers: list[str] = []
+            for token in number_token.findall(candidate):
+                raw = token.replace(",", "")
+                try:
+                    value = float(raw)
+                except ValueError:
+                    continue
+                if 2020 <= value <= 2035 and value == int(value):
+                    continue
+                numbers.append(raw)
+            if metric_name is None or len(numbers) < 2:
+                continue
+            scale = document_scale or detect_statement_scale(text)
+            by_period: dict[str, ExtractedAmount] = {}
+            for period, raw in zip(years, numbers, strict=False):
+                try:
+                    value = float(raw)
+                except ValueError:
+                    continue
+                amount = normalize_extracted_amount(
+                    value,
+                    raw_scale=scale,
+                    currency=detect_statement_currency(text) or "USD",
+                    normalization_source="structured_table" if scale else "inline_unit",
+                    period_hint="annual",
+                    period=period,
+                    period_source="table_header",
+                    period_alignment="exact",
+                )
+                if amount.normalized_value is None:
+                    continue
+                by_period[period] = amount
+            if len(by_period) >= 2:
+                out[metric_name] = by_period
+                break
+    return out
 
 
 def _compatibility_hints(amounts: dict[str, ExtractedAmount]) -> dict[str, float]:

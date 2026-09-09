@@ -7,9 +7,11 @@ import time
 
 from .config import AppConfig
 from .llm import shutdown_llm_http_clients
+from .monitoring import record_worker_job, start_worker_metrics_server
 from .provider_resilience import redact_provider_message
 from .provider_resilience import close_shared_http_clients
-from .queueing import RedisQueueManager
+from .database import JobExecutionRefused
+from .queueing import RedisQueueManager, ReservationHeartbeat, ReservedMessage
 from .service import LumenFinAnalysisService
 from redis.exceptions import RedisError
 
@@ -24,6 +26,10 @@ def execute_analysis_job(
     tenant_id: str | None = None,
     *,
     service: LumenFinAnalysisService | None = None,
+    execution_owner: str | None = None,
+    execution_token: str | None = None,
+    lease_seconds: int | None = None,
+    on_lease_renew=None,
 ) -> None:
     if service is None:
         config = AppConfig.from_env()
@@ -36,6 +42,10 @@ def execute_analysis_job(
         document_paths=document_paths or [],
         output_format=output_format,
         tenant_id=tenant_id,
+        execution_owner=execution_owner,
+        execution_token=execution_token,
+        lease_seconds=lease_seconds,
+        on_lease_renew=on_lease_renew,
     )
 
 
@@ -54,39 +64,60 @@ def process_reserved_analysis_message(
     *,
     queue: RedisQueueManager,
     service: LumenFinAnalysisService,
-    reserved,
+    reserved: ReservedMessage,
     worker_id: str,
     retry_backoff_seconds: float = 0.0,
 ) -> str:
     """Process one reserved analysis message. Returns action label for tests/logs."""
     payload = reserved.payload
     job_id = str(payload.get("job_id") or "")
-    try:
-        execute_analysis_job(
-            job_id=job_id,
-            query=payload["query"],
-            thread_id=payload["thread_id"],
-            export_artifacts=payload.get("export_artifacts", True),
-            document_paths=payload.get("document_paths", []),
-            output_format=payload.get("output_format"),
-            tenant_id=payload.get("tenant_id"),
-            service=service,
+    lease_seconds = int(queue.reclaim_idle_seconds)
+    heartbeat_interval = max(0.05, lease_seconds / 3)
+
+    def _renew_db_lease() -> None:
+        if not job_id or not reserved.reservation_token:
+            return
+        service.repository.renew_job_execution(
+            job_id,
+            execution_token=reserved.reservation_token,
+            lease_seconds=lease_seconds,
         )
+
+    try:
+        with ReservationHeartbeat(
+            queue,
+            reserved,
+            interval_seconds=heartbeat_interval,
+            on_renew=_renew_db_lease,
+        ):
+            execute_analysis_job(
+                job_id=job_id,
+                query=payload["query"],
+                thread_id=payload["thread_id"],
+                export_artifacts=payload.get("export_artifacts", True),
+                document_paths=payload.get("document_paths", []),
+                output_format=payload.get("output_format"),
+                tenant_id=payload.get("tenant_id"),
+                service=service,
+                execution_owner=worker_id,
+                execution_token=reserved.reservation_token,
+                lease_seconds=lease_seconds,
+                on_lease_renew=_renew_db_lease,
+            )
+    except JobExecutionRefused as exc:
+        result = queue.retry_reserved(reserved, f"execution_refused:{exc.action}")
+        print(
+            f"Analysis retry/DLQ message_id={reserved.message_id} "
+            f"action={result.action} attempt={result.attempt} "
+            f"refused={exc.action} job_id={job_id}"
+        )
+        if result.action == "requeued" and retry_backoff_seconds > 0:
+            time.sleep(retry_backoff_seconds)
+        record_worker_job(queue.queue_name, result.action)
+        return result.action
     except Exception as exc:  # noqa: BLE001 - persist failure then retry/DLQ
         safe_error = redact_provider_message(str(exc))
-        if job_id:
-            try:
-                service.repository.update_job_status(
-                    job_id,
-                    status="failed",
-                    error_message=safe_error,
-                )
-            except Exception as status_exc:  # noqa: BLE001
-                print(
-                    f"Failed to persist job failure for {job_id}: "
-                    f"{redact_provider_message(str(status_exc))}"
-                )
-        result = queue.retry(reserved.message_id, worker_id, f"exception: {safe_error}")
+        result = queue.retry_reserved(reserved, f"exception: {safe_error}")
         print(
             f"Analysis retry/DLQ message_id={reserved.message_id} "
             f"action={result.action} attempt={result.attempt} "
@@ -94,10 +125,13 @@ def process_reserved_analysis_message(
         )
         if result.action == "requeued" and retry_backoff_seconds > 0:
             time.sleep(retry_backoff_seconds)
+        record_worker_job(queue.queue_name, result.action)
         return result.action
-    acked = queue.ack(reserved.message_id, worker_id)
+    acked = queue.ack_reserved(reserved)
     print(f"Analysis ACK message_id={reserved.message_id} job_id={job_id} ok={acked}")
-    return "acked" if acked else "ack_miss"
+    action = "acked" if acked else "ack_miss"
+    record_worker_job(queue.queue_name, action)
+    return action
 
 
 def work_forever() -> None:
@@ -105,6 +139,7 @@ def work_forever() -> None:
     if not config.redis_url:
         raise RuntimeError("MAS_REDIS_URL is required to start the Redis worker.")
     worker_id = (os.getenv("MAS_WORKER_ID") or f"analysis-{os.getpid()}").strip()
+    start_worker_metrics_server("analysis-worker")
     queue = _queue_from_config(config)
     queue.migrate_legacy_messages()
     service = LumenFinAnalysisService(config)
@@ -119,6 +154,7 @@ def work_forever() -> None:
     try:
         while not stop_event.is_set():
             try:
+                service.republish_undelivered_jobs()
                 queue.reclaim_stale()
                 reserved = queue.reserve(timeout_seconds=1, worker_id=worker_id)
             except (ConnectionError, OSError, TimeoutError, RedisError) as exc:

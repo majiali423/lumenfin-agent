@@ -44,6 +44,12 @@ class FinRunExportTestCase(unittest.TestCase):
         self.assertEqual(metric["confidence"]["structured_source"], "sample_db")
         self.assertEqual(metric["inputs"]["revenue"]["period_source"], "provider_record")
         self.assertEqual(metric["inputs"]["revenue"]["source_record_id"], "sample:apple:FY2025:revenue")
+        self.assertTrue(metric["inputs"]["revenue"]["evidence_ids"])
+        self.assertTrue(any(item.get("id") and item.get("metric") == "revenue" for item in finrun["evidence"]))
+        revenue_ev = next(item for item in finrun["evidence"] if item.get("metric") == "revenue")
+        self.assertEqual(revenue_ev.get("source_record_id"), "sample:apple:FY2025:revenue")
+        self.assertEqual(revenue_ev.get("role"), "source_field")
+        self.assertEqual(metric["inputs"]["revenue"]["evidence_ids"], [revenue_ev["id"]])
         structured = finrun["structured_answer"]
         self.assertEqual(finrun["schema_version"], FINRUN_SCHEMA_VERSION)
         self.assertEqual(structured["structured_answer_schema_version"], STRUCTURED_ANSWER_SCHEMA_VERSION)
@@ -52,6 +58,59 @@ class FinRunExportTestCase(unittest.TestCase):
         self.assertEqual(structured["citation_validation"], "passed")
         self.assertEqual(structured["citation_path"], "unavailable")
         self.assertEqual(finrun["metadata"]["citation_validation"], "passed")
+
+    def test_absolute_metric_period_follows_field_not_cover_meta(self) -> None:
+        state = _sample_state()
+        nvda = {
+            "market_data": {"operating_income": 32.972},
+            "structured_source": "uploaded_document",
+            "fundamentals_meta": {"fiscal_year": 2025, "period_alignment": "exact"},
+            "fundamental_provenance": {
+                "operating_income": {
+                    "period": "FY2024",
+                    "period_alignment": "exact",
+                    "citation": "annual.pdf#p2",
+                    "source_record_id": "document:annual-report:p2:operating_income",
+                }
+            },
+        }
+        state["companies"] = ["NVIDIA"]
+        state["retrieved_docs"] = {"NVIDIA": nvda}
+        state["financial_metrics"] = {"NVIDIA": {"operating_income": 32.972}}
+        state["risk_scores"] = {}
+        state["market_snapshots"] = {}
+        finrun = export_finrun_state(state)
+        metric = next(item for item in finrun["metrics"] if item["name"] == "operating_income")
+        self.assertEqual(metric["period"], "FY2024")
+        self.assertNotEqual(metric["period"], "FY2025")
+
+    def test_known_missing_field_period_exports_unknown_not_latest(self) -> None:
+        state = _sample_state()
+        nvda = {
+            "market_data": {"operating_income": 32.972},
+            "structured_source": "uploaded_document",
+            "fundamentals_meta": {"fiscal_year": 2025},
+            "fundamental_provenance": {
+                "operating_income": {
+                    "period": None,
+                    "period_alignment": None,
+                    "citation": "annual.pdf#p2",
+                    "source_record_id": "document:annual-report:p2:operating_income",
+                }
+            },
+        }
+        state["companies"] = ["NVIDIA"]
+        state["retrieved_docs"] = {"NVIDIA": nvda}
+        state["financial_metrics"] = {"NVIDIA": {"operating_income": 32.972}}
+        state["risk_scores"] = {}
+        state["market_snapshots"] = {}
+        finrun = export_finrun_state(state)
+        metric = next(item for item in finrun["metrics"] if item["name"] == "operating_income")
+        self.assertEqual(metric["period"], "unknown")
+        oi_ev = next(item for item in finrun["evidence"] if item.get("metric") == "operating_income")
+        self.assertEqual(oi_ev.get("period"), "unknown")
+        self.assertIn("period not stated", str(oi_ev.get("text") or "").lower())
+        self.assertNotIn("latest operating income", str(oi_ev.get("text") or "").lower())
 
     def test_export_preserves_structured_citations_and_does_not_guess_from_prose(self) -> None:
         state = _sample_state()

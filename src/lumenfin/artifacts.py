@@ -59,6 +59,7 @@ class RetrievalArtifact:
     structured_source: StructuredSource = "none"
     appendix: dict[str, Any] = field(default_factory=dict)
     fundamentals_meta: dict[str, Any] = field(default_factory=dict)
+    fundamental_provenance: dict[str, dict[str, Any]] = field(default_factory=dict)
     provider_errors: list[dict[str, Any]] = field(default_factory=list)
     rag_meta: dict[str, Any] = field(default_factory=dict)
 
@@ -78,6 +79,11 @@ class RetrievalArtifact:
             payload["appendix"] = dict(self.appendix)
         if self.fundamentals_meta:
             payload["fundamentals_meta"] = dict(self.fundamentals_meta)
+        if self.fundamental_provenance:
+            payload["fundamental_provenance"] = {
+                str(key): dict(value)
+                for key, value in self.fundamental_provenance.items()
+            }
         if self.provider_errors:
             payload["provider_errors"] = list(self.provider_errors)
         return payload
@@ -97,6 +103,7 @@ class RetrievalArtifact:
             "structured_source": self.structured_source,
             "appendix": self.appendix,
             "fundamentals_meta": self.fundamentals_meta,
+            "fundamental_provenance": self.fundamental_provenance,
             "provider_errors": self.provider_errors,
         }
 

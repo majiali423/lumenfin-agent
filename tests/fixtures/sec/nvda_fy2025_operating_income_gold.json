@@ -1,0 +1,15 @@
+{
+  "id": "nvda_fy2025_operating_income_upload_v1",
+  "source_file": "tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf",
+  "source_sha256": "7f85d2c353ab625abb6a779d2175be499ee8e53970d49b3eb574ec1c34b68208",
+  "source_note": "Hand-read from the derived excerpt (not a complete official 10-K). Page 1 caption is USD millions. Revenue 130,497; operating income 81,453; R&D 12,914. Gold is operating income 81.453 billion USD. Independent of SAMPLE_FINANCIAL_DATA (NVIDIA operating_income 72.4).",
+  "company": "NVIDIA",
+  "period": "FY2025",
+  "metric": "operating_income",
+  "unit": "billion_usd",
+  "currency": "USD",
+  "value_billion_usd": 81.453,
+  "raw_value": 81453,
+  "raw_unit": "million_usd",
+  "page": 1
+}

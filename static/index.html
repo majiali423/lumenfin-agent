@@ -3,13 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LumenFin Agent | Financial Intelligence Workbench</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<title>LumenFin — 证据驱动的金融研究</title>
+<script src="/static/sanitize.js"></script>
 <style>
 /* ═══════════ DESIGN TOKENS (shadcn-inspired slate/blue) ═══════════ */
 :root {
@@ -87,6 +82,7 @@ body{
   background:var(--success-subtle);color:var(--success);border:1px solid rgba(5,150,105,.2);
 }
 .nav-badge.offline{background:var(--destructive-subtle);color:var(--destructive);border-color:rgba(220,38,38,.2);}
+.nav-badge.warning{background:var(--warning-subtle);color:var(--warning);border-color:rgba(217,119,6,.2);}
 .nav-status{
   display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted-foreground);font-weight:500;
 }
@@ -366,166 +362,337 @@ textarea.sidebar-input{min-height:100px;line-height:1.6;}
 .clarify-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;}
 @media(max-width:700px){.clarify-fields{grid-template-columns:1fr}}
 .clarify-label{font-size:10px;font-weight:600;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
+
+/* ═══════════ APPLE-INSPIRED SHOWCASE SURFACE ═══════════ */
+:root{
+  --background:#fbfbfd;
+  --foreground:#1d1d1f;
+  --card:#ffffff;
+  --card-foreground:#1d1d1f;
+  --border:#d8d8dc;
+  --border-subtle:#eeeef0;
+  --input:#f5f5f7;
+  --input-focus:#ffffff;
+  --ring:rgba(0,113,227,.16);
+  --primary:#0071e3;
+  --primary-hover:#0077ed;
+  --primary-subtle:#eaf4ff;
+  --muted:#f5f5f7;
+  --muted-foreground:#6e6e73;
+  --success:#248a3d;
+  --success-subtle:#eef8f0;
+  --warning:#a05a00;
+  --warning-subtle:#fff7e8;
+  --radius:12px;
+  --radius-lg:18px;
+  --radius-xl:28px;
+  --shadow-xs:0 1px 2px rgba(0,0,0,.03);
+  --shadow-sm:0 10px 32px rgba(0,0,0,.07);
+  --shadow-md:0 24px 64px rgba(0,0,0,.1);
+  --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei",sans-serif;
+}
+body{background:var(--background);letter-spacing:-.012em}
+.navbar{height:52px;background:rgba(251,251,253,.82);backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid rgba(0,0,0,.08)}
+.navbar-inner{max-width:1120px;padding:0 24px}
+.nav-brand{gap:9px}
+.nav-logo{width:28px;height:28px;border-radius:8px;background:var(--foreground);font-size:9px;letter-spacing:-.05em}
+.nav-title{font-size:13px;letter-spacing:-.01em}
+.nav-subtitle{display:none}
+.nav-right{gap:8px}
+.nav-status,.nav-badge{background:transparent;border:0;padding:5px 7px;font-size:10px;color:var(--muted-foreground)}
+.nav-badge{color:var(--primary)}
+.app-body{display:block;max-width:1180px;min-height:calc(100vh - 52px);padding:0 24px 72px}
+.main-panel{width:100%;padding:0;overflow:visible}
+.empty-state{min-height:auto;padding:56px 0 80px;text-align:left;background:transparent;border:0;border-radius:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow:visible}
+.hero-copy{width:100%;max-width:920px;display:flex;flex-direction:column;align-items:flex-start}
+.hero-mark{display:none}
+.workspace-kicker{font-size:11px;font-weight:600;letter-spacing:.045em;text-transform:none;color:var(--primary)}
+.eyebrow{margin:0;display:flex;align-items:baseline;justify-content:flex-start;gap:10px;color:var(--foreground);letter-spacing:-.025em}
+.eyebrow strong{font-size:32px;font-weight:650}
+.eyebrow span{font-size:13px;font-weight:500;color:#86868b;letter-spacing:-.01em}
+.hero-desc{max-width:720px;margin-top:10px;color:var(--muted-foreground);font-size:15px;font-weight:400;line-height:1.7}
+.workspace-card{width:100%;max-width:920px;margin-top:28px;background:#fff;border:1px solid rgba(0,0,0,.1);border-radius:24px;padding:18px;box-shadow:0 8px 28px rgba(0,0,0,.055);display:grid;grid-template-columns:220px minmax(260px,1fr) 148px;gap:14px;text-align:left}
+.workspace-heading{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:2px 6px 4px}
+.workspace-title{font-size:15px;font-weight:600;letter-spacing:-.02em;margin-top:3px}
+.step-badge{background:var(--muted);border:0;color:#86868b;font-size:10px;font-weight:500}
+.query-section{grid-column:1/-1;padding:4px 6px 14px;border-bottom:1px solid var(--border-subtle)}
+.format-section{grid-column:1}
+.upload-section{grid-column:2}
+.sidebar-section{gap:7px}
+.sidebar-label{font-size:10px;font-weight:600;letter-spacing:.01em;text-transform:none;color:#86868b}
+.optional-label{margin-left:4px;font-weight:400;color:#aeaeb2}
+.sidebar-input{border:0;background:transparent;padding:5px 0;font-size:13px}
+.sidebar-input:focus{border:0;background:transparent;box-shadow:none}
+textarea.sidebar-input{min-height:78px;font-size:17px;line-height:1.55}
+.query-examples{display:flex;gap:7px;flex-wrap:wrap;margin-top:2px}
+.query-example{border:0;background:var(--muted);color:var(--muted-foreground);font:500 10.5px/1 var(--font-sans);padding:7px 10px;border-radius:999px;cursor:pointer;transition:.15s}
+.query-example:hover{background:#e9e9ec;color:var(--foreground)}
+.mode-switch{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:3px;background:var(--muted);border-radius:11px}
+.mode-option{position:relative;cursor:pointer}
+.mode-option input{position:absolute;opacity:0;pointer-events:none}
+.mode-option span{display:flex;align-items:center;justify-content:center;height:34px;border-radius:8px;font-size:10.5px;font-weight:500;color:var(--muted-foreground);transition:.15s}
+.mode-option input:checked+span{background:#fff;color:var(--foreground);box-shadow:0 1px 4px rgba(0,0,0,.09)}
+.upload-area{min-height:56px;padding:8px 10px;border:1px dashed #c7c7cc;border-radius:12px;background:#f7f7f9;display:grid;grid-template-columns:34px 1fr;align-items:center;text-align:left;column-gap:10px}
+.upload-area:hover{border-color:rgba(0,113,227,.48);background:var(--primary-subtle)}
+.upload-area:focus-visible{outline:3px solid rgba(0,113,227,.2);outline-offset:2px;border-color:var(--primary)}
+.upload-area.is-dragging{background:var(--primary-subtle);box-shadow:inset 0 0 0 1.5px rgba(0,113,227,.45);transform:scale(1.01)}
+.upload-area.is-dragging .upload-icon-area{background:var(--primary);color:#fff;transform:translateY(-1px)}
+.upload-icon-area{width:34px;height:34px;margin:0;border-radius:10px;background:#fff;color:var(--primary)}
+.upload-copy{min-width:0}
+.upload-text{font-size:11.5px;font-weight:600;color:var(--foreground)}
+.upload-hint{font-size:9.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upload-files{grid-column:1/-1;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.upload-formats{display:none}
+.btn-cta{grid-column:3;align-self:end;width:148px;height:46px;border-radius:23px;font-size:12px;box-shadow:none;gap:6px}
+.btn-primary:hover{transform:none;background:var(--primary-hover)}
+.advanced-panel{grid-column:1/-1;border-top:1px solid var(--border-subtle);padding:10px 6px 0}
+.advanced-panel summary{cursor:pointer;list-style:none;font-size:10.5px;font-weight:500;color:#86868b;display:flex;align-items:center;justify-content:space-between}
+.advanced-panel summary::-webkit-details-marker{display:none}
+.advanced-content{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding-top:12px}
+.config-info{font-size:10px;color:#86868b;line-height:1.6;align-self:end;padding-bottom:7px}
+.progress-panel{max-width:920px;margin:52px auto 0;background:#fff;border:1px solid var(--border);border-radius:24px;padding:22px 24px;box-shadow:var(--shadow-xs)}
+.progress-title{text-align:center;font-size:12px;font-weight:600;color:var(--foreground);text-transform:none;letter-spacing:0;margin-bottom:18px}
+.progress-steps{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.progress-step{display:flex;flex-direction:column;justify-content:center;gap:7px;padding:8px 4px;text-align:center;border-radius:12px;font-size:10.5px}
+.progress-indicator{width:22px;height:22px;border-radius:50%;margin:0 auto}
+.loading-shell{max-width:980px;margin:100px auto 0;padding:30px;background:#fff;border:1px solid var(--border);border-radius:26px}
+#clarifyState,#resultsArea{max-width:1080px;margin:58px auto 0}
+.clarify-card{border-radius:24px}
+.results-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.results-head h1{font-size:28px;letter-spacing:-.04em}
+.stats-row{grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.stat-card{border-radius:18px;padding:18px 20px;box-shadow:none}
+.stat-value{font-size:25px}
+.tabs{background:rgba(255,255,255,.86);border:1px solid var(--border);border-radius:16px 16px 0 0;padding:5px 6px;gap:3px}
+.tab-btn{border:0!important;margin:0;padding:9px 15px;border-radius:11px;font-size:11px}
+.tab-btn.active{background:var(--muted);color:var(--foreground)}
+.card{border-radius:0 0 24px 24px!important;padding:30px;box-shadow:none}
+.app-footer{max-width:1120px;background:transparent;border-top:1px solid var(--border);padding:20px 24px 28px}
+@media(max-width:820px){
+  .empty-state{padding-top:44px}.workspace-card{max-width:680px;grid-template-columns:1fr 1fr}.query-section,.advanced-panel{grid-column:1/-1}.format-section{grid-column:1}.upload-section{grid-column:2}.btn-cta{grid-column:1/-1;width:100%}.stats-row{grid-template-columns:1fr 1fr}
+}
+@media(max-width:600px){
+  .navbar-inner{padding:0 16px}.nav-badge{display:none}.app-body{padding:0 16px 48px}.empty-state{padding:34px 0 56px}.eyebrow{gap:8px}.eyebrow strong{font-size:27px}.eyebrow span{font-size:12px}.hero-desc{font-size:14px;line-height:1.65}.workspace-card{margin-top:22px;padding:14px;border-radius:20px;display:flex;flex-direction:column;gap:13px}.workspace-heading{padding:2px}.query-section{padding:2px 2px 12px}textarea.sidebar-input{font-size:15px;min-height:88px}.advanced-content{grid-template-columns:1fr}.progress-panel{margin-top:34px;padding:20px 14px}.progress-steps{grid-template-columns:repeat(3,1fr)}#clarifyState,#resultsArea{margin-top:30px}.stats-row{grid-template-columns:1fr 1fr}.tabs{overflow-x:auto}.tab-btn{white-space:nowrap}.card{padding:20px}.app-footer{padding:18px 16px;display:block;line-height:1.8}
+}
+
+/* ═══════════ INTERVIEW EVIDENCE DRAWER ═══════════ */
+.bench-trigger{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 9px;border:0;border-radius:8px;background:transparent;color:var(--muted-foreground);font:500 10px/1 var(--font-sans);cursor:pointer;transition:background .15s,color .15s}
+.bench-trigger:hover,.bench-trigger:focus-visible{background:var(--muted);color:var(--foreground);outline:none}
+.bench-trigger svg{width:13px;height:13px}
+.bench-overlay{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.2);backdrop-filter:blur(3px);opacity:0;visibility:hidden;transition:opacity .22s,visibility .22s}
+.bench-overlay.open{opacity:1;visibility:visible}
+.bench-drawer{position:absolute;top:0;right:0;width:min(460px,100%);height:100%;overflow-y:auto;background:rgba(255,255,255,.97);border-left:1px solid rgba(0,0,0,.1);box-shadow:-24px 0 70px rgba(0,0,0,.12);transform:translateX(100%);transition:transform .28s cubic-bezier(.22,1,.36,1);padding:22px 24px 30px}
+.bench-overlay.open .bench-drawer{transform:translateX(0)}
+.bench-drawer-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}
+.bench-drawer-kicker{font-size:10px;font-weight:600;color:var(--primary);letter-spacing:.04em}
+.bench-close{width:30px;height:30px;border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--muted);color:var(--muted-foreground);cursor:pointer}
+.bench-close:hover,.bench-close:focus-visible{color:var(--foreground);outline:2px solid var(--ring)}
+.bench-hero{padding-bottom:24px;border-bottom:1px solid var(--border-subtle)}
+.bench-title{font-size:27px;font-weight:650;line-height:1.12;letter-spacing:-.04em}
+.bench-subtitle{margin-top:10px;font-size:12.5px;line-height:1.65;color:var(--muted-foreground)}
+.bench-status{display:inline-flex;align-items:center;gap:6px;margin-top:16px;padding:5px 9px;border-radius:999px;background:var(--success-subtle);color:var(--success);font-size:10px;font-weight:600}
+.bench-status-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.bench-score-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:20px 0}
+.bench-score{padding:14px 12px;background:var(--muted);border-radius:14px}
+.bench-score-value{font-size:21px;font-weight:650;letter-spacing:-.035em;line-height:1.1}
+.bench-score-label{margin-top:5px;font-size:9.5px;line-height:1.35;color:var(--muted-foreground)}
+.bench-section{padding:20px 0;border-top:1px solid var(--border-subtle)}
+.bench-section:first-of-type{border-top:0}
+.bench-section-title{font-size:11px;font-weight:650;margin-bottom:11px}
+.bench-case{display:grid;grid-template-columns:1fr auto;gap:8px 12px;padding:12px 0;border-bottom:1px solid var(--border-subtle)}
+.bench-case:last-child{border-bottom:0;padding-bottom:0}
+.bench-case-name{font-size:12px;font-weight:600}
+.bench-case-meta{font-size:10px;color:var(--muted-foreground);margin-top:3px}
+.bench-case-result{align-self:center;text-align:right;font-size:11px;font-weight:650;color:var(--success)}
+.bench-flow{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:9.5px;color:var(--muted-foreground)}
+.bench-flow span{padding:5px 8px;border-radius:8px;background:var(--muted);color:var(--foreground);font-weight:550}
+.bench-note{padding:13px 14px;border-radius:14px;background:#fff8e9;color:#6e4a13;font-size:10.5px;line-height:1.6}
+.bench-proof{margin-top:10px;font-size:9.5px;color:#86868b;line-height:1.65}
+body.bench-open{overflow:hidden}
+.status-banner{margin:0 0 12px;padding:10px 12px;border-radius:10px;background:var(--muted);font-size:12px}
+.status-banner.warn{background:var(--warning-subtle);color:#6e4a13}
+.status-banner.fail{background:var(--destructive-subtle);color:var(--destructive)}
+#formulaTable table{width:100%;border-collapse:collapse;font-size:12px}
+#formulaTable th,#formulaTable td{border-bottom:1px solid var(--border);padding:6px 8px;text-align:left}
+#evidenceList{display:flex;flex-wrap:wrap;gap:8px}
+@media(max-width:600px){.bench-trigger{padding:0 7px}.bench-trigger span{display:none}.bench-drawer{padding:18px 18px 28px}.bench-title{font-size:24px}.bench-score-grid{gap:6px}.bench-score{padding:12px 9px}.bench-score-value{font-size:19px}}
 </style>
 </head>
 <body>
-
-<!-- ════════ TOP NAVIGATION ════════ -->
 <nav class="navbar">
   <div class="navbar-inner">
     <a href="/" class="nav-brand">
-      <div class="nav-logo">R</div>
+      <div class="nav-logo">LF</div>
       <div class="nav-title-group">
         <span class="nav-title">LumenFin</span>
-        <span class="nav-subtitle">Enterprise Intelligence</span>
+        <span class="nav-subtitle">Evidence-grounded research agent</span>
       </div>
     </a>
     <div class="nav-right">
+      <button type="button" class="bench-trigger" id="benchTrigger" onclick="openBenchDrawer()" aria-haspopup="dialog" aria-controls="benchOverlay" aria-expanded="false" title="查看 FinAgentBench 离线验证证据">
+        <i data-lucide="shield-check"></i><span>验证</span>
+      </button>
       <div class="nav-status">
         <span class="status-dot" id="statusDot"></span>
-        <span id="statusLabel">Connecting</span>
+        <span id="statusLabel">正在连接</span>
       </div>
+      <span class="nav-badge warning" id="ragBadge" title="正在检查 RAG 存储">RAG 检查中</span>
+      <span class="nav-badge" id="dataModeBadge" title="DATA_MODE">DEMO</span>
       <span class="nav-badge" id="llmBadge">DeepSeek</span>
-      <span style="font-size:10px;color:#94a3b8;font-weight:500;">v2.2</span>
     </div>
   </div>
 </nav>
 
-<!-- ════════ BODY ════════ -->
-<div class="app-body">
-
-  <!-- ════════ SIDEBAR ════════ -->
-  <aside class="sidebar">
-
-    <div class="sidebar-section">
-      <div class="sidebar-label">Analysis Query</div>
-      <textarea class="sidebar-input" id="query" placeholder="输入你的尽调问题（建议写明公司 + 财年，例如：NVIDIA FY2025 数据中心收入与毛利率趋势）" rows="5"></textarea>
+<div class="bench-overlay" id="benchOverlay" aria-hidden="true" onclick="benchBackdropClose(event)">
+  <aside class="bench-drawer" role="dialog" aria-modal="true" aria-labelledby="benchDrawerTitle" tabindex="-1">
+    <div class="bench-drawer-head">
+      <div class="bench-drawer-kicker">FINAGENTBENCH · OFFLINE REPLAY</div>
+      <button type="button" class="bench-close" id="benchClose" onclick="closeBenchDrawer()" aria-label="关闭验证面板"><i data-lucide="x"></i></button>
     </div>
-    <div class="shortcut-hint">Ctrl+Enter to submit</div>
 
-    <div class="sidebar-section">
-      <div class="sidebar-label">报告模式 / Report Mode</div>
-      <div class="report-mode-row" style="display:flex;gap:8px;flex-wrap:wrap;">
-        <label class="report-mode-option" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
-          <input type="radio" name="outputFormat" value="research_report" checked>
-          完整报告
-        </label>
-        <label class="report-mode-option" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
-          <input type="radio" name="outputFormat" value="executive_summary">
-          简版
-        </label>
-        <label class="report-mode-option" style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
-          <input type="radio" name="outputFormat" value="table_summary">
-          仅表格
-        </label>
+    <div class="bench-hero">
+      <h2 class="bench-title" id="benchDrawerTitle">FinAgentBench 怎么用</h2>
+      <p class="bench-subtitle">这是可讲解的评测闭环，不是本页这次分析的产品准确率，也不是 4/4 或 11/11 的线上成绩。</p>
+      <div class="bench-status"><span class="bench-status-dot"></span>冻结样例：正常 run 通过合同 → 注入错误被定位</div>
+    </div>
+
+    <div class="bench-score-grid" aria-label="FinAgentBench 验证摘要">
+      <div class="bench-score"><div class="bench-score-value">合同回放</div><div class="bench-score-label">离线 Case 合同分（封存 FinRun）</div></div>
+      <div class="bench-score"><div class="bench-score-value">注入检出</div><div class="bench-score-label">正文 999999% 等突变应被门禁抓住</div></div>
+      <div class="bench-score"><div class="bench-score-value">口径分离</div><div class="bench-score-label">不代表通用金融准确率</div></div>
+    </div>
+
+    <section class="bench-section">
+      <h3 class="bench-section-title">面试讲解顺序</h3>
+      <div class="bench-flow"><span>干净 FinRun 通过</span>→<span>只改可见正文注入错误数值</span>→<span>visible_supported_claims / 产品门禁定位</span></div>
+      <div class="bench-proof">历史 14 / 14 指标与 11 / 11 合成变体是回归合同证据，不是本次产品准确率，也不代表真实流量检出率。Mutation 误报应单独记录；Evaluator 是另一套本次运行检查。</div>
+    </section>
+
+    <section class="bench-section">
+      <h3 class="bench-section-title">冻结回放用例（历史合同，非本页得分）</h3>
+      <div class="bench-case">
+        <div><div class="bench-case-name">NVIDIA × AMD 对比研究</div><div class="bench-case-meta">Quality Case · 显式预期 · 离线 Case 合同分</div></div>
+        <div class="bench-case-result">历史 PASS</div>
       </div>
-      <div class="upload-hint" style="margin-top:6px;">仅按钮生效；query 里的「简版/摘要」不会自动裁剪长报告。</div>
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-label">Session ID</div>
-      <input type="text" class="sidebar-input" id="threadId" placeholder="Auto-generated..." style="min-height:auto;">
-    </div>
-
-    <div class="sidebar-section">
-      <div class="sidebar-label">Financial Documents</div>
-      <div class="upload-area" id="uploadZone">
-        <div class="upload-icon-area">
-          <i data-lucide="upload" style="width:16px;height:16px;"></i>
-        </div>
-        <div class="upload-text" id="uploadText">上传尽调材料（多格式）</div>
-        <div class="upload-hint" id="uploadHint">PDF / CSV / Excel / Markdown / JSON</div>
-        <div class="upload-formats" id="uploadFormats">
-          <span class="upload-format-chip">PDF</span>
-          <span class="upload-format-chip">CSV</span>
-          <span class="upload-format-chip">XLSX</span>
-          <span class="upload-format-chip">MD</span>
-          <span class="upload-format-chip">JSON</span>
-        </div>
-        <div class="upload-files" id="fileList"></div>
+      <div class="bench-case">
+        <div><div class="bench-case-name">AMD 单公司研究</div><div class="bench-case-meta">Compatibility Case · 派生预期</div></div>
+        <div class="bench-case-result">历史 PASS</div>
       </div>
-      <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx,.md,.markdown,.json,application/pdf,text/csv,application/json" multiple style="display:none;">
-    </div>
+    </section>
 
-    <button class="btn btn-primary btn-cta" id="submitBtn" onclick="runAnalysis()">
-      <i data-lucide="play" style="width:15px;height:15px;"></i>
-      <span id="btnText">Launch Analysis Pipeline</span>
-      <span class="spinner-sm" id="btnSpinner" style="display:none;border-top-color:#fff;border-color:rgba(255,255,255,.25);"></span>
-    </button>
-
-    <div class="progress-panel" id="progressPanel">
-      <div class="progress-title">Agent Pipeline</div>
-      <div class="progress-steps" id="progressSteps">
-        <div class="progress-step pending" data-step="supervisor"><div class="progress-indicator pending">1</div>Supervisor</div>
-        <div class="progress-step pending" data-step="retrieval"><div class="progress-indicator pending">2</div>Retrieval Agent</div>
-        <div class="progress-step pending" data-step="quant"><div class="progress-indicator pending">3</div>Quantitative Analyst</div>
-        <div class="progress-step pending" data-step="psychologist"><div class="progress-indicator pending">4</div>Psychologist Agent</div>
-        <div class="progress-step pending" data-step="critic"><div class="progress-indicator pending">5</div>Risk &amp; Compliance</div>
-        <div class="progress-step pending" data-step="synthesizer"><div class="progress-indicator pending">6</div>Synthesizer</div>
-      </div>
-    </div>
-
-    <div style="font-size:10px;color:#94a3b8;line-height:1.7;margin-top:-4px;" id="configInfo"></div>
+    <div class="bench-note"><strong>口径说明：</strong>这里展示的是已保存 FinRun 的离线 Case 合同分，不是当前页面这次分析的实时得分，也不代表通用金融准确率。刷新后请用 URL 中的 job_id 恢复本次作业。</div>
   </aside>
+</div>
 
-  <!-- ════════ MAIN PANEL ════════ -->
+<div class="app-body">
   <main class="main-panel" id="mainPanel">
-
-    <!-- Empty State -->
     <div id="emptyState" class="empty-state">
-      <div class="empty-icon">
-        <i data-lucide="bar-chart-3" style="width:28px;height:28px;"></i>
+      <div class="hero-copy">
+        <h1 class="eyebrow"><strong>LumenFin</strong><span>金融研究工作台</span></h1>
+        <p class="hero-desc">输入研究问题或上传材料。系统会完成规划、检索、计算与证据校验；证据不足时明确返回数据缺口。</p>
       </div>
-      <h2 style="font-size:22px;font-weight:800;color:var(--foreground);margin-bottom:4px;letter-spacing:-.3px;">Enterprise Financial Intelligence</h2>
-      <p style="color:var(--muted-foreground);font-size:13.5px;max-width:420px;margin:0 auto;">
-        Submit a query to activate the 6-agent collaborative analysis pipeline &mdash; quantitative assessment, sentiment extraction, risk scoring, and investment-grade report synthesis.
-      </p>
-      <div style="display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap;">
-        <span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;background:var(--primary-subtle);color:var(--primary);border:1px solid rgba(37,99,235,.15);">Profitability</span>
-        <span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;background:#faf5ff;color:#6d28d9;border:1px solid rgba(109,40,217,.15);">Risk Architecture</span>
-        <span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;background:var(--success-subtle);color:var(--success);border:1px solid rgba(5,150,105,.15);">SWOT</span>
-        <span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;background:var(--warning-subtle);color:var(--warning);border:1px solid rgba(217,119,6,.15);">Scenario Modeling</span>
-        <span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;background:var(--muted);color:var(--muted-foreground);border:1px solid var(--border);">Peer Benchmarking</span>
-      </div>
+
+      <section class="workspace-card" aria-label="发起金融研究">
+        <div class="workspace-heading">
+          <div><div class="workspace-kicker">Research task</div><h2 class="workspace-title">新建研究</h2></div>
+          <span class="step-badge">约 30–60 秒</span>
+        </div>
+
+        <div class="sidebar-section query-section">
+          <label class="sidebar-label" for="query">研究问题</label>
+          <textarea class="sidebar-input" id="query" placeholder="例如：结合 FY2025 财报，分析 NVIDIA 数据中心业务增长、毛利率变化与主要风险。" rows="4"></textarea>
+          <div class="query-examples" aria-label="示例问题">
+            <button class="query-example" type="button" onclick="useExampleQuery('NVIDIA')">NVIDIA 风险</button>
+            <button class="query-example" type="button" onclick="useExampleQuery('Apple')">Apple 盈利能力</button>
+            <button class="query-example" type="button" onclick="useExampleQuery('Compare')">公司对比</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section format-section">
+          <div class="sidebar-label">报告形式</div>
+          <div class="mode-switch" role="radiogroup" aria-label="报告形式">
+            <label class="mode-option"><input type="radio" name="outputFormat" value="research_report" checked><span>完整</span></label>
+            <label class="mode-option"><input type="radio" name="outputFormat" value="executive_summary"><span>摘要</span></label>
+            <label class="mode-option"><input type="radio" name="outputFormat" value="table_summary"><span>表格</span></label>
+          </div>
+        </div>
+
+        <div class="sidebar-section upload-section">
+          <div class="sidebar-label">研究材料 <span class="optional-label">可选</span></div>
+          <div class="upload-area" id="uploadZone" role="button" tabindex="0" aria-label="拖拽或选择研究材料" aria-describedby="uploadHint fileList">
+            <div class="upload-icon-area"><i data-lucide="paperclip" style="width:15px;height:15px;"></i></div>
+            <div class="upload-copy"><div class="upload-text" id="uploadText">拖拽文件到这里，或点击选择</div><div class="upload-hint" id="uploadHint">支持 PDF、CSV、XLSX、Markdown、JSON</div></div>
+            <div class="upload-formats" id="uploadFormats"></div>
+            <div class="upload-files" id="fileList" aria-live="polite"></div>
+          </div>
+          <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx,.md,.markdown,.json,application/pdf,text/csv,application/json" multiple style="display:none;">
+        </div>
+
+        <button class="btn btn-primary btn-cta" id="submitBtn" onclick="runAnalysis()">
+          <span id="btnText">开始分析</span>
+          <i data-lucide="arrow-up-right" style="width:15px;height:15px;"></i>
+          <span class="spinner-sm" id="btnSpinner" style="display:none;border-top-color:#fff;border-color:rgba(255,255,255,.25);"></span>
+        </button>
+
+        <details class="advanced-panel">
+          <summary><span>高级设置</span><i data-lucide="chevron-down" style="width:13px;height:13px;"></i></summary>
+          <div class="advanced-content">
+            <div class="sidebar-section"><label class="sidebar-label" for="threadId">Session ID</label><input type="text" class="sidebar-input" id="threadId" placeholder="自动生成" style="min-height:auto;"></div>
+            <div class="sidebar-section"><label class="sidebar-label" for="apiKey">API Key</label><input type="password" class="sidebar-input" id="apiKey" placeholder="输入 MAS_API_KEY" autocomplete="off" spellcheck="false" style="min-height:auto;"><div class="upload-hint">仅保留在当前页面内存中，不会写入文件或浏览器存储。</div></div>
+            <div class="config-info" id="configInfo"></div>
+          </div>
+        </details>
+      </section>
     </div>
 
-    <!-- Clarification State (HITL) -->
+    <div class="progress-panel" id="progressPanel" style="display:none;">
+      <div class="progress-title" id="progressTitle">作业运行中（等待真实节点事件）</div>
+      <div class="progress-steps" id="progressSteps"></div>
+      <div class="upload-hint" id="jobIdBadge" style="text-align:center;margin-top:8px;"></div>
+    </div>
+
     <div id="clarifyState" style="display:none;">
       <div class="clarify-card animate-in">
         <div class="clarify-title">需要补充信息</div>
-        <div class="clarify-desc">Query Planner 检测到查询缺少关键上下文。请补充后继续分析（将从同一 checkpoint 恢复）。</div>
+        <div class="clarify-desc">规划器缺少公司或期间信息。补充后将从同一 checkpoint 继续，不会重新开始。</div>
         <ul class="clarify-questions" id="clarifyQuestions"></ul>
         <div class="sidebar-section" style="margin-bottom:12px;">
-          <div class="clarify-label">Company scope（查询与上传不一致时）</div>
+          <div class="clarify-label">公司范围（查询与上传不一致时）</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('uploaded')">uploaded</button>
-            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('query')">query</button>
-            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('both')">both</button>
+            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('uploaded')">以上传材料为准</button>
+            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('query')">以问题为准</button>
+            <button type="button" class="btn btn-ghost" onclick="setCompanyScope('both')">两者都分析</button>
           </div>
           <input type="hidden" id="clarifyCompanyScope" value="">
-          <div class="upload-hint" id="clarifyScopeHint" style="margin-top:6px;">未选择 scope</div>
+          <div class="upload-hint" id="clarifyScopeHint" style="margin-top:6px;">尚未选择</div>
         </div>
         <div class="clarify-fields">
           <div>
-            <div class="clarify-label">Company / 公司</div>
-            <input type="text" class="sidebar-input" id="clarifyCompany" placeholder="e.g. Apple, Microsoft" style="min-height:auto;">
+            <div class="clarify-label">公司</div>
+            <input type="text" class="sidebar-input" id="clarifyCompany" placeholder="例如 Apple、Microsoft" style="min-height:auto;">
           </div>
           <div>
-            <div class="clarify-label">Time Range / 时间范围</div>
-            <input type="text" class="sidebar-input" id="clarifyTimeRange" placeholder="e.g. FY2025, 2025 年报" style="min-height:auto;">
+            <div class="clarify-label">时间范围</div>
+            <input type="text" class="sidebar-input" id="clarifyTimeRange" placeholder="例如 FY2025、2025 年报" style="min-height:auto;">
           </div>
         </div>
         <button class="btn btn-primary" id="clarifyBtn" onclick="submitClarification()">
-          <i data-lucide="message-circle" style="width:15px;height:15px;"></i>
-          <span id="clarifyBtnText">Submit Clarification &amp; Resume</span>
+          <span id="clarifyBtnText">补充并继续</span>
           <span class="spinner-sm" id="clarifySpinner" style="display:none;border-top-color:#fff;border-color:rgba(255,255,255,.25);"></span>
         </button>
       </div>
     </div>
 
-    <!-- Loading State -->
+    <div id="failState" style="display:none;">
+      <div class="clarify-card animate-in">
+        <div class="clarify-title">分析失败</div>
+        <div class="clarify-desc" id="failMessage">作业未能完成。</div>
+        <button class="btn btn-primary" type="button" onclick="clearResults()">返回重试</button>
+      </div>
+    </div>
+
     <div id="loadingState" style="display:none;">
-      <div class="card animate-in" style="margin-bottom:14px;">
+      <div class="loading-shell animate-in" style="margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
           <div class="skeleton" style="width:24px;height:24px;border-radius:var(--radius-sm);"></div>
           <div class="skeleton" style="width:220px;height:16px;"></div>
@@ -538,78 +705,86 @@ textarea.sidebar-input{min-height:100px;line-height:1.6;}
       </div>
       <div style="text-align:center;color:var(--muted-foreground);font-size:12px;padding:14px;">
         <span class="spinner-sm" style="margin-right:8px;"></span>
-        Processing through 6-agent pipeline &mdash; this may take 30-60 seconds
+        Agent 正在检索、分析并审计证据，请稍候
       </div>
     </div>
 
-    <!-- Results -->
     <div id="resultsArea" style="display:none;">
-      <!-- Header -->
-      <div class="animate-in" style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap;">
-        <h1 style="font-size:20px;font-weight:800;color:var(--foreground);margin:0;letter-spacing:-.3px;">Analysis Results</h1>
+      <div class="results-head animate-in">
+        <h1>研究结果</h1>
         <span id="resultBackend" style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:600;background:var(--primary-subtle);color:var(--primary);border:1px solid rgba(37,99,235,.15);"></span>
         <span id="resultThread" style="font-size:10px;color:#94a3b8;font-family:var(--font-mono);"></span>
-        <button class="btn btn-ghost" onclick="clearResults()" style="margin-left:auto;">Clear</button>
+        <button class="btn btn-ghost" onclick="clearResults()" style="margin-left:auto;">新建分析</button>
       </div>
 
-      <!-- Stats Row -->
       <div class="stats-row animate-in delay-1" id="statsRow"></div>
 
-      <!-- Tabs -->
+      <div class="status-banner" id="statusBanner" style="display:none;"></div>
       <div class="tabs animate-in delay-2">
-        <button class="tab-btn active" onclick="switchTab('report')">Research Report</button>
-        <button class="tab-btn" onclick="switchTab('charts')">Visual Analytics</button>
-        <button class="tab-btn" onclick="switchTab('audit')">Audit Trail</button>
-        <button class="tab-btn" onclick="switchTab('raw')">Raw Data</button>
+        <button class="tab-btn active" data-tab="answer" onclick="switchTab('answer')">简洁回答</button>
+        <button class="tab-btn" data-tab="evidence" onclick="switchTab('evidence')">证据</button>
+        <button class="tab-btn" data-tab="formula" onclick="switchTab('formula')">公式输入</button>
+        <button class="tab-btn" data-tab="report" onclick="switchTab('report')">完整报告</button>
+        <button class="tab-btn" data-tab="charts" onclick="switchTab('charts')">数据视图</button>
+        <button class="tab-btn" data-tab="audit" onclick="switchTab('audit')">执行轨迹</button>
+        <button class="tab-btn" data-tab="raw" onclick="switchTab('raw')">运行详情</button>
       </div>
 
-      <!-- Tab: Report -->
-      <div id="tab-report" class="tab-panel active">
-        <div class="card animate-in delay-2" style="border-radius:0 0 var(--radius-xl) var(--radius-xl);">
-          <div class="report" id="reportContent"></div>
+      <div id="tab-answer" class="tab-panel active">
+        <div class="card animate-in delay-2"><div class="report" id="answerContent"></div></div>
+      </div>
+      <div id="tab-evidence" class="tab-panel">
+        <div class="card animate-in delay-2">
+          <p id="evidenceNote" class="upload-hint"></p>
+          <div id="evidenceList"></div>
         </div>
       </div>
+      <div id="tab-formula" class="tab-panel">
+        <div class="card animate-in delay-2"><div id="formulaTable"></div></div>
+      </div>
 
-      <!-- Tab: Charts -->
+      <div id="tab-report" class="tab-panel">
+        <div class="card animate-in delay-2"><div class="report" id="reportContent"></div></div>
+      </div>
+
       <div id="tab-charts" class="tab-panel">
-        <div class="card animate-in delay-2" style="border-radius:0 0 var(--radius-xl) var(--radius-xl);">
+        <div class="card animate-in delay-2">
           <div class="chart-grid" id="chartGrid">
             <div class="chart-card-inner">
-              <div class="chart-title">Financial Metrics Comparison</div>
-              <div class="chart-wrap"><canvas id="chartMetrics"></canvas><div class="chart-empty" id="emptyMetrics">No comparison data available</div></div>
+              <div class="chart-title">财务指标对比</div>
+              <div class="chart-wrap"><canvas id="chartMetrics"></canvas><div class="chart-empty" id="emptyMetrics">暂无可比较数据</div></div>
             </div>
             <div class="chart-card-inner">
-              <div class="chart-title">Risk Assessment Radar</div>
-              <div class="chart-wrap"><canvas id="chartRisk"></canvas><div class="chart-empty" id="emptyRisk">No risk assessment data available</div></div>
+              <div class="chart-title">风险评估</div>
+              <div class="chart-wrap"><canvas id="chartRisk"></canvas><div class="chart-empty" id="emptyRisk">暂无风险数据</div></div>
             </div>
             <div class="chart-card-inner">
-              <div class="chart-title">Sentiment Distribution</div>
-              <div class="chart-wrap"><canvas id="chartSentiment"></canvas><div class="chart-empty" id="emptySentiment">No sentiment data available</div></div>
+              <div class="chart-title">管理层情绪</div>
+              <div class="chart-wrap"><canvas id="chartSentiment"></canvas><div class="chart-empty" id="emptySentiment">暂无情绪数据</div></div>
             </div>
             <div class="chart-card-inner">
-              <div class="chart-title">Pipeline Execution Timeline</div>
-              <div id="agentTimeline" style="max-height:260px;overflow-y:auto;"><div style="color:#94a3b8;font-size:11px;padding:24px 0;text-align:center;">No timeline data</div></div>
+              <div class="chart-title">Agent 执行时间线</div>
+              <div id="chartUnavailable" class="chart-empty" style="display:none;">离线环境未加载 Chart.js，核心结论不依赖图表 CDN。</div>
+              <div id="agentTimeline" style="max-height:260px;overflow-y:auto;"><div style="color:#94a3b8;font-size:11px;padding:24px 0;text-align:center;">暂无时间线</div></div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Tab: Audit -->
       <div id="tab-audit" class="tab-panel">
-        <div class="card animate-in delay-2" style="border-radius:0 0 var(--radius-xl) var(--radius-xl);">
+        <div class="card animate-in delay-2">
           <div class="audit-list" id="auditTimeline"></div>
           <pre id="auditContent" style="margin-top:12px;display:none;background:var(--muted);border-radius:var(--radius);padding:14px;font-size:11px;overflow-x:auto;max-height:400px;overflow-y:auto;white-space:pre-wrap;"></pre>
         </div>
       </div>
 
-      <!-- Tab: Raw -->
       <div id="tab-raw" class="tab-panel">
-        <div class="card animate-in delay-2" style="border-radius:0 0 var(--radius-xl) var(--radius-xl);">
+        <div class="card animate-in delay-2">
           <div id="manifestPanel"></div>
           <div class="raw-subtabs">
-            <button type="button" class="raw-subtab active" onclick="switchRawView('manifest')">Manifest JSON</button>
-            <button type="button" class="raw-subtab" onclick="switchRawView('full')">Full Response</button>
-            <button type="button" class="raw-subtab" onclick="switchRawView('state')">Workflow State</button>
+            <button type="button" class="raw-subtab active" data-raw="manifest" onclick="switchRawView('manifest')">运行清单</button>
+            <button type="button" class="raw-subtab" data-raw="full" onclick="switchRawView('full')">完整响应</button>
+            <button type="button" class="raw-subtab" data-raw="state" onclick="switchRawView('state')">工作流状态</button>
           </div>
           <pre id="stateContent" style="background:var(--muted);border-radius:var(--radius);padding:14px;font-size:11px;overflow-x:auto;max-height:420px;overflow-y:auto;white-space:pre-wrap;"></pre>
         </div>
@@ -619,349 +794,12 @@ textarea.sidebar-input{min-height:100px;line-height:1.6;}
 </div>
 
 <footer class="app-footer">
-  <span>LumenFin Agent v1.0</span>
-  <span>LangGraph + DeepSeek | For Research Purposes Only</span>
+  <span>LumenFin · Evidence-grounded financial research agent</span>
+  <span>仅供研究展示，不构成投资建议</span>
 </footer>
 
 <div class="toast-container" id="toastContainer"></div>
 
-<script>
-// ═══════════ INIT LUCIDE ICONS ═══════════
-lucide.createIcons();
-
-// ═══════════ GLOBALS ═══════════
-let chartInstances={},uploadedFiles=[],lastResult=null,pendingClarification=null,rawView='manifest';
-const AGENT_ORDER=['supervisor','retrieval','quant','psychologist','critic','synthesizer'];
-
-// ═══════════ HEALTH ═══════════
-async function checkHealth(){
-  try{const r=await fetch('/health');const d=await r.json();
-    document.getElementById('statusDot').className='status-dot online';
-    var marketOk=d.market_provider_ok;
-    var marketLabel=d.market_provider||'yahoo';
-    document.getElementById('statusLabel').textContent='Online · '+marketLabel+(marketOk?' OK':' down');
-    const b=document.getElementById('llmBadge');
-    b.textContent=d.llm_backend==='deepseek'?'DeepSeek':'Fallback';
-    b.className=d.llm_backend==='deepseek'?'nav-badge':'nav-badge offline';
-  }catch(e){document.getElementById('statusDot').className='status-dot offline';document.getElementById('statusLabel').textContent='Offline';}
-}
-async function loadConfig(){try{const r=await fetch('/api/v1/config');const d=await r.json();document.getElementById('configInfo').textContent='Model: '+d.deepseek_model+' | Data: '+d.market_data_provider;}catch(e){}}
-
-// ═══════════ FILE UPLOAD ═══════════
-const SUPPORTED_UPLOAD_SUFFIXES=['.pdf','.csv','.xlsx','.md','.markdown','.json'];
-function isSupportedUploadFile(file){
-  var name=(file&&file.name||'').toLowerCase();
-  return SUPPORTED_UPLOAD_SUFFIXES.some(function(ext){return name.endsWith(ext);});
-}
-function addUploadFiles(fileList){
-  var added=0,skipped=0;
-  for(var i=0;i<fileList.length;i++){
-    var f=fileList[i];
-    if(isSupportedUploadFile(f)){uploadedFiles.push(f);added++;}
-    else skipped++;
-  }
-  if(skipped)showToast('已跳过 '+skipped+' 个不支持的文件（仅 PDF/CSV/XLSX/MD/JSON）','error');
-  if(added)updateFileList();
-}
-const fi=document.getElementById('fileInput');
-fi.addEventListener('change',function(e){addUploadFiles(e.target.files);e.target.value='';});
-const uz=document.getElementById('uploadZone');
-uz.addEventListener('dragover',e=>{e.preventDefault();uz.style.borderColor='var(--primary)';});
-uz.addEventListener('dragleave',()=>{uz.style.borderColor=uploadedFiles.length?'rgba(5,150,105,.3)':'';});
-uz.addEventListener('drop',e=>{e.preventDefault();uz.style.borderColor=uploadedFiles.length?'rgba(5,150,105,.3)':'';addUploadFiles(e.dataTransfer.files);});
-uz.addEventListener('click',()=>fi.click());
-function updateFileList(){
-  var names=uploadedFiles.map(function(f){return f.name;}).join(', ');
-  document.getElementById('fileList').textContent=names;
-  if(uploadedFiles.length){
-    uz.classList.add('has-files');document.getElementById('uploadText').textContent=uploadedFiles.length+' 个文件已选择';
-    document.getElementById('uploadHint').textContent='点击可继续添加或替换';
-  }else{
-    uz.classList.remove('has-files');document.getElementById('uploadText').textContent='上传尽调材料（多格式）';
-    document.getElementById('uploadHint').textContent='PDF / CSV / Excel / Markdown / JSON';
-  }
-}
-
-// ═══════════ TOAST ═══════════
-function showToast(msg,type){type=type||'error';var el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;document.getElementById('toastContainer').appendChild(el);setTimeout(function(){el.remove();},5000);}
-
-// ═══════════ PROGRESS ═══════════
-function resetProgress(){
-  document.querySelectorAll('#progressSteps .progress-step').forEach(function(s){s.classList.remove('active','done');s.classList.add('pending');});
-  document.querySelectorAll('#progressSteps .progress-indicator').forEach(function(i){i.classList.remove('active','done');i.classList.add('pending');});
-}
-var CHK='<i data-lucide="check" style="width:12px;height:12px;"></i>';
-var ALT='<i data-lucide="alert-triangle" style="width:12px;height:12px;"></i>';
-var XMK='<i data-lucide="x" style="width:12px;height:12px;"></i>';
-function markProgress(stepName,status){
-  var step=document.querySelector('#progressSteps [data-step="'+stepName+'"]');
-  if(!step)return;
-  step.classList.remove('pending','active','done');
-  var ind=step.querySelector('.progress-indicator');ind.classList.remove('pending','active','done');
-  if(status==='active'){step.classList.add('active');ind.classList.add('active');ind.textContent='...';}
-  else if(status==='ok'){step.classList.add('done');ind.classList.add('done');ind.innerHTML=CHK;}
-  else if(status==='blocked'||status==='needs_replan'){step.classList.add('done');ind.classList.add('done');ind.style.background='var(--destructive-subtle)';ind.style.color='var(--destructive)';ind.innerHTML=XMK;}
-  lucide.createIcons();
-}
-async function runProgressFromAudit(auditLog){
-  resetProgress();
-  for(var i=0;i<AGENT_ORDER.length;i++){
-    var stepName=AGENT_ORDER[i];
-    var found=auditLog.find(function(a){return a.step===stepName;});
-    if(found){
-      markProgress(stepName,found.status);
-    }else if(i===0||auditLog.find(function(a){return a.step===AGENT_ORDER[i-1];})){
-      markProgress(stepName,'active');await new Promise(function(r){setTimeout(r,200);});
-    }
-  }
-}
-
-// ═══════════ RUN ANALYSIS ═══════════
-function selectedOutputFormat(){
-  var el=document.querySelector('input[name="outputFormat"]:checked');
-  return el?el.value:'research_report';
-}
-function setCompanyScope(scope){
-  document.getElementById('clarifyCompanyScope').value=scope;
-  document.getElementById('clarifyScopeHint').textContent='已选 company_scope='+scope;
-}
-async function runAnalysis(){
-  var query=document.getElementById('query').value.trim();
-  if(!query){showToast('Please enter an analysis query');return;}
-  var outputFormat=selectedOutputFormat();
-  var btn=document.getElementById('submitBtn'),btnText=document.getElementById('btnText'),spinner=document.getElementById('btnSpinner');
-  btn.disabled=true;btnText.textContent='Pipeline Running...';spinner.style.display='inline-block';
-  resetProgress();
-  document.getElementById('emptyState').style.display='none';
-  document.getElementById('resultsArea').style.display='none';
-  document.getElementById('clarifyState').style.display='none';
-  document.getElementById('loadingState').style.display='';
-  destroyCharts();
-
-  var progressIdx=0;
-  var progressTimer=setInterval(function(){if(progressIdx<AGENT_ORDER.length){markProgress(AGENT_ORDER[progressIdx],'active');progressIdx++;}},800);
-
-  try{
-    var r,d;
-    if(uploadedFiles.length>0){
-      var fd=new FormData();fd.append('query',query);fd.append('thread_id',document.getElementById('threadId').value||'');fd.append('export_artifacts','true');fd.append('output_format',outputFormat);
-      for(var i=0;i<uploadedFiles.length;i++)fd.append('files',uploadedFiles[i]);
-      r=await fetch('/api/v1/analyze-upload',{method:'POST',body:fd});
-    }else{
-      r=await fetch('/api/v1/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({query:query,thread_id:document.getElementById('threadId').value||undefined,export_artifacts:true,output_format:outputFormat})});
-    }
-    clearInterval(progressTimer);
-    if(!r.ok){var err=await r.json().catch(function(){return{};});throw new Error(err.detail||r.statusText);}
-    d=await r.json();lastResult=d;
-    if(d.thread_id)document.getElementById('threadId').value=d.thread_id;
-    if(d.workflow_status==='needs_clarification'){
-      document.getElementById('loadingState').style.display='none';
-      showClarificationPanel(d);
-      showToast('需要补充公司与时间范围信息','success');
-      return;
-    }
-    document.getElementById('loadingState').style.display='none';
-    renderResults(d);
-    runProgressFromAudit(d.audit_log||(d.state||{}).audit_log||[]);
-    showToast('Analysis pipeline completed successfully','success');
-  }catch(e){clearInterval(progressTimer);showToast('Pipeline failed: '+e.message);document.getElementById('loadingState').style.display='none';document.getElementById('clarifyState').style.display='none';document.getElementById('emptyState').style.display='';resetProgress();}
-  finally{btn.disabled=false;btnText.textContent='Launch Analysis Pipeline';spinner.style.display='none';}
-}
-
-// ═══════════ HITL CLARIFICATION ═══════════
-function showClarificationPanel(d){
-  pendingClarification=d;
-  document.getElementById('clarifyState').style.display='';
-  var qs=d.clarification_questions||[];
-  document.getElementById('clarifyQuestions').innerHTML=qs.length?qs.map(function(q){return'<li>'+q+'</li>';}).join(''):'<li>请补充公司与分析时间范围。</li>';
-  document.getElementById('clarifyCompany').value='';
-  document.getElementById('clarifyTimeRange').value='';
-  document.getElementById('clarifyCompanyScope').value='';
-  document.getElementById('clarifyScopeHint').textContent='未选择 scope';
-  lucide.createIcons();
-}
-async function submitClarification(){
-  if(!pendingClarification||!pendingClarification.thread_id){showToast('No pending clarification session');return;}
-  var company=document.getElementById('clarifyCompany').value.trim();
-  var timeRange=document.getElementById('clarifyTimeRange').value.trim();
-  var companyScope=document.getElementById('clarifyCompanyScope').value.trim();
-  if(!company&&!timeRange&&!companyScope){showToast('请填写公司/时间范围，或选择 company_scope');return;}
-  var btn=document.getElementById('clarifyBtn'),btnText=document.getElementById('clarifyBtnText'),spinner=document.getElementById('clarifySpinner');
-  btn.disabled=true;btnText.textContent='Resuming...';spinner.style.display='inline-block';
-  document.getElementById('clarifyState').style.display='none';
-  document.getElementById('loadingState').style.display='';
-  try{
-    var clarification={};
-    if(company)clarification.company=company;
-    if(timeRange)clarification.time_range=timeRange;
-    if(companyScope)clarification.company_scope=companyScope;
-    var r=await fetch('/api/v1/clarify',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({thread_id:pendingClarification.thread_id,clarification:clarification,export_artifacts:true})});
-    if(!r.ok){var err=await r.json().catch(function(){return{};});throw new Error(err.detail||r.statusText);}
-    var d=await r.json();lastResult=d;pendingClarification=null;
-    document.getElementById('loadingState').style.display='none';
-    renderResults(d);
-    runProgressFromAudit(d.audit_log||(d.state||{}).audit_log||[]);
-    showToast('Analysis resumed and completed','success');
-  }catch(e){document.getElementById('loadingState').style.display='none';document.getElementById('clarifyState').style.display='';showToast('Resume failed: '+e.message);}
-  finally{btn.disabled=false;btnText.textContent='Submit Clarification & Resume';spinner.style.display='none';}
-}
-
-// ═══════════ RENDER RESULTS ═══════════
-function renderResults(d){
-  document.getElementById('clarifyState').style.display='none';
-  document.getElementById('resultsArea').style.display='';
-  document.getElementById('resultBackend').textContent='Backend: '+(d.llm_backend||'unknown').toUpperCase();
-  document.getElementById('resultThread').textContent='Session: '+(d.thread_id||'-');
-  var s=d.state||{},companies=s.companies||[],metrics=s.financial_metrics||{};
-  var riskScores=s.risk_scores||{},sentiment=s.sentiment_analysis||{},auditLog=s.audit_log||d.audit_log||[];
-
-  var avgEbitda=0,countE=0;for(var ci=0;ci<companies.length;ci++){var c=companies[ci];var m=metrics[c];if(m&&m.ebitda_margin!=null){avgEbitda+=m.ebitda_margin;countE++;}}avgEbitda=countE>0?avgEbitda/countE:0;
-  var avgRisk=0,countR=0;for(var ci2=0;ci2<companies.length;ci2++){var c2=companies[ci2];var rs=riskScores[c2];if(rs){var vals=Object.values(rs);if(vals.length>0){avgRisk+=vals.reduce(function(a,b){return a+b;},0)/vals.length;countR++;}}}avgRisk=countR>0?avgRisk/countR:0;
-  var bullCount=0;for(var ci3=0;ci3<companies.length;ci3++){if(sentiment[companies[ci3]]&&sentiment[companies[ci3]].label==='bullish')bullCount++;}
-
-  document.getElementById('statsRow').innerHTML=[
-    {v:companies.length,l:'Companies',s:'Under analysis',sc:'var(--foreground)',dc:''},
-    {v:(avgEbitda*100).toFixed(1)+'%',l:'Avg EBITDA Margin',s:avgEbitda>0.25?'Strong':avgEbitda>0.12?'Adequate':'Weak',sc:avgEbitda>0.25?'var(--success)':avgEbitda>0.12?'var(--warning)':'var(--destructive)',dc:avgEbitda>0.25?'text-success':avgEbitda>0.12?'text-warning':'text-destructive'},
-    {v:avgRisk.toFixed(1)+' /10',l:'Composite Risk Score',s:avgRisk<4?'Low Risk':avgRisk<6.5?'Moderate':'Elevated',sc:avgRisk<4?'var(--success)':avgRisk<6.5?'var(--warning)':'var(--destructive)',dc:avgRisk<4?'text-success':avgRisk<6.5?'text-warning':'text-destructive'},
-    {v:bullCount+'/'+companies.length,l:'Bullish Sentiment',s:bullCount>companies.length/2?'Optimistic':'Mixed',sc:bullCount>companies.length/2?'var(--success)':'var(--muted-foreground)',dc:bullCount>companies.length/2?'text-success':'text-muted'},
-  ].map(function(x){return'<div class="stat-card"><div class="stat-value" style="color:'+x.sc+'">'+x.v+'</div><div class="stat-label">'+x.l+'</div><div class="stat-desc '+x.dc+'">'+x.s+'</div></div>';}).join('');
-
-  document.getElementById('reportContent').innerHTML=markdownToHtml(d.final_report||'');
-  document.getElementById('auditContent').textContent=JSON.stringify(auditLog,null,2);
-  renderManifestPanel(d);
-  switchRawView('manifest');
-  document.getElementById('auditTimeline').innerHTML=auditLog.length?auditLog.map(function(e,i){
-    var iconEl=e.status==='ok'?'<i data-lucide="check-circle" style="width:14px;height:14px;"></i>':e.status==='blocked'?'<i data-lucide="x-circle" style="width:14px;height:14px;"></i>':'<i data-lucide="alert-circle" style="width:14px;height:14px;"></i>';
-    var iconCls=e.status==='ok'?'ok':e.status==='blocked'?'fail':'warn';
-    var statusColor=e.status==='ok'?'var(--success)':e.status==='blocked'?'var(--destructive)':'var(--warning)';
-    var metrics=e.latency_ms!=null?'<div class="audit-desc" style="margin-top:4px;font-family:var(--font-mono);font-size:10px;">'+e.latency_ms+'ms'+(e.tokens_in!=null?' | in:'+e.tokens_in:'')+(e.tokens_out!=null?' | out:'+e.tokens_out:'')+'</div>':'';
-    return'<div class="audit-item animate-in" style="animation-delay:'+(i*0.03)+'s;"><div class="audit-icon '+iconCls+'">'+iconEl+'</div><div class="audit-content"><div class="audit-title">'+e.step+'</div><div class="audit-desc">'+(e.detail||'')+'</div>'+metrics+'<div class="audit-status" style="color:'+statusColor+'">'+e.status.toUpperCase()+'</div></div></div>';
-  }).join(''):'<div style="text-align:center;color:#94a3b8;font-size:12px;padding:20px;">No audit events recorded</div>';
-  lucide.createIcons();
-
-  switchTab('report');setTimeout(function(){renderCharts(d);},300);
-}
-
-// ═══════════ CHARTS ═══════════
-function destroyCharts(){Object.values(chartInstances).forEach(function(c){c.destroy();});chartInstances={};}
-function renderCharts(d){
-  destroyCharts();var cd=d.chart_data||(d.state||{}).chart_data||{};
-  var tc=function(id,has){var el=document.getElementById(id);if(el){el.style.display=has?'':'none';var p=el.parentElement;if(p){var empty=p.querySelector('.chart-empty');if(empty)empty.style.display=has?'none':'';}}};
-
-  var mc=cd.metrics_comparison;
-  if(mc&&mc.datasets&&mc.datasets.length>0){var ctxM=document.getElementById('chartMetrics');if(ctxM)try{chartInstances.metrics=new Chart(ctxM.getContext('2d'),{type:'bar',data:mc,options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,padding:16,font:{size:10},color:'#64748b'}}},scales:{y:{beginAtZero:true,ticks:{callback:function(v){return v+(mc.y_suffix||'%');},color:'#94a3b8',font:{size:9}},grid:{color:'#e2e8f0'}},x:{ticks:{color:'#475569',font:{size:9,weight:'600'}},grid:{display:false}}}}});tc('chartMetrics',true);}catch(e){tc('chartMetrics',false);}else tc('chartMetrics',false);}else tc('chartMetrics',false);
-
-  var rr=cd.risk_radar;
-  if(rr&&rr.datasets&&rr.datasets.length>0){var ctxR=document.getElementById('chartRisk');if(ctxR)try{chartInstances.risk=new Chart(ctxR.getContext('2d'),{type:'radar',data:rr,options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,padding:16,font:{size:10},color:'#64748b'}}},scales:{r:{min:0,max:10,ticks:{stepSize:2,backdropColor:'transparent',color:'#94a3b8',font:{size:8}},grid:{color:'#e2e8f0'},pointLabels:{font:{size:9,weight:'500'},color:'#475569'}}}}});tc('chartRisk',true);}catch(e){tc('chartRisk',false);}else tc('chartRisk',false);}else tc('chartRisk',false);
-
-  var sd=cd.sentiment_distribution;
-  if(sd&&sd.datasets&&sd.datasets[0]&&sd.datasets[0].data&&sd.datasets[0].data.length>0){var ctxS=document.getElementById('chartSentiment');if(ctxS)try{chartInstances.sentiment=new Chart(ctxS.getContext('2d'),{type:'doughnut',data:sd,options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,padding:16,font:{size:10},color:'#64748b'}}}}});tc('chartSentiment',true);}catch(e){tc('chartSentiment',false);}else tc('chartSentiment',false);}else tc('chartSentiment',false);
-
-  var tl=cd.agent_timeline||[];document.getElementById('agentTimeline').innerHTML=tl.length?tl.map(function(e,i){return'<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border-subtle);"><span style="font-size:10px;color:#94a3b8;width:20px;font-weight:500;font-family:var(--font-mono);">'+String(i+1).padStart(2,'0')+'</span><span style="font-weight:600;font-size:11px;color:var(--foreground);flex:1;">'+e.step+'</span><span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:600;'+('background:'+(e.status==='ok'?'var(--success-subtle)':e.status==='blocked'?'var(--destructive-subtle)':'var(--warning-subtle)')+';'+'color:'+(e.status==='ok'?'var(--success)':e.status==='blocked'?'var(--destructive)':'var(--warning)')+';')+'">'+e.status+'</span></div>';}).join(''):'<div style="color:#94a3b8;font-size:11px;padding:24px 0;text-align:center;">No timeline data</div>';
-}
-
-// ═══════════ MARKDOWN ═══════════
-function markdownToHtml(md){if(!md)return'';try{return marked.parse(md)||'';}catch(e){return'<p>'+String(md).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+'</p>';}}
-
-// ═══════════ RAW / MANIFEST ═══════════
-function renderManifestPanel(d){
-  var m=d.run_manifest||{};
-  var tel=d.run_telemetry||(d.state||{}).run_telemetry||{};
-  var latency=m.total_latency_ms!=null?m.total_latency_ms:(tel.total_latency_ms||0);
-  var promptTok=m.total_prompt_tokens!=null?m.total_prompt_tokens:(tel.total_prompt_tokens||0);
-  var completionTok=m.total_completion_tokens!=null?m.total_completion_tokens:(tel.total_completion_tokens||0);
-  var score=m.evaluator_score!=null?m.evaluator_score:'—';
-  var grade=m.evaluator_grade||'';
-  var degraded=m.degraded_mode?'Yes':'No';
-  var guardrail=m.guardrail_findings!=null?m.guardrail_findings:((d.state||{}).input_guardrail_findings||[]).length;
-
-  var metrics=[
-    {k:'Workflow',v:(m.workflow_status||d.workflow_status||'—')},
-    {k:'Latency',v:latency+' ms'},
-    {k:'Tokens In/Out',v:promptTok+' / '+completionTok},
-    {k:'Evaluator',v:score+(grade?' ('+grade+')':'')},
-    {k:'Degraded',v:degraded},
-    {k:'Guardrail Hits',v:String(guardrail)},
-    {k:'Started',v:(m.started_at||'—').replace('T',' ').slice(0,19)},
-    {k:'Ended',v:(m.ended_at||'—').replace('T',' ').slice(0,19)},
-  ];
-  var metricsHtml='<div class="manifest-section-title">Run Manifest</div><div class="manifest-grid">'+metrics.map(function(x){
-    return'<div class="manifest-item"><div class="manifest-key">'+x.k+'</div><div class="manifest-val">'+x.v+'</div></div>';
-  }).join('')+'</div>';
-
-  var ds=m.data_sources||{};
-  var dataSourcesHtml='';
-  if(Object.keys(ds).length){
-    var dsRows=[
-      {k:'Structured',v:ds.structured||'—'},
-      {k:'Market',v:(ds.market||'—')+(ds.market_ok===true?' ✓':ds.market_ok===false?' ✗':'')},
-      {k:'RAG',v:ds.rag||'—'},
-      {k:'LLM',v:ds.llm||'—'},
-      {k:'Embedding',v:ds.embedding||'—'},
-      {k:'Tool transport',v:ds.tool_transport||ds.tool_backend||'—'},
-      {k:'PDF',v:ds.pdf_uploaded?'yes':'no'},
-      {k:'Structured',v:ds.structured_uploaded?'yes':'no'},
-      {k:'Markdown',v:ds.markdown_uploaded?'yes':'no'},
-      {k:'Formats',v:(ds.upload_formats&&ds.upload_formats.length)?ds.upload_formats.join(', '):'—'},
-    ];
-    dataSourcesHtml='<div class="manifest-section-title">Data Sources</div><div class="manifest-grid" style="grid-template-columns:repeat(4,1fr);">'+dsRows.map(function(x){
-      return'<div class="manifest-item"><div class="manifest-key">'+x.k+'</div><div class="manifest-val">'+x.v+'</div></div>';
-    }).join('')+'</div>';
-  }
-
-  var arts=m.artifacts||d.artifacts||{};
-  var artifactRows=Object.keys(arts).filter(function(k){return arts[k];}).map(function(k){
-    return'<div style="font-size:10px;font-family:var(--font-mono);padding:4px 0;border-bottom:1px solid var(--border-subtle);"><span style="color:var(--muted-foreground);">'+k+':</span> '+arts[k]+'</div>';
-  }).join('');
-  var artifactsHtml=artifactRows?'<div class="manifest-section-title">Exported Artifacts</div>'+artifactRows:'';
-
-  var ph=d.provider_health||{};
-  var providerHtml='';
-  if(Object.keys(ph).length){
-    providerHtml='<div class="manifest-section-title">Provider Health</div><div class="provider-grid">'+Object.keys(ph).map(function(name){
-      var p=ph[name];
-      return'<div class="provider-chip"><span><strong>'+name+'</strong> · '+p.name+'</span><span class="mode">'+(p.is_mock?'mock':'live')+'</span></div>';
-    }).join('')+'</div>';
-  }
-
-  var cp=d.checkpoint||{};
-  var checkpointHtml='';
-  if(cp&&cp.thread_id){
-    checkpointHtml='<div class="manifest-section-title">SQLite Checkpoint</div><div class="manifest-grid" style="grid-template-columns:repeat(3,1fr);">'+
-      [{k:'Status',v:cp.workflow_status||'—'},{k:'Last Node',v:cp.last_node||'—'},{k:'Updated',v:(cp.updated_at||'—').replace('T',' ').slice(0,19)}].map(function(x){
-        return'<div class="manifest-item"><div class="manifest-key">'+x.k+'</div><div class="manifest-val">'+x.v+'</div></div>';
-      }).join('')+'</div>';
-  }
-
-  document.getElementById('manifestPanel').innerHTML=metricsHtml+dataSourcesHtml+artifactsHtml+providerHtml+checkpointHtml;
-}
-
-function switchRawView(view){
-  rawView=view;
-  document.querySelectorAll('.raw-subtab').forEach(function(btn){btn.classList.remove('active');});
-  var active=document.querySelector('.raw-subtab[onclick="switchRawView(\''+view+'\')"]');
-  if(active)active.classList.add('active');
-  if(!lastResult){document.getElementById('stateContent').textContent='{}';return;}
-  var payload=lastResult;
-  if(view==='manifest')payload=lastResult.run_manifest||{};
-  else if(view==='state')payload=lastResult.state||{};
-  document.getElementById('stateContent').textContent=JSON.stringify(payload,null,2);
-}
-
-// ═══════════ TABS ═══════════
-function switchTab(name){
-  document.querySelectorAll('.tab-btn').forEach(function(t){t.classList.remove('active');});
-  document.querySelectorAll('.tab-panel').forEach(function(c){c.classList.remove('active');});
-  var tab=document.querySelector('.tab-btn[onclick="switchTab(\''+name+'\')"]');if(tab)tab.classList.add('active');
-  var panel=document.getElementById('tab-'+name);if(panel)panel.classList.add('active');
-  if(name==='charts'&&lastResult)setTimeout(function(){renderCharts(lastResult);},100);
-}
-function clearResults(){document.getElementById('resultsArea').style.display='none';document.getElementById('clarifyState').style.display='none';document.getElementById('emptyState').style.display='';destroyCharts();lastResult=null;pendingClarification=null;uploadedFiles=[];updateFileList();resetProgress();}
-
-checkHealth();loadConfig();setInterval(checkHealth,30000);
-document.getElementById('query').addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();runAnalysis();}});
-</script>
+<script src="/static/app.js"></script>
 </body>
 </html>

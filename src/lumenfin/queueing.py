@@ -16,6 +16,7 @@ for long-running workers; prefer ``reserve`` + ``ack`` / ``retry``.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -24,7 +25,9 @@ from uuid import uuid4
 from redis import Redis
 from redis.exceptions import RedisError, TimeoutError as RedisTimeoutError
 
-RetryAction = Literal["requeued", "dead_letter", "missing"]
+from .monitoring import record_queue_event
+
+RetryAction = Literal["requeued", "dead_letter", "missing", "rejected"]
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ class ReservedMessage:
     created_at: int
     reserved_at: int
     reserved_by: str
+    reservation_token: str
     last_error: str | None
     raw: str
 
@@ -48,10 +52,12 @@ class RetryResult:
 
 
 _RESERVE_LUA = """
+-- lumenfin:reserve
 local pending = KEYS[1]
 local processing = KEYS[2]
 local now = tonumber(ARGV[1])
 local worker_id = ARGV[2]
+local token = ARGV[3]
 local raw = redis.call('LPOP', pending)
 if not raw then
   return false
@@ -63,6 +69,7 @@ end
 msg['attempt'] = tonumber(msg['attempt'] or 0) + 1
 msg['reserved_at'] = now
 msg['reserved_by'] = worker_id
+msg['reservation_token'] = token
 if msg['message_id'] == nil or msg['message_id'] == '' then
   msg['message_id'] = tostring(now) .. '-' .. tostring(math.random(100000, 999999))
 end
@@ -78,12 +85,18 @@ return encoded
 """
 
 _ACK_LUA = """
+-- lumenfin:ack
 local processing = KEYS[1]
 local message_id = ARGV[1]
+local worker_id = ARGV[2]
+local token = ARGV[3]
 local items = redis.call('LRANGE', processing, 0, -1)
 for i, item in ipairs(items) do
   local ok, msg = pcall(cjson.decode, item)
   if ok and tostring(msg['message_id']) == message_id then
+    if tostring(msg['reserved_by'] or '') ~= worker_id or tostring(msg['reservation_token'] or '') ~= token then
+      return -1
+    end
     redis.call('LREM', processing, 1, item)
     return 1
   end
@@ -92,21 +105,28 @@ return 0
 """
 
 _RETRY_LUA = """
+-- lumenfin:retry
 local processing = KEYS[1]
 local pending = KEYS[2]
 local dead = KEYS[3]
 local message_id = ARGV[1]
-local error_text = ARGV[2]
-local max_attempts = tonumber(ARGV[3])
-local now = tonumber(ARGV[4])
+local worker_id = ARGV[2]
+local token = ARGV[3]
+local error_text = ARGV[4]
+local max_attempts = tonumber(ARGV[5])
+local now = tonumber(ARGV[6])
 local items = redis.call('LRANGE', processing, 0, -1)
 for i, item in ipairs(items) do
   local ok, msg = pcall(cjson.decode, item)
   if ok and tostring(msg['message_id']) == message_id then
+    if tostring(msg['reserved_by'] or '') ~= worker_id or tostring(msg['reservation_token'] or '') ~= token then
+      return cjson.encode({action='rejected', attempt=tonumber(msg['attempt'] or 0)})
+    end
     redis.call('LREM', processing, 1, item)
     msg['last_error'] = error_text
     msg['reserved_at'] = false
     msg['reserved_by'] = false
+    msg['reservation_token'] = false
     local attempt = tonumber(msg['attempt'] or 0)
     if attempt >= max_attempts then
       msg['failed_at'] = now
@@ -118,6 +138,29 @@ for i, item in ipairs(items) do
   end
 end
 return cjson.encode({action='missing', attempt=0})
+"""
+
+_RENEW_LUA = """
+-- lumenfin:renew
+local processing = KEYS[1]
+local message_id = ARGV[1]
+local worker_id = ARGV[2]
+local token = ARGV[3]
+local now = tonumber(ARGV[4])
+local items = redis.call('LRANGE', processing, 0, -1)
+for i, item in ipairs(items) do
+  local ok, msg = pcall(cjson.decode, item)
+  if ok and tostring(msg['message_id']) == message_id then
+    if tostring(msg['reserved_by'] or '') ~= worker_id or tostring(msg['reservation_token'] or '') ~= token then
+      return -1
+    end
+    redis.call('LREM', processing, 1, item)
+    msg['reserved_at'] = now
+    redis.call('RPUSH', processing, cjson.encode(msg))
+    return 1
+  end
+end
+return 0
 """
 
 _RECLAIM_LUA = """
@@ -145,6 +188,7 @@ for i, item in ipairs(items) do
         msg['last_error'] = 'reclaimed_stale_processing'
         msg['reserved_at'] = false
         msg['reserved_by'] = false
+        msg['reservation_token'] = false
         local attempt = tonumber(msg['attempt'] or 0)
         if attempt >= max_attempts then
           msg['failed_at'] = now
@@ -223,9 +267,11 @@ class RedisQueueManager:
             "created_at": now,
             "reserved_at": None,
             "reserved_by": None,
+            "reservation_token": None,
             "last_error": None,
         }
         self.connection().rpush(self.pending_key, json.dumps(envelope, ensure_ascii=False))
+        record_queue_event(self.queue_name, "enqueued")
         return message_id
 
     def migrate_legacy_messages(self) -> int:
@@ -258,6 +304,7 @@ class RedisQueueManager:
 
     def try_reserve(self, worker_id: str) -> ReservedMessage | None:
         now = int(time.time())
+        token = uuid4().hex
         try:
             raw = self.connection().eval(
                 _RESERVE_LUA,
@@ -266,6 +313,7 @@ class RedisQueueManager:
                 self.processing_key,
                 now,
                 worker_id,
+                token,
             )
         except (RedisTimeoutError, TimeoutError, ConnectionError, OSError, RedisError):
             self.reset_connection()
@@ -274,6 +322,7 @@ class RedisQueueManager:
             return None
         text = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
         data = json.loads(text)
+        record_queue_event(self.queue_name, "reserved")
         return ReservedMessage(
             message_id=str(data["message_id"]),
             payload=dict(data.get("payload") or {}),
@@ -281,6 +330,7 @@ class RedisQueueManager:
             created_at=int(data.get("created_at") or now),
             reserved_at=int(data.get("reserved_at") or now),
             reserved_by=str(data.get("reserved_by") or worker_id),
+            reservation_token=str(data.get("reservation_token") or token),
             last_error=data.get("last_error"),
             raw=text,
         )
@@ -296,18 +346,48 @@ class RedisQueueManager:
                 return None
             time.sleep(0.05)
 
-    def ack(self, message_id: str, worker_id: str | None = None) -> bool:
-        """Remove message from processing. Idempotent: missing id returns False."""
-        del worker_id  # ownership is enforced at business layer; ACK matches message_id.
+    def ack(
+        self,
+        message_id: str,
+        worker_id: str | None = None,
+        reservation_token: str | None = None,
+    ) -> bool:
+        """Remove message from processing if owner+token match. Missing/stolen returns False."""
+        if not worker_id or not reservation_token:
+            record_queue_event(self.queue_name, "ack_rejected")
+            return False
         try:
-            removed = self.connection().eval(_ACK_LUA, 1, self.processing_key, message_id)
+            removed = self.connection().eval(
+                _ACK_LUA,
+                1,
+                self.processing_key,
+                message_id,
+                worker_id,
+                reservation_token,
+            )
         except (RedisTimeoutError, TimeoutError, ConnectionError, OSError, RedisError):
             self.reset_connection()
             raise
-        return int(removed or 0) == 1
+        code = int(removed or 0)
+        if code == 1:
+            record_queue_event(self.queue_name, "acked")
+            return True
+        record_queue_event(self.queue_name, "ack_rejected" if code < 0 else "ack_miss")
+        return False
 
-    def retry(self, message_id: str, worker_id: str, error: str) -> RetryResult:
-        del worker_id
+    def ack_reserved(self, reserved: ReservedMessage) -> bool:
+        return self.ack(reserved.message_id, reserved.reserved_by, reserved.reservation_token)
+
+    def retry(
+        self,
+        message_id: str,
+        worker_id: str,
+        error: str,
+        reservation_token: str | None = None,
+    ) -> RetryResult:
+        if not reservation_token:
+            record_queue_event(self.queue_name, "rejected")
+            return RetryResult(action="rejected", message_id=message_id, attempt=0, last_error=error)
         now = int(time.time())
         raw = self.connection().eval(
             _RETRY_LUA,
@@ -316,18 +396,57 @@ class RedisQueueManager:
             self.pending_key,
             self.dead_letter_key,
             message_id,
+            worker_id,
+            reservation_token,
             error[:2000],
             int(self.max_attempts),
             now,
         )
         text = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
         data = json.loads(text)
-        return RetryResult(
+        result = RetryResult(
             action=str(data.get("action") or "missing"),  # type: ignore[arg-type]
             message_id=message_id,
             attempt=int(data.get("attempt") or 0),
             last_error=error,
         )
+        record_queue_event(self.queue_name, result.action)
+        return result
+
+    def retry_reserved(self, reserved: ReservedMessage, error: str) -> RetryResult:
+        return self.retry(
+            reserved.message_id,
+            reserved.reserved_by,
+            error,
+            reserved.reservation_token,
+        )
+
+    def renew(
+        self,
+        message_id: str,
+        worker_id: str,
+        reservation_token: str,
+    ) -> bool:
+        now = int(time.time())
+        try:
+            updated = self.connection().eval(
+                _RENEW_LUA,
+                1,
+                self.processing_key,
+                message_id,
+                worker_id,
+                reservation_token,
+                now,
+            )
+        except (RedisTimeoutError, TimeoutError, ConnectionError, OSError, RedisError):
+            self.reset_connection()
+            return False
+        renewed = int(updated or 0) == 1
+        record_queue_event(self.queue_name, "renewed" if renewed else "renew_rejected")
+        return renewed
+
+    def renew_reserved(self, reserved: ReservedMessage) -> bool:
+        return self.renew(reserved.message_id, reserved.reserved_by, reserved.reservation_token)
 
     def reclaim_stale(self) -> dict[str, int]:
         now = int(time.time())
@@ -347,10 +466,13 @@ class RedisQueueManager:
             return {"reclaimed": 0, "dead_lettered": 0}
         text = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
         data = json.loads(text)
-        return {
+        result = {
             "reclaimed": int(data.get("reclaimed") or 0),
             "dead_lettered": int(data.get("dead_lettered") or 0),
         }
+        record_queue_event(self.queue_name, "reclaimed", result["reclaimed"])
+        record_queue_event(self.queue_name, "dead_lettered", result["dead_lettered"])
+        return result
 
     def list_dead_letters(self, *, limit: int = 50) -> list[dict[str, Any]]:
         raw_items = self.connection().lrange(self.dead_letter_key, 0, max(0, limit - 1))
@@ -378,10 +500,54 @@ class RedisQueueManager:
             reserved = self.reserve(timeout_seconds=0, worker_id="legacy-dequeue")
             if reserved is None:
                 return None
-            self.ack(reserved.message_id)
+            self.ack(reserved.message_id, reserved.reserved_by, reserved.reservation_token)
             return reserved.payload
         _, raw_payload = result
         parsed = json.loads(raw_payload.decode("utf-8"))
         if isinstance(parsed, dict) and "payload" in parsed and "message_id" in parsed:
             return dict(parsed.get("payload") or {})
         return parsed
+
+
+class ReservationHeartbeat:
+    """Renew a queue reservation until the owner finishes or the lease is stolen."""
+
+    def __init__(
+        self,
+        queue: RedisQueueManager,
+        reserved: ReservedMessage,
+        *,
+        interval_seconds: float,
+        on_renew: Any | None = None,
+    ) -> None:
+        self._queue = queue
+        self._reserved = reserved
+        self._interval = max(0.05, float(interval_seconds))
+        self._on_renew = on_renew
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.renewals = 0
+        self.lost = False
+
+    def __enter__(self) -> "ReservationHeartbeat":
+        self._thread = threading.Thread(target=self._run, name="queue-lease-heartbeat", daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            if not self._queue.renew_reserved(self._reserved):
+                self.lost = True
+                return
+            self.renewals += 1
+            if callable(self._on_renew):
+                try:
+                    self._on_renew()
+                except Exception:
+                    continue
+

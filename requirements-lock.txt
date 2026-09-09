@@ -164,6 +164,8 @@ pyarrow==25.0.0
     # via milvus-lite
 pycparser==3.0
     # via cffi
+prometheus-client==0.26.0
+    # via lumenfin-agent (pyproject.toml)
 pydantic==2.13.4
     # via
     #   fastapi

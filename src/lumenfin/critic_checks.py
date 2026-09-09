@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from .artifacts import Violation
+from .task_spec import task_spec_from_state
 
 
 _DISCLAIMER_PATTERNS = (
@@ -28,9 +29,10 @@ def check_data_completeness(state: dict[str, Any]) -> list[Violation]:
     financial_metrics = state.get("financial_metrics") or {}
     sentiment_analysis = state.get("sentiment_analysis") or {}
 
+    spec = task_spec_from_state(state)
     for company in companies:
         name = str(company)
-        if name not in financial_metrics:
+        if name not in financial_metrics and not spec.skip_quant:
             violations.append(
                 Violation(
                     code="missing_quantitative_results",
@@ -73,6 +75,8 @@ def check_retrieval_provenance(state: dict[str, Any]) -> list[Violation]:
         overall = float(confidence.get("overall") or 0.0)
 
         if structured_source == "none":
+            if task_spec_from_state(state).allow_risk_without_ratios:
+                continue
             violations.append(
                 Violation(
                     code="missing_structured_data",

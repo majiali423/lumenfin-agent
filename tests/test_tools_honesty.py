@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
 
 from lumenfin.tools import (
     analyze_sentiment,
+    build_chart_data,
     quotes_are_weak_for_llm,
     retrieve_company_payload,
     summarize_document_context,
@@ -19,6 +20,28 @@ from lumenfin.tools import (
 
 
 class ToolsHonestyTestCase(unittest.TestCase):
+    def test_chart_summary_preserves_values_and_missingness_for_compact_api(self) -> None:
+        chart_data = build_chart_data(
+            ["NVIDIA", "MissingCo"],
+            {"NVIDIA": {"ebitda_margin": 0.6385}},
+            {"NVIDIA": {"label": "neutral"}},
+            {"NVIDIA": {"financial_risk": 1.5, "operational_risk": 6.2, "market_risk": 6.2}},
+            [],
+        )
+        summary = chart_data["summary_stats"]
+        self.assertEqual(summary["company_count"], 2)
+        self.assertEqual(summary["avg_ebitda_margin"], 0.6385)
+        self.assertEqual(summary["ebitda_company_count"], 1)
+        self.assertEqual(summary["avg_risk_score"], 4.6333)
+        self.assertEqual(summary["risk_company_count"], 1)
+        self.assertEqual(summary["bullish_count"], 0)
+        self.assertEqual(summary["sentiment_company_count"], 1)
+
+        empty = build_chart_data(["MissingCo"], {}, {}, {}, [])["summary_stats"]
+        self.assertIsNone(empty["avg_ebitda_margin"])
+        self.assertIsNone(empty["avg_risk_score"])
+        self.assertEqual(empty["sentiment_company_count"], 0)
+
     def test_narrative_only_upload_is_not_document_extracted(self) -> None:
         docs = [
             {

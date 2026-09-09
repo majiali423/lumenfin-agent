@@ -198,6 +198,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         elapsed = round(time.perf_counter() - started, 2)
         db_path = output_dir / "milvus_lite.db"
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+        # Resume sessions only count newly indexed docs; prefer checkpoint totals.
+        if checkpoint.exists():
+            previous = json.loads(checkpoint.read_text(encoding="utf-8"))
+            sealed_totals = dict(previous.get("totals") or {})
+            if sealed_totals:
+                for key, value in totals.items():
+                    sealed_totals.setdefault(key, value)
+                totals = sealed_totals
         seal = {
             "schema_version": "ledger_public_holdout_index_seal.v1",
             "status": "SEALED",
@@ -228,7 +239,11 @@ def main(argv: list[str] | None = None) -> int:
             "canary": canary,
             "input_access_audit": dry["input_access_audit"],
             "milvus_db_sha256": sha256_path(db_path) if db_path.exists() else "",
-            "milvus_db_bytes": db_path.stat().st_size if db_path.exists() else 0,
+            "milvus_db_bytes": (
+                sum(p.stat().st_size for p in db_path.rglob("*") if p.is_file())
+                if db_path.is_dir()
+                else (db_path.stat().st_size if db_path.exists() else 0)
+            ),
             "holdout_consumed": False,
         }
         atomic_write_json(output_dir / "index_seal.json", seal)

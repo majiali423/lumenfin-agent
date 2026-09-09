@@ -672,8 +672,8 @@ def run_ack_idempotency(settings: IntegrationSettings, log_dir: Path) -> dict[st
         message_id = queue.enqueue({"hello": "world"})
         reserved = queue.reserve(timeout_seconds=2, worker_id="ack-tester")
         assert reserved is not None
-        first = queue.ack(reserved.message_id, "ack-tester")
-        second = queue.ack(reserved.message_id, "ack-tester")
+        first = queue.ack_reserved(reserved)
+        second = queue.ack_reserved(reserved)
         out.update(
             {
                 "message_id": message_id,

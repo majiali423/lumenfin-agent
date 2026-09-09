@@ -105,6 +105,24 @@ class FinancialGroundingMergeTests(unittest.TestCase):
 
 
 class FinancialGroundingRetrieveTests(unittest.TestCase):
+    def test_document_without_supply_chain_evidence_remains_unknown(self) -> None:
+        payload = retrieve_company_payload(
+            "NVIDIA",
+            document_contexts=[
+                {
+                    "detected_companies": ["NVIDIA"],
+                    "filename": "nvidia.pdf",
+                    "excerpt": "Revenue and gross margin commentary.",
+                    "text": "Revenue and gross margin commentary.",
+                }
+            ],
+            allow_sample_data=False,
+            fetch_sec_fundamentals=False,
+            fetch_live_fundamentals=False,
+        )
+        self.assertEqual(payload["supply_chain"]["risk_level"], "unknown")
+        self.assertTrue(payload["supply_chain"]["signals"])
+
     def test_partial_upload_gap_fills_from_issuer_sec(self) -> None:
         """Partial PDF hints must not block issuer SEC companyfacts fill."""
         docs = [

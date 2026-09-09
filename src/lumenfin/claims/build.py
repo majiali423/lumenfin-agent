@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from ..metrics_schema import get_fundamental, period_label_from_meta
-from ..tools import AST_RATIO_KEYS, has_computable_fundamentals
+from ..quant_contract import AST_RATIO_KEYS, has_computable_fundamentals
 from .binding import _collect_evidence_pool, _prefer_refs_for_values, _verify_numeric
 from .models import (
     FORMULA_INPUTS,
@@ -348,7 +348,8 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
             else str(risk_c.value)
         )
         claim.statement = (
-            f"{company} supports a {stance} based on verified {profit.metric_name} "
+            f"{company} supports a {stance} based on verified "
+            f"{METRIC_LABELS.get(profit.metric_name, profit.metric_name)} "
             f"({_fmt_pct(profit_v)}) and verified risk screen ({risk_label})."
         )
         claim.evidence_refs = list(profit.evidence_refs[:1]) + list(risk_c.evidence_refs[:1])
@@ -460,7 +461,12 @@ def format_verified_claims_ledger(claims: list[Claim]) -> list[str]:
     lines.append("| Entity | Type | Statement | Source |")
     lines.append("|--------|------|-----------|--------|")
     for claim in verified:
-        cite = humanize_citation(claim.primary_citation).replace("|", "/")
+        raw = str(claim.primary_citation or "").replace("|", "/")
+        human = humanize_citation(claim.primary_citation).replace("|", "/")
+        if raw:
+            cite = f"{human} [{raw}]" if human and human != raw else f"[{raw}]"
+        else:
+            cite = human
         stmt = claim.statement.replace("|", "/")
         lines.append(
             f"| {claim.entity} | {claim.claim_type} | {stmt} | {cite} |"

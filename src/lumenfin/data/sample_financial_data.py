@@ -1,3 +1,7 @@
+# Catalog vintage for demo fundamentals. Independent of the user query:
+# a FY2024 request must not be treated as an exact sample match.
+SAMPLE_FUNDAMENTALS_FISCAL_YEAR = 2025
+
 SAMPLE_FINANCIAL_DATA = {
     "Apple": {
         "market_data": {

@@ -86,3 +86,6 @@ class FinanceState(TypedDict, total=False):
     verified_claims: list[dict[str, Any]]
     claim_binding: dict[str, Any]
     structured_answer: dict[str, Any]
+    task_spec: dict[str, Any]
+    bounded_repair_enabled: bool
+    bounded_repair_trace: list[dict[str, Any]]

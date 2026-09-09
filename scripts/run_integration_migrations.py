@@ -18,6 +18,7 @@ MIGRATIONS = [
     ROOT / "migrations" / "postgresql" / "001_add_workflow_checkpoint_revision.sql",
     ROOT / "migrations" / "postgresql" / "002_add_rag_index_lease.sql",
     ROOT / "migrations" / "postgresql" / "003_add_tenant_ownership.sql",
+    ROOT / "migrations" / "postgresql" / "004_add_analysis_job_execution.sql",
 ]
 
 
@@ -48,11 +49,11 @@ def wait_for_postgres(database_url: str, *, timeout_seconds: float = 90.0) -> No
 
 
 def bootstrap_tables(database_url: str) -> None:
-    """Create current ORM tables when the database is empty."""
-    from lumenfin.database import Base, JobRepository
+    """Create missing ORM tables on an empty database without app-layer schema validation."""
+    from lumenfin.database import create_schema_engine
 
-    repo = JobRepository(database_url)
-    Base.metadata.create_all(repo.engine)
+    engine = create_schema_engine(database_url)
+    engine.dispose()
 
 
 def apply_sql_files(database_url: str, files: list[Path]) -> list[dict[str, str]]:

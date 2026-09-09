@@ -13,6 +13,7 @@ from .clarification import merge_clarification_into_query
 from .config import AppConfig
 from .agents import AgentRuntime
 from .planning import build_query_plan
+from .task_spec import task_spec_from_state
 from .skills import get_skill_specs
 from .knowledge_store import InMemoryKnowledgeStore
 from .llm import BaseLLMClient, build_llm_client
@@ -38,9 +39,25 @@ def route_after_query_planner(state: FinanceState) -> str:
 
 
 def route_after_retrieval(state: FinanceState) -> str:
+    spec = task_spec_from_state(state)
+    if state.get("fatal_data_gap"):
+        if state.get("bounded_repair_enabled") and spec.requires_ast_ratios:
+            return "bounded_repair"
+        return "claim_binder"
+    if state.get("replan_reason"):
+        return "appendix_replan"
+    if spec.skip_quant:
+        return "psychologist"
+    return "quant"
+
+
+def route_after_bounded_repair(state: FinanceState) -> str:
+    spec = task_spec_from_state(state)
     if state.get("fatal_data_gap"):
         return "claim_binder"
-    return "appendix_replan" if state.get("replan_reason") else "quant"
+    if spec.skip_quant:
+        return "psychologist"
+    return "quant"
 
 
 def route_after_quant(state: FinanceState) -> str:
@@ -100,6 +117,7 @@ def _base_initial_state(
         "retries": 0,
         "degraded_mode": False,
         "fatal_data_gap": False,
+        "bounded_repair_enabled": app_config.bounded_repair_enabled,
         "partial_data_gap": False,
         "data_gap_detail": "",
         "coverage_matrix": {},
@@ -177,6 +195,10 @@ class LumenFinAgentSystem:
             data_mode=self.app_config.data_mode,
             fetch_live_fundamentals=self.app_config.fetch_live_fundamentals,
             fetch_sec_fundamentals=self.app_config.fetch_sec_fundamentals,
+            task_spec_gating=self.app_config.task_spec_gating,
+            bounded_repair_enabled=self.app_config.bounded_repair_enabled,
+            bounded_repair_max_steps=self.app_config.bounded_repair_max_steps,
+            bounded_repair_max_tool_calls=self.app_config.bounded_repair_max_tool_calls,
         )
         self.checkpointer = InMemorySaver()
         self.graph = self._build_graph()
@@ -188,6 +210,7 @@ class LumenFinAgentSystem:
         workflow.add_node("await_clarification", self.runtime.await_clarification)
         workflow.add_node("supervisor", self.runtime.supervisor)
         workflow.add_node("retrieval", self.runtime.retrieval)
+        workflow.add_node("bounded_repair", self.runtime.bounded_repair)
         workflow.add_node("quant", self.runtime.quantitative_analyst)
         workflow.add_node("psychologist", self.runtime.psychologist)
         workflow.add_node("critic", self.runtime.critic)
@@ -212,7 +235,18 @@ class LumenFinAgentSystem:
         workflow.add_conditional_edges(
             "retrieval",
             route_after_retrieval,
-            {"quant": "quant", "appendix_replan": "appendix_replan", "claim_binder": "claim_binder"},
+            {
+                "quant": "quant",
+                "psychologist": "psychologist",
+                "appendix_replan": "appendix_replan",
+                "claim_binder": "claim_binder",
+                "bounded_repair": "bounded_repair",
+            },
+        )
+        workflow.add_conditional_edges(
+            "bounded_repair",
+            route_after_bounded_repair,
+            {"quant": "quant", "psychologist": "psychologist", "claim_binder": "claim_binder"},
         )
         workflow.add_conditional_edges(
             "quant",
