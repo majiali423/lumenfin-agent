@@ -29,10 +29,10 @@ Recorded confirmation-50 (consumed; do not rerun):
 | nDCG@10 | 0.3461 |
 
 These are **page-level retrieval** scores. They are not answer accuracy,
-not financial Q&A accuracy, and not a product claim. `public_holdout`
-was not opened. Phase 4 remains `NOT_RUN`. A later one-shot LEDGER
-`public_holdout` E2E attempt stayed blocked: no compatible prebuilt
-index, so the split was not consumed.
+not financial Q&A accuracy, and not a product claim. FinanceBench Phase 4
+remains `NOT_RUN`. A later one-shot LEDGER `public_holdout` E2E v1 stayed
+blocked (no compatible prebuilt index). After the rc5 index sealed, v2
+ran once and is consumed — see §6.
 
 ## 3. FinAgentBench mutation
 
@@ -65,27 +65,38 @@ cases). Claim name only:
 Tracked ledger:
 [`../data/eval_rag/synthetic_alias_compliance_result.json`](../data/eval_rag/synthetic_alias_compliance_result.json).
 
-## 6. LEDGER public_holdout E2E (blocked, not consumed)
+## 6. LEDGER public_holdout E2E (v1 blocked; v2 sealed/consumed)
 
-Attempted metric name only:
+Metric name only:
 **LEDGER public_holdout held-out end-to-end verified task success**.
+
+### v1 (historical)
 
 | Field | Value |
 |-------|-------|
 | status | `BLOCKED_BEFORE_PREFLIGHT` |
 | holdout_consumed | false |
-| official preflight / remote | 0 / 0 |
 | reason | no compatible prebuilt index |
-| document re-embedding | forbidden (budget 0) |
 | config hash | `be89d18d77da01e0f2e3938ecf6c5235887e81720f5defc3f1ed55a45644674e` |
 
-A later authorized index attempt completed a zero-label dry-run
-(26 companies / 10,895 pages / 81,376 chunks; conservative fee
-≈ CNY 12.04) and then **fail-closed** before holdout consumption:
-the rc5 China DashScope endpoint was unreachable from the execution
-network. No v2 E2E run started. Details:
-[`LEDGER_PUBLIC_HOLDOUT_INDEX.md`](LEDGER_PUBLIC_HOLDOUT_INDEX.md)
-and [`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md).
+### v2 (official)
+
+| Field | Value |
+|-------|-------|
+| status | `SEALED` |
+| holdout_consumed | true |
+| cases | 100 (26 companies) |
+| strict verified E2E | 35 / 100 = 0.35 |
+| Wilson 95% CI | [0.264, 0.447] |
+| document re-embedding | 0 |
+| public_dev candidate cache | unused |
+| config hash | `233605b6f1d047ea8cd0d2a67a0e912da5df193cde8b909c338c4a424e4de01d` |
+
+Protocol:
+[`LEDGER_PUBLIC_HOLDOUT_E2E.md`](LEDGER_PUBLIC_HOLDOUT_E2E.md),
+[`LEDGER_PUBLIC_HOLDOUT_INDEX.md`](LEDGER_PUBLIC_HOLDOUT_INDEX.md).
+This is dataset-specific and single-use — **not** a general product
+accuracy claim. Do not re-open holdout.
 
 ## 7. Why the old LEDGER public/dev support metric is invalid
 
@@ -93,7 +104,8 @@ Sealed exposed public/dev shadow: 22/50 structured answers, 18 unknown
 citations. Recorded `supported_claims=0` is **not** a valid support rate:
 official scoring received empty qrels. A later read-only diagnosis found
 window mismatch (Top-20 / Top-10). There is **no repaired public/dev
-score**. Do not rerun or rescore. `public_holdout` stays closed.
+score**. Do not rerun or rescore. LEDGER `public_holdout` v2 is already
+consumed; do not authorize a second run.
 
 ## 8. Reproducible identity
 
@@ -103,7 +115,8 @@ score**. Do not rerun or rescore. `public_holdout` stays closed.
 - Dataset: `0d982240…`
 - Implementation ancestor: `f91c474…`
 - Execution HEAD: `030bf725…`
-- Holdout E2E contract: `be89d18d…` (blocked; not executed)
+- Holdout E2E v1 contract: `be89d18d…` (blocked; historical)
+- Holdout E2E v2 config: `233605b6…` (sealed; consumed)
 
 ## 9. Do not claim
 
@@ -112,7 +125,8 @@ score**. Do not rerun or rescore. `public_holdout` stays closed.
 - A repaired LEDGER public/dev score
 - That confirmation-50 Hit@5 is chatbot accuracy
 - That this canary selected a production model or tuned prompts
-- A LEDGER public_holdout E2E success rate (that run never started)
+- A LEDGER public_holdout E2E rate as **general** product accuracy
+  (v2 35/100 is dataset-specific, single-use, held-out only)
 
 ## 10. Resume bullets
 
@@ -120,9 +134,10 @@ score**. Do not rerun or rescore. `public_holdout` stays closed.
   verified `chunk_id` citations, and an ephemeral E01–E10 alias window.
 - Isolated evaluation from production: default-deny authorization,
   one-shot budgets, and no retune on exposed sets.
-- Closed an 8-case live-model alias-compliance canary (8/8) and refused a
-  LEDGER `public_holdout` E2E when no rc5-compatible prebuilt index existed,
-  instead of embedding the holdout corpus or replaying public/dev caches.
+- Closed an 8-case live-model alias-compliance canary (8/8), sealed the
+  rc5 public_holdout document index, then ran a one-shot held-out E2E
+  (35/100 strict verified) without public/dev candidate replay or a
+  second holdout consume.
 
 ## 11. 60-second talk
 
@@ -131,7 +146,7 @@ The model never sees stable chunk IDs; it can only cite E01–E10, and
 the program maps those aliases or fail-closes. I kept evaluation
 governance separate from product claims: FinanceBench numbers are
 page-level retrieval, the old LEDGER support=0 is invalid because
-qrels were unbound, and I did not rerun consumed public/dev. I also
-did not open `public_holdout` for a fake E2E score: there is no
-prebuilt holdout index matching rc5 retrieval, and re-embedding the
-corpus was out of budget, so the grant stayed closed.
+qrels were unbound, and I did not rerun consumed public/dev. When I
+later sealed an rc5-compatible holdout index, I ran one held-out E2E
+under a frozen contract (35/100 strict verified) and marked the split
+consumed — still not a general product accuracy claim.

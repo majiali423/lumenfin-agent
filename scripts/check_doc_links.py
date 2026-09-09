@@ -25,6 +25,10 @@ TARGETS = [
     "docs/AUTUMN_RECRUITING_EVIDENCE.md",
     "docs/LEDGER_PUBLIC_HOLDOUT_E2E.md",
     "docs/LEDGER_PUBLIC_HOLDOUT_INDEX.md",
+    "docs/EVIDENCE_INDEX.md",
+    "docs/RESUME_DRAFT.md",
+    "docs/PHASED_CHANGE_SUMMARY.md",
+    "docs/PHASED_IMPROVEMENT_LOG.md",
 ]
 LINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 

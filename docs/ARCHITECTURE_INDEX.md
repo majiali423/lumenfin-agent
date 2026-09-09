@@ -73,6 +73,7 @@ Reliability layers (current):
 
 | Doc | Purpose |
 |-----|---------|
+| [OBSERVABILITY.md](OBSERVABILITY.md) | Prometheus/Grafana operational metrics, privacy boundary, and runbook |
 | [ENCODING.md](ENCODING.md) | Windows/UTF-8 notes |
 | [PRODUCTION_BACKUP_RESTORE.md](PRODUCTION_BACKUP_RESTORE.md) | Backup / restore rehearsal |
 

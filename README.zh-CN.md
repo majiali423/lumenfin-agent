@@ -1,98 +1,128 @@
-﻿# LumenFin
+# LumenFin
 
 [English](README.md) | **中文**
 
-**证据锚定的金融研究 Agent，带有显式的 planner–critic–repair 控制流**
-
-由 LangGraph 编排的专职节点（不是彼此独立的自主 Agent）：业务规划 → 检索 →
-分析 → 检查 → 修复 → 绑定证据 → 仅综合已验证内容。
+证据锚定的金融研究 **Agent 产品**（LangGraph 专职节点，不是彼此独立的多 Agent
+集群）。兄弟评测仓
+[FinAgentBench](https://github.com/majiali423/finagentbench-demo) 只评
+**已导出的 FinRun**。那是作者自有的契约门禁，不是第三方市场榜单，也不是
+held-out 产品准确率。
 
 [![CI](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
 
-Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
-Docker Compose · pytest
+已发布包 **`0.1.0rc5`**（标签 **`v0.1.0-rc.5`**）。FinRun `1.0`。FinAgentBench pin
+**`v0.1.0-rc.3`**（required CI 同时对 **`v0.1.0-rc.4`** fail-closed）。
 
-最新已发布版本 **`0.1.0rc5`** / **`v0.1.0-rc.5`**。
-FinRun schema `1.0` · FinAgentBench 权威 pin **`v0.1.0-rc.3`** · required CI
-同时对已发布的 FinAgentBench **`v0.1.0-rc.4`** fail-closed 兼容验证 · 受控 RC，边界见
-[局限说明](docs/PRODUCTION_LIMITATIONS.md)
+**官方运行时：** GitHub Actions（Ubuntu）与本机 Windows 10/11 上的 Python
+**3.12**。classifiers 列出 3.11；required CI 只有 3.12。
+**UI：** 源码检出或 Docker（镜像 `COPY static`）。单独
+`pip install lumenfin-agent` 的 wheel **不含** 网页。
 
-[文档](docs/README.md) · [架构](docs/ARCHITECTURE.md) ·
-[局限](docs/PRODUCTION_LIMITATIONS.md) · [演示](docs/DEMO_GUIDE.md) ·
-[发布报告](docs/PORTFOLIO_RELEASE_REPORT.md) ·
-[秋招证据](docs/AUTUMN_RECRUITING_EVIDENCE.md)
-
----
-
-## 它解决什么问题
-
-常见金融 RAG demo 往往会：
-
-- 把 10-K 正文中的 peer 公司误提升为发行人范围；
-- 在没有结构化输入时编造比率；
-- 输出流畅但无引用的主张；
-- 只看最终段落时看起来“正确”。
-
-LumenFin 让这些失败模式变得**可见**，并以 **fail-closed** 方式处理：规划任务、
-获取证据、运行专职分析节点、审计完整性、在有界重试环中修复、将主张绑定到证据，
-并在缺少 fundamentals 时拒绝给出无支撑的数值结论。
+[局限](docs/PRODUCTION_LIMITATIONS.md) ·
+[架构](docs/ARCHITECTURE.md) ·
+[5 分钟演示](docs/DEMO_GUIDE.md) ·
+[证据索引](docs/EVIDENCE_INDEX.md) ·
+[变更摘要](docs/PHASED_CHANGE_SUMMARY.md) ·
+[简历草案](docs/RESUME_DRAFT.md)
 
 ---
 
-## 架构速览
+## 具体问题
 
-LangGraph 专职节点共享一个 `FinanceState`（`src/lumenfin/graph.py`）：
+一段流畅的尽调文字仍然可能：
 
-`query → plan → retrieve → analyze → critic/repair → claim bind → synthesize`
+- 把 10-K 里的 peer 提升成发行人范围；
+- 没有结构化输入就编造 EBITDA 利润率；
+- 只看最后一段时显得“正确”；
+- 正文追加 `999999%`，只核结构化 metric 的评分器仍给满分。
 
-运行时角色（不是单一线性管道）：FastAPI ↔ PostgreSQL / Milvus；
-Redis analysis 队列 → Analysis Worker；Redis index 队列 → Index Worker
-（lease + attempt fencing）。详见
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
-
-### 可靠性（设计属性）
-
-- 缺少 fundamentals 时数值主张 fail-closed
-- 进入正文前的 Claim → Evidence 绑定
-- At-least-once Redis 队列 + worker 回收（不是 exactly-once）
-- 每个 provider 调用单一重试所有者；per-process bulkhead
-- FinRun 导出供离线回放评分（不是实时市场真值源）
+LumenFin 让这些模式 **可见且 fail-closed**：规划 → 检索 → AST 安全量化（当
+TaskSpec 要求时）→ critic/repair → 绑定主张 → 只综合已验证事实。缺营收
+**不得**单独阻断有证据的 **风险** 回答；它必须阻断 **无证据的数值主张**。
 
 ---
 
-## 快速开始
+## 能看见的结果
 
-受支持的 CI Python：**3.12**。优先使用 lockfile 路径。
+离线组合演示（无需 API key）在同一进程里断言三条故事：
+
+| 演示 | 应看到什么 |
+|------|------------|
+| **A** 正常有证据回答 | 仅发行人范围、公式主张绑定输入、可导出 FinRun |
+| **B** 注入错误被抓住 | 错数 / 错主体 / 缺引用 / 缺风险被拒（**本地 claim-binder 4/4**，不是 FinAgentBench 产品准确率） |
+| **C** 缺数据局部拒绝 | 强制缺 SEC+Yahoo → `incomplete_data`，**零**编造数值主张 |
+
+网页（源码/Docker）：问题 → **简洁回答** → 证据 id → 公式输入 → **真实**
+`audit_log`。进度是 job 轮询，不是 800ms 假节点计时。刷新用 `?job=`。
+
+主张形状（节选；全文见
+[docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)）：
+
+```json
+{
+  "claim_id": "cl_num_Apple_ebitda_margin",
+  "entity": "Apple",
+  "claim_type": "numeric",
+  "value": 0.3478,
+  "unit": "ratio",
+  "period": "FY2025",
+  "verification": "verified"
+}
+```
+
+---
+
+## 5 分钟离线复现
+
+需要 **源码检出**（不是只有 wheel）。不要设置 `PYTHON_DOTENV_DISABLED=1`。
+不要覆盖已经漂移的旧 `.venv`；若 `pip show lumenfin-agent` 不是
+`0.1.0rc5` 或 `pip check` 失败，请另建虚拟环境。
+
+**1. 仅主项目**（不需要 FinAgentBench）。`--fast` 与离线 UI 不导入评测包。
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-lock.txt
 .\.venv\Scripts\python -m pip install -e . --no-deps
+.\.venv\Scripts\python -m pip show lumenfin-agent milvus-lite
+.\.venv\Scripts\python -m pip check
 copy .env.example .env
-
-# 单元套件使用 SQLite test backend。.env.example 默认 APP_ENV=dev，
-# 该模式以 PostgreSQL 为主，并默认拒绝 SQLite。
 $env:APP_ENV = "test"
-.\.venv\Scripts\python scripts\run_tests.py
 .\.venv\Scripts\python scripts\run_portfolio_demo.py
+.\.venv\Scripts\python scripts\run_tests.py --fast
+.\.venv\Scripts\python scripts\start_offline_demo_api.py
 ```
 
-启动 API（读取 `.env`，默认 `127.0.0.1:8000`）：
+然后打开 `http://127.0.0.1:8000/`。这条路径不需要 live key。
+
+**首选演示问题**（已验证的上传闭环，NVIDIA FY2025 节选）：
+
+```text
+Using uploaded files only, what is NVIDIA FY2025 operating income from the filing facts?
+```
+
+上传 `tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf`。人工 gold：营业利润
+**81.453 billion USD**（第 1 页，USD millions）。样例库 NVIDIA 为 72.4，若结果是
+72.4 则是回填而非文件。缺字段路径：同一问题上传
+`tests/fixtures/sec/minimal/nvda_narrative_only.txt`。
+
+**2. 双仓工作树**（完整测试 + 产品 v3 门禁）。v3 评分器 **还不是已发布 tag**。
+指向当前 `finagentbench-demo` 工作树，不要伪造 SHA。
 
 ```powershell
-.\.venv\Scripts\python start_api.py
+$env:FINAGENTBENCH_DIR = "<finagentbench-demo 绝对路径>"
+.\.venv\Scripts\python -m pip install -e $env:FINAGENTBENCH_DIR
+.\.venv\Scripts\python scripts\run_tests.py --skip-joint
+.\.venv\Scripts\python scripts\run_tests.py --joint-only
+cd $env:FINAGENTBENCH_DIR
+python -m unittest discover -s tests -v
+$env:LUMENFIN_ROOT = "<lumenfin-agent 绝对路径>"
+python scripts\validate_cross_repo.py --profile ci
 ```
 
-Live provider 需要把密钥放进 `.env`（切勿提交）。配置说明：
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md) · 复现冻结证据：
-[docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md)。
+`validate_cross_repo.py --profile ci` 得 100 是 **冻结样例契约**，不是产品准确率。
 
-### 评测（FinRun → FinAgentBench）
-
-FinAgentBench 是**兄弟仓库回放评测器**：对导出的 FinRun 状态与 mutation
-控件打分。它**不** import LumenFin app 代码，也不是第三方独立市场基准。
-对照 pin **`v0.1.0-rc.3`** 复现兼容性门禁
-（[majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)）：
+**3. 冻结已发布评测器**（仅 FinRun 契约）：
 
 ```powershell
 git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
@@ -102,108 +132,55 @@ $env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
 python scripts\validate_cross_repo.py --profile ci
 ```
 
-摘要记录双方 commit、FinRun schema、profile 与 core/extended mutation 结果。
-LumenFin CI 也会在 pin 的评测器 tag 上运行该门禁。FinAgentBench 是**离线合同 /
-回归门禁**，不是 held-out 产品效果。网页 Run Manifest 的 **Evaluator** 是另
-一套本次运行的本地轻量检查，同样不是 held-out 产品效果。
-
-### 外部 RAG 评测（FinanceBench + LEDGER）
-
-这是**页级检索 / packing canary**，不是 FinAgentBench，也不是产品准确率。
-FinanceBench 端到端答题（Phase 4）仍为 `NOT_RUN`。生产检索默认（chunker、
-lexical reranker）未改。
-
-- FinanceBench confirmation-50 已**消耗**：页 Hit@10 `0.62`。不要重跑或据此调参。
-  聚合：[`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json)。
-- LEDGER `public_dev` 已**封存并停止**。整页 *返回* 仅限 eval；**不要**给
-  page-parent 索引做 embedding。LEDGER `public_holdout` 一次性 E2E v2：
-  **35/100** 严格核实（Wilson 95% CI [0.264, 0.447]）；dataset-specific、
-  single-use、已消耗；**不是**通用产品准确率：
-  [`docs/LEDGER_PUBLIC_HOLDOUT_E2E.md`](docs/LEDGER_PUBLIC_HOLDOUT_E2E.md)。
-  聚合：
-  [`data/eval_rag/holdout/`](data/eval_rag/holdout/)。
-- 协议：[docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) ·
-  [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md)。
-  离线检查：[docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md)。
+CI 同时对 `v0.1.0-rc.4` fail-closed。必需 job：`offline` 跑 `--skip-joint`；
+**Product quality v3** 在 `FINAGENTBENCH_PRODUCT_REF` 为空/默认分支/rc.3/rc.4
+时是配置失败，不是跳过成功。发布顺序：评测仓先落地 v3 → 记下 SHA → 设置
+LumenFin 仓库变量 → 再依赖该 job。本轮不改远程变量。远程 Actions **未验证**。
 
 ---
 
-## 一键离线演示
+## 架构取舍（实际做了什么）
 
-确定性 · 离线 · 无需 API key · 失败时非零退出。
+- **一张 LangGraph `FinanceState`**，专职 **节点**，不是独立 Agent 网。
+  保持 FastAPI + Redis 队列 + Milvus；不再加一层 Agent 框架。
+- 作业是 **at-least-once**（reservation token + lease）。不是 exactly-once。
+- **HITL** 暂停/恢复用进程内 LangGraph `InMemorySaver`，外加持久化
+  `WorkflowCheckpointRepository`。这 **不是** 已测试的跨进程、逐节点
+  LangGraph 回放。
+- **FinAgentBench 是兄弟包**，FinRun 有版本。不把 4/4、11/11、14/14 说成
+  当前页产品准确率。
+- **TaskSpec**（默认开）：风险/叙述题不会只因缺 AST 比率而 fail-closed。
+  **有界修复** 存在，离线 ablation 后默认 **关**。
 
-```powershell
-python scripts/run_portfolio_demo.py
-```
+---
 
-| Demo | 本轮断言内容 |
-|------|-----------------------|
-| **A** 可信正常分析 | 仅发行人范围、带引用的落地主张、可导出 FinRun 的状态 |
-| **B** 隔离与错误检出 | Apple/Microsoft 保持在范围内；错误数值 / 错误实体 / 缺失引用 / 缺失风险均被拒绝（**4/4**） |
-| **C** Fail-closed | 强制缺失 SEC + Yahoo → `workflow_status = incomplete_data`，零数值主张 |
+## 效果、成本、边界
 
-该入口还会**打印**离线不复证的已验证引用（queue/worker 租户泄漏 `0`、
-provider-resilience Docker run id）；本入口不会启动 Docker 栈。完整走读：
-[docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+| 种类 | 成立的事实 | 不声称 |
+|------|------------|--------|
+| 离线 A/B/C | `run_portfolio_demo.py` 必须 exit 0 | 生产 SLA / 用户数 |
+| 单测 | 当前 dirty 工作区见 [docs/PHASED_IMPROVEMENT_LOG.md](docs/PHASED_IMPROVEMENT_LOG.md) | 每台电脑干净安装都已测 |
+| FinanceBench / LEDGER | 封存的历史 canary；不要重跑 holdout 调参 | 通用问答准确率 |
+| product-dev 集 | 36 条手写 gold；只评 **dev**；test 冻结 | 80%/95% 目标 |
+| 成本 | 离线演示用 `LocalFallbackLLM`（不耗 token） | 未预算前的 live DeepSeek/SEC/Yahoo 费用 |
 
-### 已验证 claim 长什么样
+已知缺口：保留已漂移的旧 `.venv` 时另建隔离环境核对；远程产品评分 CI
+在 `FINAGENTBENCH_PRODUCT_REF` 发布前 **未验证**；pip wheel 无 UI。
 
-已验证公式 Claim 的精简结构示例（ID 与绑定规则与
-`src/lumenfin/claims/models.py`、`src/lumenfin/claims/binding.py`
-一致；完整示例见
-[docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)）：
+封存数字与报告：[docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md)。
+运维边界：[docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)。
 
-```json
-{
-  "claim_id": "cl_num_Apple_ebitda_margin",
-  "entity": "Apple",
-  "claim_type": "numeric",
-  "statement": "Apple EBITDA margin is 34.8% for FY2025.",
-  "value": 0.3478, "unit": "ratio", "period": "FY2025",
-  "metric_name": "ebitda_margin",
-  "evidence_refs": [
-    {
-      "evidence_id": "ev_fund_Apple_ebitda_FY2025",
-      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:ebitda",
-      "source_type": "sec_companyfacts", "period": "FY2025"
-    },
-    {
-      "evidence_id": "ev_fund_Apple_revenue_FY2025",
-      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:revenue",
-      "source_type": "sec_companyfacts", "period": "FY2025"
-    }
-  ],
-  "verification": "verified",
-  "verify_reason": "Metric/period/unit-bound evidence (formula_inputs_bound); formula_inputs={'ebitda': 'ev_fund_Apple_ebitda_FY2025', 'revenue': 'ev_fund_Apple_revenue_FY2025'}"
-}
-```
+---
 
-`ebitda_margin` 是公式 Claim：必须同时绑定 `ebitda` 与 `revenue` 两条
-fundamentals 证据（见 `src/lumenfin/claims/models.py` 的 `FORMULA_INPUTS`），
-不能写成缺少 metric 的
-`ev_fund_{company}_{period}`。
+## 更深文档
 
-当没有 AST 可计算的 fundamentals 时，同一流水线会发出数据受限主张，而不是编造比率
-（完整形状见
-[docs/examples/fail_closed_data_limitation_claim.json](docs/examples/fail_closed_data_limitation_claim.json)）：
-
-```json
-{
-  "claim_id": "cl_risk_OpenAI_supply",
-  "entity": "OpenAI",
-  "claim_type": "risk_conclusion",
-  "statement": "OpenAI data-limitation risk is elevated: no AST-computable fundamentals (structured_source=none).",
-  "value": "elevated",
-  "metric_name": "data_limitation_risk",
-  "evidence_refs": [{
-    "evidence_id": "ev_gap_OpenAI",
-    "citation": "lumenfin:data_gap:OpenAI:none",
-    "source_type": "data_gap"
-  }],
-  "verification": "verified",
-  "verify_reason": "Fail-closed data-limitation risk bound to structured_source=none provenance."
-}
-```
+| 文档 | 用途 |
+|------|------|
+| [docs/README.md](docs/README.md) | 文档地图 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Graph、worker、checkpoint |
+| [docs/PHASED_CHANGE_SUMMARY.md](docs/PHASED_CHANGE_SUMMARY.md) | Phase 0–6：发现的缺陷与改动 |
+| [docs/RESUME_DRAFT.md](docs/RESUME_DRAFT.md) | 诚实简历条目 |
+| [docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md) | 历史分数、hash、报告（不删原件） |
 
 ---
 
@@ -347,50 +324,15 @@ PDF / SEC / Yahoo / market providers
 
 ---
 
-## 已验证结果（分门禁）
+## 历史门禁（索引）
 
-**不要**把这些合并成一个“准确率”数字。
+带日期的快照（含 2026-08-13 post-rc4 快照）与封存检索分数见
+[docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md)（原报告保留）。
+**不要**合成一个准确率。当前 HEAD 以
+[ci.yml](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
+与本地 `python scripts/run_tests.py` 为准。
 
-| Gate | What it measures | Result |
-|------|------------------|--------|
-| **LumenFin RC 标签回归** | 冻结的 `v0.1.0-rc.3` Linux 镜像测试 | **495 passed, 2 skipped** |
-| **LumenFin 2026-08-13 post-rc4 快照** | `v0.1.0-rc.4` 之后的有日期 Linux 镜像测试；不是无日期的“当前 main”计数 | **512 passed, 3 skipped** |
-| **FinAgentBench unit regression** | 全量 Python 测试 | **149 passed** |
-| **Infrastructure integration** | Queue/worker 多进程 Docker | **PASS**（`20260804T095357Z`） |
-| Worker-kill recovery | 被杀 worker 的任务是否需要人工重投？ | **否** — lease 过期 + attempt fencing 自动回收 |
-| Tenant leakage | 跨租户 RAG 读取 | **0** |
-| Orphan chunks / vectors | Index 补偿 | **0 / 0** |
-| **Provider fault validation** | Provider-resilience + Docker 双 API | **PASS**（`docker_20260804T100817Z`） |
-| Retry amplification across 2 API containers | 逻辑 provider 调用 → 物理 HTTP 尝试 | **20 → 25**（1.25×）；stub 精确观测到 **25** |
-| Provider unexpected failures | Scenario G | **0** |
-| **Benchmark reliability** | FinAgentBench 完成案例均分 | **92.97**（informational；在评测器 pin `v0.1.0-rc.1` 下测得） |
-| Core mutation detection | 错误实体 / 数值 / 引用 / 风险 | **4/4** |
-| **Evaluator compatibility (frozen pin)** | 冻结 FinRun 导出由 FinAgentBench `v0.1.0-rc.3` 回放 | **PASS**（schema `1.0`；评测器侧 core **4/4** 与 extended provenance/period **7/7**） |
-| **Evaluator compatibility (latest published)** | Required CI 对 FinAgentBench `v0.1.0-rc.4` 的兼容 lane | fail-closed 兼容验证；不替换 rc3 pin |
-| **Native BM25 + Qwen3** | 合成 hard negative、首次检索一致性、telemetry | **PASS**（Qwen3 Top-1/MRR `1.0/1.0`，零 fallback；**不是** FinanceBench） |
-| **FinanceBench confirmation-50** | 已消耗切分上的页级检索 | Hit@10 **0.62**；不是产品准确率；Phase 4 `NOT_RUN` |
-| **LEDGER public-dev** | 公开 KPI 检索 / packing / 生成 canary | **已封存并停止**；不是产品准确率；不要给 page-parent 索引做 embedding |
-| **LEDGER structured-citation shadow** | 暴露的 public/dev sealed-candidate replay | 已记录；执行门禁通过、引用质量门禁未通过；不是产品准确率 |
-| **Compose hardening** | 不可变镜像、UID 10001、readiness、持久化、备份、密钥扫描、优雅停止 | 受控本地 Compose **PASS** |
-
-**RC 标签**单元回归计数冻结于 2026-08-12 全量验证，并随
-`v0.1.0-rc.3` 发布；2026-08-13 post-rc4 快照是当天的 Linux 镜像 unittest
-discovery，不是当前 HEAD 的实时计数。HEAD 状态见
-[CI workflow](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)。
-RC 验证中的 LumenFin 在 UID-10001 Linux 镜像内通过
-`scripts/run_tests.py` 运行；FinAgentBench 使用 unittest discovery。直接调用
-`pytest` 可能按 subtest 产生不同计数，因此不能混用 runner 总数或快照边界。
-
-Benchmark 行仅供参考，是在更早的评测器 pin 下测得；**不是**已发布
-`v0.1.0-rc.3` 评测器给出的分数。当前 pin 验证的是兼容性：冻结 FinRun 导出可被
-FinAgentBench `v0.1.0-rc.3` 接受并回放。Required CI 另有一条对已发布
-FinAgentBench `v0.1.0-rc.4` 的 fail-closed 兼容 lane；它不替换 rc3 pin。
-FinAgentBench `master` 不是必选门禁。
-
-证据：[queue/worker](docs/QUEUE_WORKER_INTEGRATION.md) ·
-[provider resilience](docs/PROVIDER_RESILIENCE.md) ·
-[全量验证](docs/PRODUCTION_LIMITATIONS.md) ·
-[作品集发布报告](docs/PORTFOLIO_RELEASE_REPORT.md)
+运维边界：[docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md)。
 
 ---
 

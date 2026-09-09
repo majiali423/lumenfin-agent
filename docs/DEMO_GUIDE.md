@@ -23,6 +23,18 @@ The portfolio demo's "evaluator score" is an **internal LumenFin contract
 score**, not a FinAgentBench completed-case mean. For the external evaluator,
 use FinAgentBench `scripts/run_offline_demo.py` or the pinned cross-repo gate.
 
+Three interview stories map 1:1 to A / B / C: normal evidenced answer,
+injected bad output caught by the local gate, missing-data partial refuse.
+
+Web UI (source checkout or Docker — **not** `pip install` wheel):
+`python scripts/start_offline_demo_api.py`, then **upload**
+`tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf` with
+`Using uploaded files only, what is NVIDIA FY2025 operating income from the filing facts?`
+Gold is **81.453 billion USD** (hand-read; not sample 72.4). Then concise answer →
+evidence ids → formula inputs → real `audit_log` via `POST /api/v1/jobs/upload` +
+poll. Refresh uses `?job=`. There is no 800ms fake node timer. Sparse
+`nvda_narrative_only.txt` must not invent that number.
+
 The demo also prints validated references (queue/worker run, provider-resilience Docker
 run, tenant leakage 0) and the optional Docker recovery story:
 `worker A killed → automatic reclaim → worker B attempt=2 → ready`

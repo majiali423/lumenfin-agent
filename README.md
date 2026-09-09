@@ -1,104 +1,136 @@
-﻿# LumenFin
+# LumenFin
 
 **English** | [中文](README.zh-CN.md)
 
-**Evidence-grounded financial research agent with an explicit
-planner–critic–repair control flow**
-
-LangGraph-orchestrated specialist nodes (not independent autonomous agents):
-plan → retrieve → analyze → check → repair → bind evidence → synthesize only
-what is verified.
+Evidence-grounded financial research **agent product** (LangGraph specialist
+nodes, not independent multi-agent swarms). Sibling evaluator:
+[FinAgentBench](https://github.com/majiali423/finagentbench-demo) scores
+**exported FinRun traces**. That is an author-owned contract gate, not a
+third-party market benchmark and not held-out product accuracy.
 
 [![CI](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
 
-Python 3.12 · FastAPI · LangGraph · PostgreSQL · Redis · Milvus ·
-Docker Compose · pytest
+Published package **`0.1.0rc5`** (tag **`v0.1.0-rc.5`**). FinRun `1.0`. FinAgentBench pin
+**`v0.1.0-rc.3`** (CI also fail-closes **`v0.1.0-rc.4`**).
 
-Latest published release **`0.1.0rc5`** / **`v0.1.0-rc.5`**.
-FinRun schema `1.0` · FinAgentBench authoritative pin
-**`v0.1.0-rc.3`** · required CI also fail-closes against published
-FinAgentBench **`v0.1.0-rc.4`** · controlled RC under documented
-limits ([limitations](docs/PRODUCTION_LIMITATIONS.md))
+**Official runtimes:** Python **3.12** on GitHub Actions (Ubuntu) and local
+Windows 10/11. Classifiers list 3.11; required CI is 3.12 only.
+**UI:** source checkout or Docker (`static/` is copied in the image). A
+plain `pip install lumenfin-agent` wheel does **not** ship the web UI.
 
-[Docs](docs/README.md) · [Architecture](docs/ARCHITECTURE.md) ·
-[Limitations](docs/PRODUCTION_LIMITATIONS.md) · [Demo](docs/DEMO_GUIDE.md) ·
-[Release report](docs/PORTFOLIO_RELEASE_REPORT.md) ·
-[Autumn recruiting evidence](docs/AUTUMN_RECRUITING_EVIDENCE.md)
-
----
-
-## What problem it solves
-
-Typical financial RAG demos often:
-
-- promote peers out of a 10-K body into issuer scope;
-- invent ratios without structured inputs;
-- emit fluent claims without citations;
-- look “correct” when only the final paragraph is judged.
-
-LumenFin makes those failure modes **visible** and **fail-closed**: it plans
-the work, acquires evidence, runs specialist analysis nodes, audits
-completeness, repairs with a bounded retry loop, binds claims to evidence, and
-refuses unsupported numeric conclusions when fundamentals are missing.
+[Limitations](docs/PRODUCTION_LIMITATIONS.md) ·
+[Architecture](docs/ARCHITECTURE.md) ·
+[5-minute demos](docs/DEMO_GUIDE.md) ·
+[Evidence index](docs/EVIDENCE_INDEX.md) ·
+[Change summary](docs/PHASED_CHANGE_SUMMARY.md) ·
+[Resume draft](docs/RESUME_DRAFT.md)
 
 ---
 
-## Architecture sketch
+## Concrete problem
 
-LangGraph specialist nodes share one `FinanceState`
-(`src/lumenfin/graph.py`):
+A fluent diligence paragraph can still:
 
-`query → plan → retrieve → analyze → critic/repair → claim bind → synthesize`
+- promote 10-K peer names into issuer scope;
+- invent EBITDA margins with no structured inputs;
+- look “correct” when only the last paragraph is judged;
+- append a bogus `999999%` in visible text while a metric-only scorer still
+  passes.
 
-Runtime roles (not a single linear pipe): FastAPI ↔ PostgreSQL / Milvus;
-Redis analysis queue → Analysis Worker; Redis index queue → Index Worker
-(lease + attempt fencing). Detail:
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-### Reliability (designed properties)
-
-- Fail-closed numeric claims when fundamentals are missing
-- Claim → evidence binding before material assertions
-- At-least-once Redis queues with worker reclaim (not exactly-once)
-- Single retry owner per provider call; per-process bulkhead
-- FinRun export for offline replay scoring (not a live market oracle)
+LumenFin makes those modes **visible and fail-closed**: plan → retrieve →
+AST-safe quant (when TaskSpec requires it) → critic/repair → bind claims →
+synthesize only verified facts. Missing revenue must not block an evidenced
+**risk** answer; it must block **unevidenced numeric claims**.
 
 ---
 
-## Quick start
+## Visible result
 
-Supported CI Python: **3.12**. Prefer the lockfile path.
+Offline portfolio demo (no API key) asserts three stories in one process:
+
+| Demo | What you should see |
+|------|---------------------|
+| **A** Normal evidenced answer | Issuer-only scope, formula claims bound to inputs, FinRun-exportable state |
+| **B** Injected errors caught | Wrong number / wrong entity / missing citation / missing risk rejected (**local claim-binder 4/4**, not FinAgentBench product accuracy) |
+| **C** Missing data, local refuse | Forced missing SEC+Yahoo → `incomplete_data`, **zero** invented numeric claims |
+
+Web UI (source/Docker): question → **concise answer** → evidence ids → formula
+inputs → **real** `audit_log` steps. Progress is job polling, not an 800ms
+fake node timer. Refresh restores `?job=`.
+
+Verified claim shape (abridged; full:
+[docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)):
+
+```json
+{
+  "claim_id": "cl_num_Apple_ebitda_margin",
+  "entity": "Apple",
+  "claim_type": "numeric",
+  "value": 0.3478,
+  "unit": "ratio",
+  "period": "FY2025",
+  "verification": "verified"
+}
+```
+
+---
+
+## 5-minute offline reproduce
+
+Supported on a **source checkout** (not wheel-only). Do not set
+`PYTHON_DOTENV_DISABLED=1`. Do not overwrite an existing drifted `.venv`;
+make a new venv if `pip show lumenfin-agent` is not `0.1.0rc5` or
+`pip check` fails.
+
+**1. Solo LumenFin** (no FinAgentBench). Fast tests and the offline UI do not
+import the evaluator.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-lock.txt
 .\.venv\Scripts\python -m pip install -e . --no-deps
+.\.venv\Scripts\python -m pip show lumenfin-agent milvus-lite
+.\.venv\Scripts\python -m pip check
 copy .env.example .env
-
-# The unit suite runs on the SQLite test backend. .env.example ships
-# APP_ENV=dev, which is PostgreSQL-first and refuses SQLite by default.
 $env:APP_ENV = "test"
-.\.venv\Scripts\python scripts\run_tests.py
 .\.venv\Scripts\python scripts\run_portfolio_demo.py
+.\.venv\Scripts\python scripts\run_tests.py --fast
+.\.venv\Scripts\python scripts\start_offline_demo_api.py
 ```
 
-Serve the API (reads `.env`, defaults to `127.0.0.1:8000`):
+Then open `http://127.0.0.1:8000/`. Live keys are not required.
+
+**Preferred demo question** (verified upload loop, NVIDIA FY2025 excerpt):
+
+```text
+Using uploaded files only, what is NVIDIA FY2025 operating income from the filing facts?
+```
+
+Upload `tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf`. Gold operating
+income is **81.453 billion USD** (hand-read from page 1, USD millions). Sample
+catalog NVIDIA operating income is 72.4 — a matching 72.4 means sample
+backfill, not the file. Missing-field path: upload
+`tests/fixtures/sec/minimal/nvda_narrative_only.txt` with the same question.
+
+**2. Dual working trees** (full tests + product v3 gate). The v3 scorer is
+**not a published tag**. Point at the current `finagentbench-demo` working
+tree. Do not invent a SHA.
 
 ```powershell
-.\.venv\Scripts\python start_api.py
+$env:FINAGENTBENCH_DIR = "<absolute path to finagentbench-demo>"
+.\.venv\Scripts\python -m pip install -e $env:FINAGENTBENCH_DIR
+.\.venv\Scripts\python scripts\run_tests.py --skip-joint
+.\.venv\Scripts\python scripts\run_tests.py --joint-only
+cd $env:FINAGENTBENCH_DIR
+python -m unittest discover -s tests -v
+$env:LUMENFIN_ROOT = "<absolute path to lumenfin-agent>"
+python scripts\validate_cross_repo.py --profile ci
 ```
 
-Live providers need keys in `.env` (never commit them). Configuration:
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md) · reproducing frozen
-evidence: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
+A `validate_cross_repo.py --profile ci` score of 100 is the **frozen sample
+contract**, not product accuracy.
 
-### Evaluation (FinRun → FinAgentBench)
-
-FinAgentBench is a **sibling replay evaluator**: it scores exported FinRun
-states and mutation controls. It does **not** import LumenFin app code and is
-not a third-party independent market benchmark. Reproduce the compatibility
-gate against pin **`v0.1.0-rc.3`**
-([majiali423/finagentbench-demo](https://github.com/majiali423/finagentbench-demo)):
+**3. Frozen published evaluator** (FinRun contract only):
 
 ```powershell
 git clone --branch v0.1.0-rc.3 https://github.com/majiali423/finagentbench-demo.git
@@ -108,112 +140,64 @@ $env:LUMENFIN_ROOT = "<path to lumenfin-agent>"
 python scripts\validate_cross_repo.py --profile ci
 ```
 
-The summary records both commits, FinRun schema, profile, and core/extended
-mutation results. LumenFin CI also runs this gate at the pinned evaluator tag.
-FinAgentBench is an **offline contract / regression gate**. It is not held-out
-product accuracy. The webpage Run Manifest **Evaluator** is a separate local
-lightweight check of the current analysis run; it is also not held-out product
-accuracy.
-
-### External RAG eval (FinanceBench + LEDGER)
-
-These are **page-retrieval / packing canaries**, not FinAgentBench and not
-product accuracy. FinanceBench end-to-end answers (Phase 4) remain `NOT_RUN`.
-Production retrieval defaults (chunker, lexical reranker) are unchanged.
-
-- FinanceBench confirmation-50 is **consumed**: page Hit@10 `0.62`. Do not
-  rerun or retune. Aggregate:
-  [`data/eval_rag/financebench/confirmation_result.json`](data/eval_rag/financebench/confirmation_result.json).
-- LEDGER `public_dev` is **sealed and stopped**. Parent-page *return* is
-  eval-only; do **not** embed a page-parent index. LEDGER `public_holdout`
-  one-shot E2E v2: **35/100** strict verified (Wilson 95% CI [0.264, 0.447]);
-  dataset-specific, single-use, consumed; **not** a general product accuracy
-  claim:
-  [`docs/LEDGER_PUBLIC_HOLDOUT_E2E.md`](docs/LEDGER_PUBLIC_HOLDOUT_E2E.md).
-  Aggregates:
-  [`data/eval_rag/holdout/`](data/eval_rag/holdout/).
-- Protocol: [docs/FINANCEBENCH_EVAL.md](docs/FINANCEBENCH_EVAL.md) ·
-  [docs/FINANCEBENCH_NEXT_PHASE.md](docs/FINANCEBENCH_NEXT_PHASE.md).
-  Offline checks: [docs/VALIDATION_COMMANDS.md](docs/VALIDATION_COMMANDS.md).
+CI also fail-closes `v0.1.0-rc.4`. Required GitHub jobs: `fast` → `offline`
+(`run_tests.py --skip-joint` + portfolio) and **Product quality v3**
+(`FINAGENTBENCH_PRODUCT_REF` must be a real published v3 commit/tag;
+empty/main/master/rc.3/rc.4 are configuration failures, not skipped
+successes). Frozen contract remains `finrun-contract` on rc.3/rc.4.
+Publish order: land FinAgentBench v3 scorer → tag/commit that SHA → set
+LumenFin `FINAGENTBENCH_PRODUCT_REF` → then rely on the product-quality
+job. This checkout does not change GitHub variables. Remote Actions are
+unverified until that ref exists.
 
 ---
 
-## One-command offline demo
+## Architecture trade-offs (what I actually built)
 
-Deterministic · offline · no API key · non-zero exit on failure.
+- **One LangGraph `FinanceState`**, specialist **nodes**, not a mesh of
+  independent agents. FastAPI + Redis queues + Milvus stay; no extra agent
+  framework.
+- **At-least-once** jobs (reservation token + lease). Not exactly-once.
+- **HITL** pause/resume uses in-process LangGraph `InMemorySaver` plus a
+  durable `WorkflowCheckpointRepository`. That is **not** a tested
+  multi-process LangGraph node-level replay of every graph tick.
+- **FinAgentBench is a sibling package** with versioned FinRun. I do not
+  present 4/4, 11/11, or 14/14 as live product accuracy.
+- **TaskSpec** (default on): risk/narrative questions are not fail-closed
+  solely for missing AST ratios. **Bounded repair** exists, default **off**
+  after an honest offline ablation.
 
-```powershell
-python scripts/run_portfolio_demo.py
-```
+---
 
-| Demo | What this run asserts |
-|------|-----------------------|
-| **A** Trusted normal analysis | Issuer-only scope, grounded claims with citations, FinRun-exportable state |
-| **B** Isolation & error detection | Apple/Microsoft stay in scope; wrong number / wrong entity / missing citation / missing risk all rejected (**4/4**) |
-| **C** Fail-closed | Forced missing SEC + Yahoo → `workflow_status = incomplete_data`, zero numeric claims |
+## Effects, cost, limits
 
-The run also **prints** validated references it does not re-prove offline
-(queue/worker tenant leakage `0`, provider-resilience Docker run id); the Docker
-stack is not started by this entrypoint. Walkthrough:
-[docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+| Kind | What is true | What is not claimed |
+|------|----------------|---------------------|
+| Offline A/B/C | `run_portfolio_demo.py` must exit 0 | Production SLA / user count |
+| Unit tests | Current dirty workspace: see [docs/PHASED_IMPROVEMENT_LOG.md](docs/PHASED_IMPROVEMENT_LOG.md) | Clean-install on every laptop |
+| FinanceBench / LEDGER | Sealed historical canaries; do not rerun holdout to tune | General QA accuracy |
+| Product-dev set | 36 hand gold items; **dev** ablation only; test frozen | 80%/95% target |
+| Cost | Offline demos use `LocalFallbackLLM` (no token spend) | Live DeepSeek/SEC/Yahoo cost until you budget it |
 
-### What a verified claim looks like
+Known gaps: keep a drifted existing `.venv` if you still need it; verify with
+a **new** venv (`pip check`, metadata `0.1.0rc5`, milvus-lite 3.1.0).
+pip-install wheel has no UI. Remote product-scorer CI is unverified until
+`FINAGENTBENCH_PRODUCT_REF` is a published commit/tag.
 
-Illustrative abridged shape of a verified formula claim (IDs and binding rules
-match `src/lumenfin/claims/models.py` and `src/lumenfin/claims/binding.py`; full example:
-[docs/examples/verified_formula_claim.json](docs/examples/verified_formula_claim.json)):
+Sealed numbers and reports: [docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md).
+Operator limits: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md).
 
-```json
-{
-  "claim_id": "cl_num_Apple_ebitda_margin",
-  "entity": "Apple",
-  "claim_type": "numeric",
-  "statement": "Apple EBITDA margin is 34.8% for FY2025.",
-  "value": 0.3478, "unit": "ratio", "period": "FY2025",
-  "metric_name": "ebitda_margin",
-  "evidence_refs": [
-    {
-      "evidence_id": "ev_fund_Apple_ebitda_FY2025",
-      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:ebitda",
-      "source_type": "sec_companyfacts", "period": "FY2025"
-    },
-    {
-      "evidence_id": "ev_fund_Apple_revenue_FY2025",
-      "citation": "lumenfin:sec_companyfacts:Apple:FY2025:revenue",
-      "source_type": "sec_companyfacts", "period": "FY2025"
-    }
-  ],
-  "verification": "verified",
-  "verify_reason": "Metric/period/unit-bound evidence (formula_inputs_bound); formula_inputs={'ebitda': 'ev_fund_Apple_ebitda_FY2025', 'revenue': 'ev_fund_Apple_revenue_FY2025'}"
-}
-```
+---
 
-`ebitda_margin` is a formula claim: it must bind **both** `ebitda` and
-`revenue` fundamentals evidence (`FORMULA_INPUTS` in
-`src/lumenfin/claims/models.py`), not a single
-`ev_fund_{company}_{period}` id.
+## Deeper docs
 
-With no AST-computable fundamentals, the same pipeline emits a data-limitation
-claim instead of a ratio (full shape:
-[docs/examples/fail_closed_data_limitation_claim.json](docs/examples/fail_closed_data_limitation_claim.json)):
-
-```json
-{
-  "claim_id": "cl_risk_OpenAI_supply",
-  "entity": "OpenAI",
-  "claim_type": "risk_conclusion",
-  "statement": "OpenAI data-limitation risk is elevated: no AST-computable fundamentals (structured_source=none).",
-  "value": "elevated",
-  "metric_name": "data_limitation_risk",
-  "evidence_refs": [{
-    "evidence_id": "ev_gap_OpenAI",
-    "citation": "lumenfin:data_gap:OpenAI:none",
-    "source_type": "data_gap"
-  }],
-  "verification": "verified",
-  "verify_reason": "Fail-closed data-limitation risk bound to structured_source=none provenance."
-}
-```
+| Doc | Why |
+|-----|-----|
+| [docs/README.md](docs/README.md) | Full doc map |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Graph, workers, checkpoints |
+| [docs/PHASED_CHANGE_SUMMARY.md](docs/PHASED_CHANGE_SUMMARY.md) | Phases 0–6: bugs found and what changed |
+| [docs/RESUME_DRAFT.md](docs/RESUME_DRAFT.md) | Honest resume bullets |
+| [docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md) | Historical scores, hashes, reports (do not delete) |
 
 ---
 
@@ -362,52 +346,15 @@ as proof of absolute world-truth.
 
 ---
 
-## Validated results (separate gates)
+## Historical gates (index)
 
-Do **not** merge these into one “accuracy” number.
+Dated snapshots (including the 2026-08-13 post-rc4 snapshot) and sealed retrieval scores are listed in
+[docs/EVIDENCE_INDEX.md](docs/EVIDENCE_INDEX.md) (original reports are kept).
+Do **not** merge them into one accuracy number. Live HEAD is
+[ci.yml](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
+on the current commit, plus `python scripts/run_tests.py` locally.
 
-| Gate | What it measures | Result |
-|------|------------------|--------|
-| **LumenFin RC-tag regression** | Frozen `v0.1.0-rc.3` Linux-image suite | **495 passed, 2 skipped** |
-| **LumenFin 2026-08-13 post-rc4 snapshot** | Dated Linux-image suite after `v0.1.0-rc.4`; not an undated “current main” count | **512 passed, 3 skipped** |
-| **FinAgentBench unit regression** | Full Python suite | **149 passed** |
-| **Infrastructure integration** | Queue/worker multi-process Docker | **PASS** (`20260804T095357Z`) |
-| Worker-kill recovery | Does a killed worker's job need human redelivery? | **no** — lease expiry + attempt fencing reclaim it |
-| Tenant leakage | Cross-tenant RAG read | **0** |
-| Orphan chunks / vectors | Index compensation | **0 / 0** |
-| **Provider fault validation** | Provider-resilience + Docker dual-API | **PASS** (`docker_20260804T100817Z`) |
-| Retry amplification across 2 API containers | Logical provider calls → physical HTTP attempts | **20 → 25** (1.25×); stub observed exactly **25** |
-| Provider unexpected failures | Scenario G | **0** |
-| **Benchmark reliability** | FinAgentBench completed-case mean | **92.97** (informational; measured under evaluator pin `v0.1.0-rc.1`) |
-| Core mutation detection | Wrong entity / number / citation / risk | **4/4** |
-| **Evaluator compatibility (frozen pin)** | Frozen FinRun export replayed by FinAgentBench `v0.1.0-rc.3` | **PASS** (schema `1.0`; evaluator-side core **4/4** and extended provenance/period controls **7/7**) |
-| **Evaluator compatibility (latest published)** | Required CI lane against FinAgentBench `v0.1.0-rc.4` | fail-closed compatibility; does not replace the rc3 pin |
-| **Native BM25 + Qwen3** | Synthetic hard negatives, first-search consistency, telemetry | **PASS** (Qwen3 Top-1/MRR `1.0/1.0`, zero fallback; **not** FinanceBench) |
-| **FinanceBench confirmation-50** | Page-level retrieval on a consumed split | Hit@10 **0.62**; not product accuracy; Phase 4 `NOT_RUN` |
-| **LEDGER public-dev** | Public KPI retrieval / packing / generate canary | **Sealed / stopped**; not product accuracy; do not embed page-parent index |
-| **LEDGER structured-citation shadow** | Exposed public/dev sealed-candidate replay | Recorded; execution passed, citation quality failed; not product accuracy |
-| **Compose hardening** | Immutable image, UID 10001, readiness, persistence, backup, secret scan, graceful stop | **PASS** on controlled local Compose |
-
-The **RC-tag** unit-regression counts were frozen during full validation on
-2026-08-12 and shipped in `v0.1.0-rc.3`. The separate 2026-08-13 post-rc4
-snapshot is that day's Linux-image unittest discovery run, not a live HEAD
-count. HEAD status is the [CI workflow](https://github.com/majiali423/lumenfin-agent/actions/workflows/ci.yml)
-on the current commit. The RC validation
-used `scripts/run_tests.py` inside the UID-10001 Linux image; FinAgentBench used
-unittest discovery. Invoking `pytest` directly can count subtests differently,
-so runner totals and snapshot boundaries must not be mixed.
-
-The benchmark row is informational and was produced with the earlier evaluator
-pin; it is **not** a score for the published `v0.1.0-rc.3` evaluator. What the
-current pin verifies is compatibility: the frozen FinRun export is accepted and
-replayed by FinAgentBench `v0.1.0-rc.3`. Required CI also fail-closes a second
-lane against published FinAgentBench `v0.1.0-rc.4`; that lane is compatibility,
-not a silent pin replacement. FinAgentBench `master` is not a required gate.
-
-Evidence: [queue/worker](docs/QUEUE_WORKER_INTEGRATION.md) ·
-[provider resilience](docs/PROVIDER_RESILIENCE.md) ·
-[full validation](docs/PRODUCTION_LIMITATIONS.md) ·
-[Portfolio release report](docs/PORTFOLIO_RELEASE_REPORT.md)
+Operator limits: [docs/PRODUCTION_LIMITATIONS.md](docs/PRODUCTION_LIMITATIONS.md).
 
 ---
 

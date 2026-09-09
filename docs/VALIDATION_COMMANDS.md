@@ -7,43 +7,47 @@ lives in the sibling FinAgentBench repository.
 
 - Python **3.12** (CI pin)
 - Install via `requirements-lock.txt` then `pip install -e . --no-deps`
-- Sibling layout or `LUMENFIN_ROOT` / `FINAGENTBENCH_DIR`
+- Set `FINAGENTBENCH_DIR` for product tests (sibling discovery is opt-in via `LUMENFIN_ALLOW_SIBLING_FAB=1`)
 
-## 1. Minimal offline validation
+## 1. Minimal offline validation (solo, no evaluator)
 
 ```bash
-python scripts/run_tests.py
+python scripts/run_tests.py --fast
+python scripts/run_portfolio_demo.py
 ```
 
-## 2. Full offline validation
+## 2. Full offline validation (needs working-tree FinAgentBench)
 
 ```bash
-python scripts/run_tests.py
-# concurrency / HITL are included in the unit suite
+export FINAGENTBENCH_DIR=/absolute/path/finagentbench-demo
+python scripts/run_tests.py --skip-joint
+python scripts/run_tests.py --joint-only
 ```
 
-From sibling FinAgentBench:
+From the evaluator checkout:
 
 ```bash
-cd ../finagentbench-demo
+cd "$FINAGENTBENCH_DIR"
 python -m unittest discover -s tests -v
 python scripts/run_mutation_suite.py
 python scripts/run_offline_demo.py
-python -m unittest tests.test_rc_runner_import -v
 ```
 
 ## 3. Cross-repository gate
 
-CI uses the LumenFin orchestrator with absolute paths (sibling layout):
+CI uses absolute `LUMENFIN_ROOT` / `FINAGENTBENCH_DIR` (do not rely on a
+neighbor folder being present):
 
 ```bash
+export FINAGENTBENCH_DIR=/absolute/path/finagentbench-demo
 python scripts/run_cross_repo_ci.py --profile ci --require-clean-lumenfin
 ```
 
-Local equivalent still available from FinAgentBench:
+Local equivalent from FinAgentBench:
 
 ```bash
-cd ../finagentbench-demo
+cd "$FINAGENTBENCH_DIR"
+export LUMENFIN_ROOT=/absolute/path/lumenfin-agent
 python scripts/validate_cross_repo.py --profile ci
 ```
 

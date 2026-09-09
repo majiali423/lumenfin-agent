@@ -4,6 +4,10 @@
 
 | Doc | Purpose |
 |-----|---------|
+| [EVIDENCE_INDEX.md](EVIDENCE_INDEX.md) | Historical scores/hashes; do not treat as live accuracy |
+| [PHASED_CHANGE_SUMMARY.md](PHASED_CHANGE_SUMMARY.md) | Phases 0–9: bugs found and what changed |
+| [RESUME_DRAFT.md](RESUME_DRAFT.md) | Honest resume bullets |
+| [PHASED_IMPROVEMENT_LOG.md](PHASED_IMPROVEMENT_LOG.md) | Per-phase verification log |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Current system spine |
 | [CONFIGURATION.md](CONFIGURATION.md) | Environment variables and fail-closed defaults |
 | [REPRODUCIBILITY.md](REPRODUCIBILITY.md) | Install and validation commands |

@@ -12,44 +12,52 @@ FinAgentBench versioning (do not conflate):
 | Current FinAgentBench **package tag** | `v0.1.0-rc.4` / `0.1.0rc4` (pins producer LumenFin `v0.1.0-rc.3`) |
 | FinRun schema | `1.0` |
 
-Clone repositories as siblings:
+Layout is **not** required to be siblings. Product-quality tests use
+`FINAGENTBENCH_DIR` or an editable install. Sibling auto-discovery is off
+unless `LUMENFIN_ALLOW_SIBLING_FAB=1`.
 
-```text
-workspace/
-  lumenfin-agent/
-  finagentbench-demo/
-```
-
-Environment variables may replace sibling discovery:
-`LUMENFIN_ROOT` and `FINAGENTBENCH_DIR`.
+The **v3** `visible_supported_claims` scorer is the current
+`finagentbench-demo` working tree until a real tag exists. Do not invent a
+SHA. Frozen contract pins remain `v0.1.0-rc.3` / `v0.1.0-rc.4`.
 
 ## Install
+
+Solo (fast / offline demo only):
 
 ```bash
 cd lumenfin-agent
 python -m venv .venv
 python -m pip install -r requirements-lock.txt
 python -m pip install -e . --no-deps
+python -m pip check
+```
 
-cd ../finagentbench-demo
-python -m pip install -e .
+Dual (full tests + product gate):
+
+```bash
+export FINAGENTBENCH_DIR=/absolute/path/finagentbench-demo
+python -m pip install -e "$FINAGENTBENCH_DIR"
 ```
 
 ## Offline Quick Validation
 
 ```bash
 cd lumenfin-agent
-python scripts/run_tests.py
+python scripts/run_tests.py --fast   # no evaluator
+FINAGENTBENCH_DIR=... python scripts/run_tests.py --skip-joint
+FINAGENTBENCH_DIR=... python scripts/run_tests.py --joint-only
 
-cd ../finagentbench-demo
+cd "$FINAGENTBENCH_DIR"
 python -m unittest discover -s tests -v
 python scripts/run_mutation_suite.py
-python scripts/validate_cross_repo.py --profile ci
-python scripts/run_offline_demo.py
+LUMENFIN_ROOT=... python scripts/validate_cross_repo.py --profile ci
 ```
 
-These commands require no real API key. They validate LumenFin, the FinRun
-contract, the deterministic benchmark gate and all four mutations.
+`--profile ci` 100 is the frozen sample contract, not product accuracy.
+Required CI `product-quality` fails closed without a published v3
+`FINAGENTBENCH_PRODUCT_REF` (not rc.3/rc.4). Set that variable after the
+evaluator commit exists; this repo does not change GitHub settings.
+Remote Actions remain unverified until that ref is configured.
 
 ## Live RC Validation
 
