@@ -2,7 +2,7 @@ name: test
 
 # Extended gate (FinAgentBench checkout + cross-repo + RAG eval). Manual / optional.
 # Required PR CI is `.github/workflows/ci.yml`:
-#   fast (unit/contract/docs) → offline (--skip-joint + portfolio)
+#   docs (stdlib-only checks), fast (unit/contract) → offline (--skip-joint + portfolio)
 #   → product-quality (required v3 scorer; empty ref = config failure)
 #   and finrun-contract (frozen rc.3 / rc.4; not a v3 substitute).
 # Matrix: FinAgentBench v0.1.0-rc.3 authoritative pin and v0.1.0-rc.4 compatibility.

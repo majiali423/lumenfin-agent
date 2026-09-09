@@ -116,16 +116,43 @@ class Phase6DocsTestCase(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("COPY static", dockerfile)
 
-    def test_ci_fast_job_gates_offline_and_contract(self) -> None:
-        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("run_tests.py --fast", ci)
-        self.assertIn("run_tests.py --skip-joint", ci)
-        self.assertIn("run_tests.py --joint-only", ci)
-        self.assertIn("needs: [fast]", ci)
-        self.assertGreaterEqual(ci.count("needs: [fast]"), 3)
-        self.assertIn("FINAGENTBENCH_PRODUCT_REF", ci)
-        self.assertIn("Product quality v3", ci)
-        self.assertNotIn("deadbeef", ci)
+    def test_ci_preserves_required_gates_and_failure_status(self) -> None:
+        import yaml
+
+        # BaseLoader preserves GitHub's `on` key instead of YAML 1.1 booleans.
+        ci = yaml.load(
+            (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        )
+        self.assertTrue({"push", "pull_request"}.issubset(ci["on"]))
+        for event in ("push", "pull_request"):
+            self.assertFalse((ci["on"][event] or {}).get("paths"))
+            self.assertFalse((ci["on"][event] or {}).get("paths-ignore"))
+        self.assertEqual(ci["defaults"]["run"]["shell"], "bash")
+
+        commands = {
+            "docs": ("check_doc_links.py", "tests.test_report_path_portability", "tests.test_version_consistency"),
+            "fast": ("run_tests.py --fast",),
+            "offline": ("run_tests.py --skip-joint", "run_portfolio_demo.py"),
+            "product-quality": ("product_scorer_gate.py --require-ref", "product_scorer_gate.py --require-v3-module", "run_tests.py --joint-only"),
+            "finrun-contract": ("run_cross_repo_ci.py",),
+        }
+        for job_id, required in commands.items():
+            job = ci["jobs"][job_id]
+            self.assertNotIn("if", job, job_id)
+            self.assertNotEqual(job.get("continue-on-error"), "true", job_id)
+            if job_id in {"offline", "product-quality", "finrun-contract"}:
+                self.assertIn("fast", job["needs"])
+            for command in required:
+                steps = [step for step in job["steps"] if command in step.get("run", "")]
+                self.assertTrue(steps, command)
+                for step in steps:
+                    self.assertNotIn("if", step, command)
+                    self.assertNotEqual(step.get("continue-on-error"), "true", command)
+                    self.assertNotIn("|| true", step["run"], command)
+        docs = ci["jobs"]["docs"]
+        self.assertNotIn("needs", docs)
+        self.assertFalse(any("pip install" in step.get("run", "") for step in docs["steps"]))
 
 
 if __name__ == "__main__":

@@ -4,7 +4,37 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Explicit bash enables -e -o pipefail, including commands logged with tee.
+    shell: bash
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
 jobs:
+  docs:
+    name: Documentation contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Documentation links, portable paths and release versions
+        run: |
+          python scripts/check_doc_links.py
+          python -m unittest tests.test_report_path_portability tests.test_version_consistency -v
+
   fast:
     name: Fast unit/contract
     runs-on: ubuntu-latest
@@ -28,6 +58,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-lock.txt
 
       - name: Install package
         run: |
@@ -37,9 +69,6 @@ jobs:
 
       - name: Fast unit tests
         run: python scripts/run_tests.py --fast
-
-      - name: Documentation link check
-        run: python scripts/check_doc_links.py
 
   offline:
     name: Offline regression
@@ -67,6 +96,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-lock.txt
 
       - name: Install package
         run: |
@@ -75,7 +106,9 @@ jobs:
           python -m pip install -e . --no-deps
 
       - name: Offline unit tests (solo; not the v3 product gate)
-        run: python scripts/run_tests.py --skip-joint
+        run: |
+          mkdir -p test_artifacts/ci
+          python scripts/run_tests.py --skip-joint 2>&1 | tee test_artifacts/ci/offline-tests.log
 
       - name: Portfolio demo (offline A/B/C)
         run: python scripts/run_portfolio_demo.py
@@ -86,6 +119,7 @@ jobs:
         with:
           name: offline-ci-logs
           path: |
+            test_artifacts/ci/**
             outputs/portfolio_demo/**
           if-no-files-found: ignore
 
@@ -116,6 +150,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-lock.txt
 
       - name: Install package
         run: |
@@ -200,6 +236,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: lumenfin-agent/requirements-lock.txt
 
       - name: Install LumenFin
         working-directory: lumenfin-agent

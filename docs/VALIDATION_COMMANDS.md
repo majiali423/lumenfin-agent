@@ -17,6 +17,22 @@ python scripts/run_tests.py --skip-joint
 python scripts/run_portfolio_demo.py
 ```
 
+Documentation checks use only Python's standard library:
+
+```bash
+python scripts/check_doc_links.py
+python -m unittest tests.test_report_path_portability tests.test_version_consistency -v
+```
+
+CI runs documentation contracts independently of the runtime jobs. Fast tests
+gate the full offline regression, product v3 and both frozen FinRun lanes. All
+jobs remain enabled for every push and pull request; documentation changes do
+not bypass runtime tests. Dependency downloads are cached against the lockfile,
+and a newer run supersedes an older run on the same branch or pull request.
+
+On an offline regression failure, download `offline-ci-logs` for the complete
+test output. Logging uses Bash `pipefail`, so `tee` cannot hide a failing test.
+
 ## 2. Joint product validation (explicit FinAgentBench checkout)
 
 For the published baseline, use evaluator commit
