@@ -1,118 +1,332 @@
-# 评估与可靠性方案
+# LumenFin 产品评测方案：任务完成与证据一致性
 
-## 为什么要评估 trace
+**状态：24 题开发试点是候选 gold 诊断，不是正式准确率。** 离线回归报告执行覆盖、记录完整性和评分器行为，不把 LocalFallback 写成准确率。
+已授权的 B1/B2 live 对照使用 **lexical + 确定性向量**（不是生产 DashScope/Qwen3），语料是派生摘录和重复页应力夹具。`fair_v4` 已结束；累计额度 357/960 HTTP，禁止继续付费调用或重置预算。
+FinanceBench confirmation / LEDGER holdout 仍不得重跑。
 
-传统 LLM 应用常见的评估方式是看最终回答是否正确。但 agent 应用还要关心“过程是否正确”：
+核心问题是：**用户交给系统一组财报和一个问题，系统能否完成正确的动作，
+给出所需答案，并让关键结论得到原文支持？**
+评测单位是一项用户任务，不能用测试数量、流程节点齐全或自评分高代替回答质量。
 
-- 有没有调用应该调用的工具？
-- 有没有跳过关键节点？
-- 有没有在数据缺失时胡编？
-- 有没有留下审计记录？
-- prompt 改动后，流程有没有退化？
+## 1. 先区分现有能力与待补部分
 
-本项目新增 `src/lumenfin/evaluation.py`，对每次运行导出的 `_state.json` 做结构化评估。
+| 现有入口 | 已经能验证什么 | 不能据此直接声称什么 |
+|---|---|---|
+| [完整独立回归](../scripts/run_tests.py) | 路由、API、租约、恢复、隔离、来源与引用等行为 | 真实用户问题准确率 |
+| [产品闭环测试](../tests/test_product_quality_loop.py) | 产品运行导出与独立 fixture gold 一致；正文突变被阻断 | 大规模真实文档泛化 |
+| [上传闭环测试](../tests/test_upload_product_loop.py)与[页身份测试](../tests/test_rag_page_identity.py) | 上传、索引、字段页身份和回答路径 | 全类型财报解析能力 |
+| [product-dev](../src/lumenfin/eval/product_dev.py)与[离线消融](../scripts/run_product_dev_ablation.py) | 样例 gold 下的控制流与 TaskSpec 差异 | 同真实模型、同证据预算的 Agent 优势 |
+| [FinAgentBench](https://github.com/majiali423/finagentbench-demo) | 导出契约、数值复算、受支持的可见财务断言与突变控制 | 所有自由叙述都正确，或原始材料本身可靠 |
 
-## 当前评估维度
+现有 product-dev 共 36 条，train/dev/test 为 12/16/8。
+当前消融使用规则回退客户端，RAG 与在线基本面关闭；
+repair 的样例补数会改变数据可用性。因此保留它作为控制流回归，
+不把它升级包装为“Agent 相比 RAG 的效果提升”。现有 test split 保持冻结。
 
-### 1. Pipeline Completeness
+24 题目录、B1/B2 runner、HTTP 预算和独立评分器已经落地，见第 10 节。
+120 题冻结测试集、盲审和稳定性重复仍未建设。
 
-检查是否出现必要节点：
+## 2. 主评测范围：上传文档内的财务分析
 
-```text
-query_planner
-supervisor
-retrieval
-quant
-psychologist
-critic
-synthesizer
+第一版采用 **uploaded-only**：答案只能使用本题允许的文件。
+固定原始文件、解析版本和文件 hash，关闭样例基本面补齐以及 SEC/Yahoo 在线补数。
+这样可以区分“模型答错”和“在线数据源今天改变或不可用”。
+
+初版优先覆盖现有核心口径：revenue、operating income、EBITDA、R&D，
+以及 operating margin、EBITDA margin、R&D intensity。
+叙述任务覆盖风险与限制，不加入股票收益预测或投资收益排名。
+
+英文财报任务作为主要自动评分范围；中文表达另列语言切片，
+先人工核验。v3 的财务词表和语法有边界，不能把未解析的中文或自由叙述
+按“没有发现错误”自动计成通过。图像扫描件/OCR 不混入首版总体口径。
+
+在线 SEC/行情增强可以后续单独评测，使用冻结响应快照，
+并单列数据新鲜度与 provider 错误，不与 uploaded-only 总分混算。
+
+## 3. 数据集：先 24 条试运行，再冻结 120 条任务
+
+建议建立新的 `lumenfin_document_tasks_v1`，目标 120 条：
+**60 dev + 60 test**。这是建设规模建议，不是已经存在的数据集。
+
+| 任务族 | 总量 | 主要验证点 |
+|---|---:|---|
+| 单文档事实抽取 | 20 | 指标、数值、单位、币种和引用一致 |
+| 比率与可复算计算 | 20 | 正确分子/分母、公式、期间和舍入 |
+| 多页与期间辨别 | 20 | 页码不压缩、年份不串用、未知期间不补猜 |
+| 公司比较与范围隔离 | 20 | 双方口径可比；不把同业提及误作分析对象 |
+| 有证据的风险叙述 | 20 | 必需风险点被覆盖；不因缺无关比率而过拒答 |
+| 缺数与澄清 | 20 | 10 条应拒绝补数，10 条应先澄清；明确允许的后续动作 |
+
+每族 dev/test 各 10 条；最后一族每个 split 各 5 条拒答、5 条澄清。
+先从 dev 中取每族 4 条，共 24 条，检查数据与执行器是否可用，再补齐全集。
+
+**划分规则先于调参**：
+
+- 目标至少 12 个发行人资料组，dev/test 各 6 组；同一发行人的相关报告、
+  相邻年度、节选、问题改写及突变版本放在同组。
+- 比较题涉及的两个发行人必须属于同一 split，不能让比较题跨分组泄漏。
+- 优先选择未用于既有实验的报告；按文件 hash 和资料族排查重复。
+  无法避免的来源复用应显式标记，不称为全新外部验证。
+- 先确定任务族和采样方法，再运行系统，不能只保留系统能答对的题。
+- test gold 不提供给生成器，也不用于改提示词、挑 checkpoint 或调容差。
+  一次冻结评测后若查看失败题并据此开发，该批结果即成为已观察结果；
+  再次做确认需要新版本、未暴露的数据。
+- “未用于本项目调参”不等于“基础模型训练时从未见过公开财报”。
+
+## 4. Gold 应独立于 Agent 的输出
+
+每题必须能从原始材料人工核对。先写 gold，再看系统回答。
+下面是**拟新增的数据规格示意**，不是当前 runner 已支持的配置：
+
+```json
+{
+  "id": "task-example",
+  "split": "dev",
+  "family": "financial_fact",
+  "source_group": "issuer-document-family",
+  "query": "What was operating income in FY2025?",
+  "allowed_documents": [{"document_id": "filing-a", "sha256": "<document hash>"}],
+  "expected_action": "answer",
+  "required_facts": [{
+    "entity": "ExampleCo",
+    "metric": "operating_income",
+    "period": "FY2025",
+    "value": 1234,
+    "unit": "million",
+    "currency": "USD",
+    "accepted_evidence_sets": [[{"document_id": "filing-a", "page": 42, "quote": "<source text>"}]]
+  }],
+  "forbidden_claims": [],
+  "clarification": null
+}
 ```
 
-如果缺失或 blocked，会扣分。
+可替代的完整证据集合分开列出；一个计算需要两页证据时，两页必须同属一个集合。
+原 PDF 页序与印刷页码分开存，引用评分使用与产品一致的页序，不靠模糊文件名前缀匹配。
 
-`query_planner` 被纳入必要节点，因为系统需要先记录对用户意图的结构化理解，再进入正式分析工作流。
+- **数值题**：记录原始值、标准单位、币种、期间、公式和每个输入的证据。
+  容差按原文显示精度预先确定，例如显示两位小数的百分比按舍入区间判断。
+  新 gold 容差不能反向改写既有 FinAgentBench case 的阈值。
+- **风险题**：列出必须覆盖的原子风险点、可接受证据和明确不允许推出的结论，
+  不以文风、长度或出现“Risk”标题作为正确性。
+- **拒答题**：记录究竟缺哪个字段/期间/公司范围，以及哪些断言必须被保留为空。
+  从“上传材料未提供”推成“公司没有这个指标”也算错误。
+- **澄清题**：预先写明要询问的槽位和固定用户回复。分别评估首次是否正确澄清，
+  以及补充信息后能否恢复完成；把整个交互算作一个任务。
+- 至少复核全部 test gold。条件允许时由第二位标注者盲审；
+  如果只有作者一人标注，如实标为单人 gold，不能写成独立人工评审。
 
-### 2. Report Contract
+## 5. 主指标：有证据的任务成功率
 
-检查最终报告是否包含必要结构：
+### 5.1 可回答题的严格成功
 
-- Executive Summary
-- Financial Performance Analysis
-- Risk
-- Compliance
-- Methodology
-- Disclaimer
+一题成功要求同时满足：
 
-这避免报告变成一段自由文本。
+1. 完成正确动作，并回答全部必需事实或风险点。
+2. 关键数值、单位、币种、公司和期间正确；计算输入与公式可复核。
+3. 每个关键结论有允许文档中的充分证据与正确页定位。
+4. 额外输出中没有未经支持的实质性财务断言。
+5. 未触发超时、解析崩溃或任务执行错误。
 
-### 3. Evidence Grounding
+**有证据的任务成功率 = 严格成功题数 / 全部可回答题数。**
+拒答、空回答和运行失败都不能从这个分母中删掉。
 
-检查每家公司是否有：
+### 5.2 必须同时报告的维度
 
-- retrieval 数据
-- financial metrics
-- risk scores
-- sentiment analysis
+| 指标 | 口径 |
+|---|---|
+| 必需事实覆盖率 | 已正确回答且有证据的必需事实数 / gold 必需事实数 |
+| 主张支持精确率 | 有原始证据支持的实质性输出主张数 / 全部此类输出主张数 |
+| 引用完整率 | 附带充分有效引用的输出主张数 / 需要引用的输出主张数 |
+| 正确拒答率 | 在应拒答题中，正确说明缺口且未补造事实的比例 |
+| 过度拒答率 | 在可回答题中，错误拒绝完成所需答案的比例 |
+| 澄清与恢复成功率 | 在澄清题中，询问正确槽位并在固定回复后完成任务的比例 |
+| 范围违规数 | 越公司、越文档、越租户或样例数据违规补齐的次数 |
+| 运行失败率 | 超时、provider 错误、崩溃等失败任务 / 全部计划任务 |
 
-这比只看报告内容更可靠，因为它关注每个公司是否真的被完整分析。
+无输出主张时，主张精确率标记为 N/A；可回答题仍判失败，
+防止用全部拒答制造“零幻觉”。正确拒答和可回答题成功率分开列，
+不能靠增大拒答题占比抬高一个总体分。
 
-### 4. Operational Reliability
+按六个任务族分别列分子、分母、比例与失败原因，不能只给一个平均分。
+对可回答任务族可补充等权宏平均，但同时保留各族原始计数。
 
-检查：
+### 5.3 检索、评分器与运行成本是诊断指标
 
-- 是否进入 degraded mode
-- 是否仍有 compliance findings
-- 是否还有未解决的 replan reason
-- 是否生成 final report 和 audit log
+- **证据集合召回**：Top-K 是否覆盖至少一个 gold 完整证据集合；
+  同时统计片段/页级召回。K 在 dev 阶段冻结，例如 K=5、10。
+  抽取阶段已得到结构化字段、未走检索的题单列路径，不虚填检索命中。
+- **有证据仍答错的比例**：正确材料已进入生成上下文，但任务失败，
+  帮助区分召回问题与推理/生成问题。
+- **评分器检测率与误报率**：已知错误是否被定位；未修改正确结果是否被误拦截。
+  它们衡量 FinAgentBench，不属于产品回答准确率。
+- **成本**：任务总耗时 p50/p95、LLM 调用数、输入/输出 tokens、重试次数。
+  上传/建索引耗时与索引完成后的问答耗时分开统计。
+  每个成功任务成本使用**全部任务实际成本 / 成功任务数**；无成功时标 N/A，
+  不只计算成功样本的消耗。
+- provider 异常单列原因，同时计入端到端失败率；可另附“provider 正常子集”的诊断表，
+  不能用它替换全量结果。
 
-## 如何运行
+## 6. 对照实验：证明组件的增益，而不是模型换代的增益
 
-```powershell
-.\.venv\Scripts\python.exe scripts\evaluate_agent_runs.py --write
-```
+第一阶段只固定一个真实模型及其版本，不做模型排行榜。
 
-输出：
+| 系统 | 配置 | 用途 |
+|---|---|---|
+| B0：单次回答 | 同模型；明确记录如何选取固定文档窗口 | 辅助参照，不作为主要增益结论 |
+| B1：普通 RAG | 同解析、切块、检索器、重排和初始 Top-K；一次生成回答 | 主比较基线 |
+| B2：LumenFin | 同模型、文档与初始检索配置；开启当前 TaskSpec、计算、校验和恢复路径；数据修复保持默认关闭 | 完整产品 |
 
-```text
-outputs/evaluation_report.json
-outputs/evaluation_report.md
-```
+B1 与 B2 共用同一份初始检索结果。完整 Agent 如发生补充检索、
+额外调用或重试，必须记录，而不能称为“使用了完全相同的最终上下文”。
+比较题的可用数据、source policy 和质量要求完全相同。
 
-## 设计说明
+同题运行顺序交错，固定模型、温度、提示词版本、最大上下文和单题资源上限。
+预算先在 dev pilot 验证能完成正常图流程，再冻结；记录实际消耗，
+不能为某个系统静默放宽超时，也不能用过紧的调用上限故意截断完整 Agent。
 
-agent 的错误经常发生在路径上，例如漏调用工具、跳过审查、失败后没有降级。Evaluator 会读取每次运行的 state 和 audit log，从流程完整性、报告契约、证据覆盖、运行可靠性四个角度打分。这样 prompt、工具或模型替换后，可以用历史 runs 做回归测试。
+**建议执行规模**：先只做 B1/B2 的 24 题 dev pilot（48 次任务运行）；
+数据与 harness 验收后，完整 dev 比较。冻结 test 时 B1/B2 各跑 60 题，
+共 120 次任务运行。B0 可在预算允许时加入，单独标注。
+预算金额由 pilot 的真实 token 用量估算，本方案不预报费用或质量提升。
 
-## External retrieval dataset (FinanceBench)
+从 test 预先抽取 12 题，对 B1/B2 各补跑两次，额外 48 次运行，
+统计动作一致性和任务成功稳定性；不能事后挑稳定题，也不能取三次中的最好答案。
+首轮保持主结果，重复运行单列。
 
-Internal RAG scripts remain synthetic gates. External page-level retrieval
-evaluation is documented in [`FINANCEBENCH_EVAL.md`](FINANCEBENCH_EVAL.md).
-The 2026-08-16 corpus test-100 is an **exploratory baseline / exposed
-test-100**, not an unseen held-out. Company-scope on those same questions is
-a **recorded post-hoc paired diagnostic**: Hybrid Hit@5 moved +0.16; Dense
-Hit@5 did not move; Hybrid+Qwen3 Hit@5 did not move, Hit@10/MRR did.
-Confirmation-50 is **RECORDED** (Hit@5 0.50, Hit@10 0.62, MRR 0.2955,
-nDCG@10 0.3461): one-shot unseen at execution, now consumed/exposed. Those
-numbers are page-level retrieval, **not product accuracy**, **not**
-end-to-end QA, and **not** the 10-case Qwen3 hard-negative gate (Top-1/MRR
-1.0000). Do not rerun or retune. Phase 4 end-to-end answer metrics remain
-`NOT_RUN`.
+**消融仅在 dev、隔离 harness 中进行**：
 
-LEDGER `public_dev` retrieval / packing / numeric-generate canaries are
-**sealed and stopped** (see [FINANCEBENCH_NEXT_PHASE.md](FINANCEBENCH_NEXT_PHASE.md)).
-They are a public development benchmark, not product accuracy and not
-FinanceBench Phase 4. `public_holdout` remains unopened. Locked next on
-that chain is `do_not_embed_page_parent_index`. Production RAG defaults
-are unchanged.
+- TaskSpec 开/关：测风险任务过度拒答与数值任务错误放行。
+- 相同上下文下的直接生成/证据绑定生成：测主张支持与覆盖的权衡。
+- 普通 RAG/确定性计算：在比率子集检查数值收益与调用成本。
 
-## 后续增强方向
+第二、三项需要新增隔离执行适配，不能假称现有脚本已经提供全部开关。
+不在部署配置中移除安全检查，也不将样例回填作为 live repair 的公平增益。
 
-1. 加 golden trace 数据集，作为每次改动后的回归基准。
-2. 加 LLM-as-judge，但只用于主观质量，不替代结构化检查。
-3. 记录每个节点耗时和 token 成本。
-4. 对 PDF 抽取结果做字段级置信度评分。
-5. 把 evaluator 接入 API，前端展示运行质量分。
-6. FinanceBench 端到端回答评测（Phase 4）仍为 `NOT_RUN`；不要在已消耗的
-   150 题上补跑。
-7. 若再做检索实验，先独立出题并冻私有 holdout，或打开尚未打分的 LEDGER
-   `public_holdout`。禁止在 FinanceBench test-100 / confirmation-50 或
-   已看过的 LEDGER 5×50 后缀上再调参；生产默认仍为 A。
+## 7. 分离产品评分与评分器自证
+
+FinAgentBench 负责**可复用运行契约**与导出域一致性（`evaluate_run`）。
+项目 gold 负责**原始材料事实**以及**用户任务是否答完**。
+接入策略版本：`lumenfin_eval_contract.v1`。不覆盖 `fair_v2`/`v3`/`v4` 账本，不自动重评，不消耗已封存 holdout。
+
+| 字段 | 含义 | 是否改变历史口径 |
+|---|---|---|
+| `task_result` | 独立 gold：事实与任务完成 | 新结构；`passed`/`diagnostic_pass` 仍只表示 gold |
+| `contract_result` | 适用的 Bench 导出/可见断言检查 | 新；不再只保存直调 `visible_supported_claims` |
+| `b2_internal_result` | B2 专属结构（主体覆盖、公式复算、单位） | 新；不计入 B1 任务成绩，不与 B1 混成不公平总分 |
+| `diagnostic_pass` | 与 `task_result.passed` 相同 | **不改含义** |
+| `eval_acceptance_v1` | gold 通过，且 `contract_result.status` 为 `passed` 或 `not_applicable` | **新字段**；`unavailable`/`error`/`undetermined`/`failed` 不能算通过 |
+| `formal_pass` | 仍要求任务 `formal_accuracy_eligible` | 开发试点仍为 false |
+
+状态：`passed` 已执行并通过；`failed` 已执行并发现错误；`not_applicable` 按题型与输出明确不适用；`unavailable`/`error` 应执行但缺依赖、缺导出或运行失败；`undetermined` 无法可靠判断。必要检查的后三类不得改写成 `not_applicable`，也不得算通过。
+
+预期主体只来自评测任务契约（`required_facts.entity`、`scoring_contract.expected_entities`、或题目 query 中的公司名）。契约缺失时报错，**不再默认 NVIDIA**。评测标签不进入 B1/B2 运行输入。
+
+### 题型与检查项
+
+| 题型 | Gold | Bench（有 FinRun 的 B2） | 不适用 / 不宣称 |
+|---|---|---|---|
+| 事实回答 `financial_fact` / 多页期间 `multipage_period` | 数值、公司、期间、单位、来源；缺一项即任务不完整 | 导出契约 + `visible_supported_claims`；`entity_coverage` 单列内部 | B1 无导出不因此判任务失败 |
+| 计算回答 `ratio_calc` | 同上，外加比率展示精度 | 上述 + `numeric_correctness`、`unit_currency_consistency`（内部） | 无公式导出时内部检查失败/不可用，不是 N/A |
+| 公司比较 `comparison_scope` | 每个「公司＋指标＋期间」都要答完；出现公司名不能代替事实 | 可见断言一致性；主体范围作 B2 内部检查 | 只答一家时 gold 任务完整性失败 |
+| 拒答或澄清 `refuse_or_clarify` | 行为符合题目；夹带金额/期间/比较结论仍查 | 无数值断言时数值类检查 N/A；夹带数字则仍跑可见断言 | 不因缺少可检查数值而判正确拒答失败 |
+| 风险分析 `evidenced_risk` | 已有风险要点与证据 | 仅当正文仍断言金额时检查可见断言 | 缺财务数字不是失败；Bench 不能全面判断风险语义 |
+
+B1 与 B2 的**主任务对照**使用同一套外部 gold。B1 没有 Agent 内部结构时，对应 Bench 项为 `not_applicable`，不把缺 FinRun 写成 B1 任务失败。
+
+候选 gold 仍无正式准确率资格。`eval_acceptance_v1` 只是开发验收辅助，不能填进正式准确率表。
+
+FinAgentBench 对导出证据的检查不能代替原文 gold：
+如果 Agent 同时把内部指标与最终文本写成同一个错误值，
+导出一致性仍可能通过，gold 必须失败。
+
+新任务评分器应将 final output、引用与**外部 gold**比对。
+可见断言通过完整 `evaluate_run` 执行已启用指标，而不是只直调一个函数。
+所有无法自动判定的必需结论进入人工审阅，不按未报错自动放行。
+自由叙述可用模型辅助拆主张，但最终口径应与人工 gold 校准，评审时隐藏系统身份。
+
+用现有 [突变套件](https://github.com/majiali423/finagentbench-demo/blob/master/benchmarks/mutations/suite.json)
+保持回归，再在新 dev 的正确输出上扩展：
+
+| 变化 | 预期 |
+|---|---|
+| 改金额、单位或币种 | 定位到错误的金融主张 |
+| 交换财年、公司或引用页 | 拒绝不匹配的身份/证据 |
+| 删除计算输入证据 | 检查到支持不足 |
+| 将证据期间改为未知而正文保留确定年份 | 阻断错误期间断言 |
+| 正文和导出指标同时改成相同错误值 | 外部 gold 检查必须失败 |
+| 仅换行、等价单位转换、允许范围内舍入 | 不应误报 |
+
+每个错误对应未修改的正例；同时公布漏检和误报。
+只变异在当前语法支持范围内的断言，超出范围的情况作为人工评估切片，
+不能把未支持的解析能力写成“覆盖全部财务语义”。
+
+## 8. 工程可靠性继续由确定性门禁承担
+
+保留现有 CI：文档、Fast、完整独立回归、产品 v3、
+冻结 rc.3/rc.4 FinRun 契约，以及评测仓正负例。
+不把 live 模型或尚未建设的数据集强行放进每次 push 的必需门禁。
+
+租户隔离、过期 Worker、幂等恢复、上传限额和正文安全由现有故障注入与回归检查承担。
+测试中出现边界违规即修复，不能用其他任务的质量分抵消。
+真实 Milvus/Redis/Docker 场景按[验证命令](VALIDATION_COMMANDS.md)单列，
+缺环境时写“未运行”，不计通过。
+
+## 9. 如何产出一份可展示的结果
+
+每次冻结评测保存：两个仓库 commit、模型与参数、文档/索引 hash、
+gold 和 case 版本、检索设置、source policy、资源上限及运行时间。
+逐题账本至少包含动作、final output、原始引用、FinRun、各项判定、
+错误分类、耗时、tokens 和重试信息。
+
+主表不使用预填正式成绩。已完成的 live 对照只能作为候选 gold 诊断写入第 10 节，
+不能把 `17/24` 一类计数填进本表当作准确率。冻结 test 仍为待建设。
+
+| 系统 | 可回答任务成功 n/N | 事实覆盖 | 主张支持 | 正确拒答 n/N | 过拒答 n/N | 澄清恢复 n/N | p95 | 每成功任务成本 |
+|---|---|---|---|---|---|---|---|---|
+| 普通 RAG | 正式 test 待建设 | 待建设 | 待建设 | 待建设 | 待建设 | 待建设 | 待建设 | 待建设 |
+| LumenFin | 正式 test 待建设 | 待建设 | 待建设 | 待建设 | 待建设 | 待建设 | 待建设 | 待建设 |
+
+报告同题成对差异，并以发行人资料组为单位做 bootstrap 区间；
+同一文档的问题不是彼此独立的样本。初版 test 仅约 6 个资料组，
+区间和外推能力有限，应当展示逐组差异，不能据此宣称行业领先。
+稳定性重复也不能当作新增独立样本扩大 N。
+
+README 可展示有对照、分母清晰且能够复现的结论，例如完成率与过拒答的共同变化。
+是否值得放在首页取决于实验设计与证据，而不是分数是否好看。
+完整结果必须保留全部任务族、失败和成本；没有明显提升时，
+首页继续展示机制和演示，把实验结论如实留在证据页。
+
+## 10. 当前入口与收口状态
+
+1. 24 题 dev pilot：`tests/fixtures/document_tasks/lumenfin_document_tasks_v1.json`（每族 4 题）。`gold_origin` 为派生夹具文本；多数题 `review_status=source_quote_checked`。`dt-p23-clarify-company` 仍是诊断题（`needs_human_review`），不能靠迎合候选 gold 修复。不是独立人工评审，不是冻结，`formal_accuracy_eligible=false`。评分接入版本 `lumenfin_eval_contract.v1`；历史 `fair_v2`/`v3`/`v4` 账本不覆盖、不自动重评。
+2. 离线：`python scripts/run_document_task_eval.py --pilot --offline`（process overlay + 出站阻断；不改 `.env`）。
+3. 冻结检查（预期退出码 2）：`python scripts/run_document_task_eval.py --freeze-check`
+4. 真实实验准备：`python scripts/run_document_task_eval.py --prepare-live`（不再授权新的 live 批次，除非另行批准）。
+
+已记录的 lexical live 诊断（本地账本，不入库）：`fair_v2` → `fair_v3` → `fair_v4`。额度 token `pilot24-lexical-v1-960http-2026-09-10`，硬上限 960 次 DeepSeek HTTP（含重试），当前累计 **357/960**。`--confirm-budget` 不是授权。USD 仅为用量估算，没有美元停机线。
+
+`fair_v4` 不是无中断的严格对照：首次入口被 PowerShell 把 gRPC stderr 当成终止后，在同一账本续跑剩余题；两条 B1 为 SSL/握手超时，未挑选重跑。v3/v4 延迟差异含网络与续跑，不能归因于单一代码修改。B2 `all_tasks` 诊断计数 v3 为 16/24、v4 为 17/24（仅 p14 的 gold 翻转）；这不是正式准确率，也不是完整 10-K 或生产检索验收。
+
+评分疑点：`dt-p24-clarify-period` 在 v4 正文已标出 FY2024 32.972 `#p2`，仍 `expected_answer_or_clarify`。人工记录见 [`tests/fixtures/document_tasks/p24_scoring_suspicion.json`](../tests/fixtures/document_tasks/p24_scoring_suspicion.json)，不接入 catalog，不改评分器。
+
+`fair_v4` 之后的产品修复（比较题公司期间最近邻绑定、发行人 mismatch 说明、无字段期间金额与摘要一致）只经过离线回归与联合契约，**未付费复测**，不得用 v4 分数宣称这些修复的 live 效果。
+
+120 题测试集、稳定性重复、生产 DashScope/Qwen3 24 题对照 **尚未建设**。LangSmith 远程接入未作为发布门禁验证。无新的付费授权前不要再跑 `--allow-live`。
+
+---
+
+## 已有数据集边界与方法参考
+
+FinanceBench confirmation 与 LEDGER 已有记录继续遵守各自的 consumed/sealed 状态；
+不能沿用旧文档中“public_holdout 尚未打开”的陈述。
+当前状态以[证据索引](EVIDENCE_INDEX.md)、
+[LEDGER E2E](LEDGER_PUBLIC_HOLDOUT_E2E.md)及对应封存账本为准。
+本方案不授予这些数据的新运行权限。
+
+方法上参考 FinanceBench 的“问题、答案、原始证据”组织方式，
+以及 RAGChecker 将检索与生成分别诊断的思路；本文的任务分类、
+样本规模、动作评分和实施步骤是针对本项目提出的设计，
+不等同于复现这两个基准：
+[FinanceBench 原论文](https://arxiv.org/abs/2311.11944)，
+[RAGChecker 原论文](https://arxiv.org/abs/2408.08067)。

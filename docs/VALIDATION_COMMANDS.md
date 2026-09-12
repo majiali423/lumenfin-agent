@@ -24,6 +24,28 @@ python scripts/check_doc_links.py
 python -m unittest tests.test_report_path_portability tests.test_version_consistency -v
 ```
 
+Document-task evaluation (independent gold; does not consume holdout):
+
+```bash
+python -m unittest tests.test_document_tasks tests.test_tracing tests.test_document_task_baselines tests.test_eval_contract_policy
+python scripts/run_document_task_eval.py --freeze-check
+python scripts/run_document_task_eval.py --prepare-live
+python scripts/run_document_task_eval.py --pilot --offline
+```
+
+`--pilot --offline` reports execution coverage and scorer behavior only.
+LocalFallback gold-pass counts are diagnostics, not model accuracy, and must
+not be copied into README. `--freeze-check` must fail until test gold is
+reviewed. Authorized live B1/B2 used the **lexical + deterministic** retrieval
+profile (not production DashScope/Qwen3) under
+`LUMENFIN_EVAL_BUDGET_AUTH=pilot24-lexical-v1-960http-2026-09-10`.
+`--confirm-budget` is not authorization. The hard cap is provider HTTP
+requests including retries (960; currently 357 used). USD is an estimate
+only. Do not reset the ledger or start another paid run unless newly
+authorized. `fair_v4` resumed after a harness interrupt. Later product fixes
+were not live-retested.
+
+
 CI runs documentation contracts independently of the runtime jobs. Fast tests
 gate the full offline regression, product v3 and both frozen FinRun lanes. All
 jobs remain enabled for every push and pull request; documentation changes do

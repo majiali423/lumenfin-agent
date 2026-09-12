@@ -50,7 +50,7 @@ dataset experiments answer different questions.
 | Document | Purpose |
 |---|---|
 | [Evidence index](EVIDENCE_INDEX.md) | Historical scores, source identities and reports |
-| [Evaluation strategy](evaluation_strategy.md) · [FinAgentBench architecture](https://github.com/majiali423/finagentbench-demo/blob/master/docs/architecture.md) | Evaluation responsibilities and evaluator implementation |
+| [Product evaluation](evaluation_strategy.md) · [FinAgentBench architecture](https://github.com/majiali423/finagentbench-demo/blob/master/docs/architecture.md) | 24-task candidate gold, B1/B2 lexical diagnostic, `lumenfin_eval_contract.v1` layers; not formal accuracy |
 | [FinanceBench](FINANCEBENCH_EVAL.md) | Historical retrieval experiments |
 | [LEDGER development boundary](FINANCEBENCH_NEXT_PHASE.md) | Sealed development chain and restrictions |
 | [LEDGER index](LEDGER_PUBLIC_HOLDOUT_INDEX.md) · [E2E](LEDGER_PUBLIC_HOLDOUT_E2E.md) | Versioned index and end-to-end evidence |

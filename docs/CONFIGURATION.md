@@ -13,7 +13,9 @@ Copy `.env.example` to `.env` for local use. Never commit `.env`.
 | `DEEPSEEK_MODEL` | Optional | Required model must exist | `deepseek-v4-flash` |
 | `DASHSCOPE_API_KEY` | Not needed with deterministic embeddings | Required when embedding provider is DashScope | empty |
 | `SEC_USER_AGENT` | Optional local fallback | **Required**, include operator contact | no production default |
-| `MAS_API_KEY` | Optional in dev/test | Required API authentication | empty |
+| `MAS_LANGSMITH_TRACING` | Optional traces | Off unless `true` plus API key | empty |
+| `LANGSMITH_API_KEY` / `LANGCHAIN_API_KEY` | Remote LangSmith | Unset → local-only / off | empty |
+| `MAS_TRACE_DIR` | Local JSON traces | `outputs/traces` when tracing a run | empty |
 
 Missing production credentials do not enable sample fundamentals. LLM/provider
 failures are surfaced as degraded/incomplete paths; live mode must not silently
