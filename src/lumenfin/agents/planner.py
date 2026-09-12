@@ -74,27 +74,23 @@ class PlannerMixin:
             query_plan = state.get("query_plan", {})
             planned_companies = list(query_plan.get("companies", []))
             company_scope = str(query_plan.get("company_scope") or "")
-            intent = str(query_plan.get("intent") or "").lower()
             # Rules-only fallback: planner already ran LLM company extract when needed.
-            companies = planned_companies or extract_companies_from_query(
-                state["query"],
-                document_contexts=state.get("document_contexts", []),
-                llm_client=None,
-            )
-            # Upload expansion: issuer companies only (primary entity), never all body mentions.
-            # Skip expansion when planner already scoped to query-only (non-compare).
-            expand_uploads = not (
+            companies = list(planned_companies)
+            if not companies:
+                companies = extract_companies_from_query(
+                    state["query"],
+                    document_contexts=state.get("document_contexts", []),
+                    llm_client=None,
+                )
+            # Named query/mismatch sets stay as planned. Do not replace or pad them
+            # with upload issuers, body peer mentions, or extra compare peers.
+            query_named = [str(item) for item in (query_plan.get("query_companies") or []) if str(item).strip()]
+            keep_asked_only = bool(
                 planned_companies
-                and company_scope == "query"
-                and intent
-                not in {
-                    "compare",
-                    "peer",
-                    "comparison",
-                    "comparative_financial_diligence",
-                }
+                or query_named
+                or company_scope in {"query", "mismatch"}
             )
-            if expand_uploads or not companies:
+            if not keep_asked_only:
                 for doc in state.get("document_contexts", []):
                     issuers = doc.get("issuer_companies") or doc.get("detected_companies") or []
                     for company in issuers:

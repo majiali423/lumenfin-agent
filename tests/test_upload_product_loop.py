@@ -322,7 +322,7 @@ class MultipageUploadLoopTestCase(unittest.TestCase):
         self.assertFalse(period_result.passed, [item.message for item in period_result.findings])
 
         oi_cite = re.compile(
-            r"(NVIDIA Operating income is 32\.97\d* billion USD for FY2024 \[)([^\]]+#p)2(\])",
+            r"(NVIDIA Operating income is 32\.97\d* billion USD for FY2024(?: \([^)]+\))? \[)([^\]]+#p)2(\])",
             re.I,
         )
         self.assertRegex(body, oi_cite, body[-2000:])
@@ -348,7 +348,11 @@ class MultipageUploadLoopTestCase(unittest.TestCase):
         self.assertNotEqual(nvda.get("structured_source"), "sample_db")
         report = str(state.get("final_report") or public.get("error_message") or "")
         lowered = report.lower()
-        self.assertRegex(lowered, r"period not stated|not noted in the source|unspecified period")
+        exec_summary = str(state.get("executive_summary") or "")
+        self.assertIn("32.972", exec_summary)
+        self.assertRegex(exec_summary.lower(), r"period not stated|not stated next to|not noted in the source|unspecified period")
+        self.assertNotRegex(exec_summary, r"Operating income is 32\.97\d* billion USD for FY2025", re.I)
+        self.assertRegex(lowered, r"period not stated|not stated next to|not noted in the source|unspecified period")
         self.assertNotRegex(report, r"Operating income is 32\.97\d* billion USD for FY2025", re.I)
         state["execution_path"] = "product_workflow"
         finrun = export_finrun_state(state)

@@ -131,7 +131,7 @@ def _hits_from_scored_chunks(
     scored: list[tuple[float, dict[str, Any]]] = []
     for chunk in chunks:
         companies = list(chunk.get("companies") or [])
-        if companies and company not in companies:
+        if company and companies and company not in companies:
             continue
         fact = chunk.get("financial_fact") if isinstance(chunk.get("financial_fact"), dict) else None
         score = _keyword_score(
@@ -181,7 +181,7 @@ def _keyword_search(
             or document.get("detected_companies")
             or []
         )
-        if doc_companies and company not in doc_companies:
+        if company and doc_companies and company not in doc_companies:
             continue
         for chunk in chunk_document(document):
             chunks.append(chunk)

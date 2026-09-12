@@ -8,6 +8,11 @@ from typing import Any
 
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
 from .evaluation import evaluate_run_state
+from .query_focus import (
+    distinct_fiscal_years,
+    format_billion_amount,
+    query_has_relative_unanchored_period,
+)
 
 _PAGE_CITATION_RE = re.compile(r"(?:#p\d+|\bp\.\d+\b)", re.IGNORECASE)
 
@@ -102,17 +107,21 @@ COMPARE_METRIC_SPECS: tuple[tuple[str, str, bool], ...] = (
 
 def parse_requested_fiscal_year(*texts: Any) -> int | None:
     """Extract a single FY year from planner/query strings (e.g. FY2024, 2024)."""
+    collected: list[int] = []
     for raw in texts:
         text = str(raw or "").strip()
         if not text:
             continue
-        # Prefer explicit FY#### tokens.
         fy_hits = re.findall(r"FY\s*(20\d{2})", text, flags=re.IGNORECASE)
         if fy_hits:
-            return int(fy_hits[-1])
+            collected.extend(int(item) for item in fy_hits)
+            continue
         hits = _FY_RE.findall(text)
         if hits:
-            return int(hits[-1])
+            collected.extend(int(item) for item in hits)
+    unique = list(dict.fromkeys(collected))
+    if len(unique) == 1:
+        return unique[0]
     return None
 
 
@@ -234,8 +243,11 @@ def _docs_for_company(
     for doc in document_contexts or []:
         if not isinstance(doc, dict):
             continue
+        issuers = doc.get("issuer_companies") or []
         detected = doc.get("detected_companies") or []
-        if company and detected and company not in detected:
+        if company and issuers and company not in issuers:
+            continue
+        if company and not issuers and detected and company not in detected:
             continue
         docs.append(doc)
     return docs
@@ -333,14 +345,35 @@ def infer_fiscal_year_from_documents(
     *,
     company: str | None = None,
 ) -> tuple[int | None, str | None]:
-    """Infer FY from upload filenames / filing text (not from query alone).
+    """Infer FY from field evidence first; filename/cover never override field years.
 
-    Returns ``(year, source_tag)`` where source_tag is ``upload_filename`` or
-    ``upload_text`` when a year is found.
+    Returns ``(year, source_tag)`` where source_tag is ``document_text``,
+    ``upload_filename``, or ``upload_text`` when a year is found.
     """
-    docs = document_contexts or []
-    # Filename is the strongest analyst-facing signal for derived fixtures
-    # (e.g. msft_fy2024_10k_long_excerpt.pdf).
+    docs = _docs_for_company(document_contexts, company=company)
+    field_years: list[int] = []
+    for doc in docs:
+        metas: list[dict[str, Any]] = []
+        per_co = (doc.get("per_company_metric_hint_meta") or {}).get(company or "")
+        if isinstance(per_co, dict):
+            metas.append(per_co)
+        raw_meta = doc.get("metric_hint_meta")
+        if isinstance(raw_meta, dict):
+            metas.append(raw_meta)
+        for meta_map in metas:
+            for row in meta_map.values():
+                if not isinstance(row, dict):
+                    continue
+                year = parse_requested_fiscal_year(row.get("period"))
+                if year is not None:
+                    field_years.append(year)
+    unique_field = list(dict.fromkeys(field_years))
+    if len(unique_field) == 1:
+        return unique_field[0], "document_text"
+    if len(unique_field) > 1:
+        return None, None
+
+    collected: list[tuple[int, str]] = []
     for doc in docs:
         for key in ("filename", "source", "path", "citation"):
             raw = str(doc.get(key) or "")
@@ -349,19 +382,22 @@ def infer_fiscal_year_from_documents(
             name = Path(raw).name if ("/" in raw or "\\" in raw) else raw
             year = parse_requested_fiscal_year(name)
             if year is not None:
-                return year, "upload_filename"
-    # Filing body / excerpt (FY2024, fiscal year ended ..., etc.)
-    for doc in docs:
-        detected = doc.get("detected_companies") or []
-        if company and detected and company not in detected:
-            continue
-        blob = " ".join(
-            str(doc.get(k) or "") for k in ("filename", "excerpt", "text")
-        )[:8000]
+                collected.append((year, "upload_filename"))
+                break
+        blob = " ".join(str(doc.get(k) or "") for k in ("excerpt", "text"))[:8000]
         year = parse_requested_fiscal_year(blob)
         if year is not None:
-            return year, "upload_text"
-    return None, None
+            collected.append((year, "upload_text"))
+    unique = list(dict.fromkeys(year for year, _source in collected))
+    if len(unique) != 1:
+        return None, None
+    year = unique[0]
+    source = (
+        "upload_filename"
+        if any(item_year == year and item_source == "upload_filename" for item_year, item_source in collected)
+        else "upload_text"
+    )
+    return year, source
 
 
 # Typical fiscal calendars for common issuers when filing extract has no period_end.
@@ -485,16 +521,56 @@ def annotate_upload_period_meta(
 def requested_fiscal_year_from_state(state: dict[str, Any] | None) -> int | None:
     state = state or {}
     plan = state.get("query_plan") or {}
+    query = state.get("query")
+    if query_has_relative_unanchored_period(str(query or "")):
+        return None
+    years = distinct_fiscal_years(plan.get("time_range"), query)
+    if len(years) > 1:
+        return None
     return parse_requested_fiscal_year(
-        plan.get("time_range"),
-        state.get("query"),
+        plan.get("time_range") if str(plan.get("time_range") or "") not in {"document_context"} else "",
+        query,
         (state.get("user_clarification") or {}).get("time_range"),
         (state.get("user_clarification") or {}).get("fiscal_year"),
     )
 
 
+def requested_fiscal_year_for_company(state: dict[str, Any] | None, company: str) -> int | None:
+    plan = (state or {}).get("query_plan") or {}
+    label = str((plan.get("company_periods") or {}).get(company) or "")
+    match = re.search(r"(20\d{2})", label)
+    if match:
+        return int(match.group(1))
+    return requested_fiscal_year_from_state(state)
+
+
 def used_fiscal_year_for_company(state: dict[str, Any] | None, company: str) -> int | None:
     payload = ((state or {}).get("retrieved_docs") or {}).get(company) or {}
+    provenance = payload.get("fundamental_provenance") or {}
+    field_years: list[int] = []
+    has_field_row = False
+    if isinstance(provenance, dict):
+        from .claims.period import is_factual_period_provenance
+
+        for row in provenance.values():
+            if not isinstance(row, dict):
+                continue
+            has_field_row = True
+            period = str(row.get("period") or "").strip()
+            if not is_factual_period_provenance(
+                period=period or None,
+                period_source=str(row.get("period_source") or "") or None,
+                period_alignment=str(row.get("period_alignment") or "") or None,
+            ):
+                continue
+            year = parse_requested_fiscal_year(period)
+            if year is not None:
+                field_years.append(year)
+    unique_field = list(dict.fromkeys(field_years))
+    if len(unique_field) == 1:
+        return unique_field[0]
+    if has_field_row and not unique_field:
+        return None
     meta = payload.get("fundamentals_meta") or {}
     for key in ("fiscal_year", "fy"):
         value = meta.get(key)
@@ -771,8 +847,21 @@ def format_comparison_capsule(state: dict[str, Any] | None) -> list[str]:
     if len(companies) < 2:
         return []
     metrics_by_company = state.get("financial_metrics") or {}
+    asked = [str(item) for item in ((state.get("query_plan") or {}).get("requested_metrics") or []) if str(item).strip()]
+    specs = list(COMPARE_METRIC_SPECS)
+    if asked:
+        label_map = {
+            "operating_income": ("Operating income", False),
+            "revenue": ("Revenue", False),
+            "r_and_d": ("R&D expense", False),
+            "ebitda": ("EBITDA", False),
+            "operating_margin": ("Operating Margin", True),
+            "ebitda_margin": ("EBITDA Margin", True),
+            "r_and_d_intensity": ("R&D Intensity", True),
+        }
+        specs = [(key, label_map[key][0], label_map[key][1]) for key in asked if key in label_map]
     bullets: list[str] = []
-    for key, label, is_pct in COMPARE_METRIC_SPECS:
+    for key, label, is_pct in specs:
         scored: list[tuple[str, float]] = []
         missing: list[str] = []
         for company in companies:
@@ -856,6 +945,84 @@ def filter_claims_for_brief(claims: list[Any]) -> list[Any]:
     return kept
 
 
+def _claim_entity(claim: Any) -> str:
+    return str(
+        getattr(claim, "entity", None)
+        or (claim.get("entity") if isinstance(claim, dict) else None)
+        or ""
+    )
+
+
+def _claim_metric(claim: Any) -> str:
+    return str(
+        getattr(claim, "metric_name", None)
+        or (claim.get("metric_name") if isinstance(claim, dict) else None)
+        or ""
+    )
+
+
+def asked_subject_companies(state: dict[str, Any] | None) -> list[str]:
+    state = state or {}
+    plan = state.get("query_plan") or {}
+    named = [str(item) for item in (plan.get("query_companies") or []) if str(item).strip()]
+    if named:
+        return named
+    return [str(item) for item in (state.get("companies") or []) if str(item).strip()]
+
+
+def format_answer_scope_lines(state: dict[str, Any] | None) -> list[str]:
+    """Named-issuer and requested-vs-evidence period notes (no eval case IDs)."""
+    state = state or {}
+    plan = state.get("query_plan") or {}
+    query = str(state.get("query") or plan.get("normalized_query") or "")
+    asked = asked_subject_companies(state)
+    upload = [str(item) for item in (plan.get("upload_companies") or []) if str(item).strip()]
+    asked_metrics = [str(item) for item in (plan.get("requested_metrics") or []) if str(item).strip()]
+    lines: list[str] = []
+    for company in asked:
+        if upload and company not in upload:
+            covered = ", ".join(upload)
+            lines.append(
+                f"- Uploaded materials identify {covered} and do not contain statement evidence for {company}. "
+                f"{covered} figures are not a substitute answer for {company}."
+            )
+            continue
+        payload = (state.get("retrieved_docs") or {}).get(company) or {}
+        provenance = payload.get("fundamental_provenance") or {}
+        metrics = asked_metrics or ["operating_income", "revenue", "r_and_d", "ebitda"]
+        periods: list[str] = []
+        ambiguous = False
+        for metric in metrics:
+            row = provenance.get(metric) if isinstance(provenance, dict) else None
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("period_source") or "").strip().casefold() == "ambiguous":
+                ambiguous = True
+            label = str(row.get("period") or "").strip()
+            if label:
+                periods.append(label)
+        unique = list(dict.fromkeys(periods))
+        requested = requested_fiscal_year_for_company(state, company)
+        if requested is not None and unique:
+            requested_label = f"FY{requested}"
+            if not any(parse_requested_fiscal_year(item) == requested for item in unique):
+                lines.append(
+                    f"- {company}: field evidence supports {', '.join(unique)}, which does not answer requested {requested_label}."
+                )
+        elif ambiguous or len(unique) > 1:
+            shown = ", ".join(unique) if unique else "multiple unlabeled years"
+            lines.append(
+                f"- {company}: materials contain more than one candidate period ({shown}). "
+                "Specify the fiscal year; cover or filename years are not used as the fact period."
+            )
+        elif query_has_relative_unanchored_period(query) and unique:
+            lines.append(
+                f"- {company}: relative time in the query has no calendar/FY anchor; "
+                f"the labeled figure uses field evidence {unique[0]} rather than a file-year guess for 'last year'."
+            )
+    return lines
+
+
 def build_analyst_executive_summary(
     state: dict[str, Any] | None,
     verified_claims: list[Any],
@@ -864,74 +1031,89 @@ def build_analyst_executive_summary(
 ) -> str:
     """Analyst-facing summary: compare capsule first; single-issuer falls back to numeric claims."""
     state = state or {}
-    companies = [str(c) for c in (state.get("companies") or [])]
+    companies = asked_subject_companies(state)
     parts: list[str] = []
+    from .query_focus import RATIO_METRICS
+
+    asked = [
+        str(item)
+        for item in ((state.get("query_plan") or {}).get("requested_metrics") or [])
+        if str(item).strip()
+    ]
     capsule = format_comparison_capsule(state)
-    # Multi-company: capsule alone is the analyst conclusion (no claim dump).
+    if asked and not any(item in RATIO_METRICS for item in asked):
+        capsule = []
     if capsule:
         parts.extend(line for line in capsule if line.strip())
+        scope = format_answer_scope_lines(state)
+        if scope:
+            parts.extend(["", *scope])
         return "\n".join(parts)
 
-    # Analyst summary: numeric highlights only (risk/thesis live in dedicated sections).
     claims = [
         c
         for c in (filter_claims_for_brief(verified_claims) if brief else list(verified_claims))
         if (getattr(c, "claim_type", None) or (c.get("claim_type") if isinstance(c, dict) else None))
         == "numeric"
+        and _claim_entity(c) in set(companies)
     ]
 
+    scope_lines = format_answer_scope_lines(state)
     if not companies:
         return (
             "This run produced a research report, but no target company was available "
             "for a grounded executive summary."
         )
-    if not claims:
-        return (
-            "No structurally verified financial claims were available. "
-            "This executive summary withholds numeric and investment assertions rather than inventing citations."
-        )
 
     per_company: list[str] = []
     for company in companies:
-        company_claims = [
-            c
-            for c in claims
-            if (getattr(c, "entity", None) or (c.get("entity") if isinstance(c, dict) else None)) == company
-        ]
-        # Prefer margin/intensity metrics for compact summary.
-        preferred_order = (
+        company_claims = [c for c in claims if _claim_entity(c) == company]
+        preferred_order = tuple(asked) if asked else (
+            "operating_income",
+            "revenue",
+            "r_and_d",
             "operating_margin",
             "ebitda_margin",
             "r_and_d_intensity",
-            "revenue",
-            "pe_ratio",
         )
         picked: list[Any] = []
         remaining = list(company_claims)
         for metric in preferred_order:
             for claim in list(remaining):
-                metric_name = getattr(claim, "metric_name", None) or (
-                    claim.get("metric_name") if isinstance(claim, dict) else None
-                )
-                if metric_name == metric:
+                if _claim_metric(claim) == metric:
                     picked.append(claim)
                     remaining.remove(claim)
                     break
-            if len(picked) >= 3:
+            if asked and len(picked) >= len(preferred_order):
                 break
-        if not picked:
-            continue
-        bullets = []
+            if not asked and len(picked) >= 3:
+                break
+        bullets: list[str] = []
         for claim in picked:
             if hasattr(claim, "render_with_citation"):
                 bullets.append(f"- {claim.render_with_citation(humanize=True)}")
             else:
                 bullets.append(f"- {claim.get('statement') or ''}")
+        if not picked:
+            if asked:
+                labels = ", ".join(item.replace("_", " ") for item in asked)
+                bullets.append(
+                    f"- Uploaded materials do not support a verified {labels} figure for {company}."
+                )
+            else:
+                continue
         per_company.append(f"**{company}**\n" + "\n".join(bullets))
 
+    if scope_lines:
+        parts.extend(scope_lines)
     if per_company:
         parts.append("\n\n".join(per_company))
-    return "\n".join(p for p in parts if p)
+    if parts:
+        return "\n".join(p for p in parts if p)
+    return (
+        "No structurally verified financial claims were available. "
+        "This executive summary withholds numeric and investment assertions rather than inventing citations."
+    )
 
 
 # Used by AgentRuntime.retrieval for SEC prefer_fiscal_year.

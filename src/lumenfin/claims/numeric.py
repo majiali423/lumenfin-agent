@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from ..documents import detect_companies_from_text
 from .models import METRIC_ALIASES, EvidenceRef, _STRUCTURED_SOURCES
 from .period import (
     PeriodIdentity,
@@ -24,11 +25,9 @@ def _fmt_pct(value: float) -> str:
 
 
 def _fmt_num(value: float) -> str:
-    if abs(value) >= 100:
-        return f"{value:.1f}"
-    if abs(value) >= 10:
-        return f"{value:.2f}"
-    return f"{value:.4g}"
+    from ..query_focus import format_billion_amount
+
+    return format_billion_amount(value)
 
 
 def _is_usable_number_token(token: str, value: float) -> bool:
@@ -318,8 +317,11 @@ def match_numeric_evidence(
         return EvidenceMatch(
             False, None, False, False, False, None, None, "none", "entity_mismatch"
         )
-
-    text = evidence.text or ""
+    named = detect_companies_from_text(text := evidence.text or "")
+    if named and entity and not any(item.casefold() == entity.casefold() for item in named):
+        return EvidenceMatch(
+            False, None, False, False, False, None, None, "none", "entity_mismatch"
+        )
     period_type = getattr(evidence, "period_type", None)
     hit: tuple[int, float, str | None, str] | None = None
     if formula_inputs:

@@ -131,12 +131,8 @@ class ClarificationCopyTestCase(unittest.TestCase):
                 {"detected_companies": ["Apple", "Microsoft"], "filename": "table.pdf"}
             ],
         )
-        self.assertIn("company_upload_mismatch", plan.missing_fields)
-        joined = " ".join(plan.clarification_questions)
-        self.assertIn("不一致", joined)
-        self.assertIn("uploaded", joined)
-        self.assertIn("query", joined)
-        self.assertIn("both", joined)
+        self.assertTrue(plan.evidence_company_gap)
+        self.assertNotIn("company_upload_mismatch", plan.missing_fields)
 
 
 class BriefReportEndToEndTestCase(unittest.TestCase):

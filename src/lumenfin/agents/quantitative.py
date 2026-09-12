@@ -4,7 +4,9 @@ from typing import Any
 
 from ..metrics_schema import get_fundamental
 from ..parallel import map_in_parallel
+from ..query_focus import RATIO_METRICS
 from ..state import FinanceState
+from ..task_spec import task_spec_from_state
 from ..tools import (
     build_coverage_matrix,
     calculate_derived_ratios,
@@ -52,34 +54,58 @@ class QuantitativeMixin:
         for abs_key, abs_value in base_data.items():
             metrics.setdefault(abs_key, float(abs_value))
 
-        if len(base_data) >= 3:
+        spec = task_spec_from_state(state)
+        asked = list(spec.requested_metrics)
+        compute_ratios = spec.requires_ast_ratios or any(item in RATIO_METRICS for item in asked)
+        if compute_ratios:
             for formula, key in [
                 ("ebitda / revenue", "ebitda_margin"),
                 ("r_and_d / revenue", "r_and_d_intensity"),
                 ("operating_income / revenue", "operating_margin"),
             ]:
+                if asked and key not in asked:
+                    continue
                 try:
-                    if all(v in base_data for v in ["revenue"]):
-                        if key == "r_and_d_intensity" and "r_and_d" not in base_data:
-                            continue
-                        if key == "operating_margin" and "operating_income" not in base_data:
-                            continue
-                        if key == "ebitda_margin" and "ebitda" not in base_data:
-                            continue
-                        metrics[key] = resolve_safe_formula(
-                            formula,
-                            base_data,
-                            backend=self.tool_backend,
-                        )
-                        set_confidence(key, 0.95, "AST")
+                    if key == "r_and_d_intensity" and "r_and_d" not in base_data:
+                        continue
+                    if key == "operating_margin" and "operating_income" not in base_data:
+                        continue
+                    if key == "ebitda_margin" and "ebitda" not in base_data:
+                        continue
+                    if "revenue" not in base_data:
+                        continue
+                    metrics[key] = resolve_safe_formula(
+                        formula,
+                        base_data,
+                        backend=self.tool_backend,
+                    )
+                    set_confidence(key, 0.95, "AST")
                 except (KeyError, ValueError):
                     pass
 
-        derived = calculate_derived_ratios(market)
-        for key, value in derived.items():
-            metrics.setdefault(key, value)
-            if key not in metric_confidence:
-                set_confidence(key, 0.72, "Derived")
+        if not spec.skip_enrichment:
+            derived = calculate_derived_ratios(market)
+            for key, value in derived.items():
+                metrics.setdefault(key, value)
+                if key not in metric_confidence:
+                    set_confidence(key, 0.72, "Derived")
+
+        if spec.skip_enrichment:
+            if not metrics:
+                return {
+                    "company": company,
+                    "metrics": {},
+                    "quant_status": "uncomputable",
+                    "metric_confidence": {},
+                }
+            quant_status = classify_quant_status(metrics)
+            return {
+                "company": company,
+                "metrics": metrics,
+                "quant_status": quant_status,
+                "scenario": {},
+                "metric_confidence": metric_confidence,
+            }
 
         cap = live_market.get("market_cap")
         live_status = str(live_market.get("status") or "ok")

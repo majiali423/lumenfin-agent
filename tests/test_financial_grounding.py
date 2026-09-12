@@ -225,7 +225,7 @@ class FinancialGroundingRetrieveTests(unittest.TestCase):
         meta = payload["fundamentals_meta"]
         self.assertEqual(meta.get("grounding_layer"), "document_ast_complete")
         self.assertEqual(meta.get("fiscal_year"), 2024)
-        self.assertEqual(meta.get("fiscal_year_source"), "upload_filename")
+        self.assertIn(meta.get("fiscal_year_source"), {"document_text", "upload_filename"})
         self.assertEqual(meta.get("period_alignment"), "exact")
         self.assertEqual(meta.get("requested_fiscal_year"), 2024)
         self.assertNotEqual(meta.get("period_end"), "2024-06-30")

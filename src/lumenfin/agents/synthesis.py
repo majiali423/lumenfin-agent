@@ -448,18 +448,32 @@ class SynthesisMixin:
                             f"| {label} | {v:.2f}x | {screen} | — | {status} | {citation} |"
                         )
 
-                add_row("ebitda_margin", "EBITDA Margin", ">25%")
-                add_row("operating_margin", "Operating Margin", ">20%")
-                add_row("r_and_d_intensity", "R&D Intensity", "5-15%")
-                add_row("pe_ratio", "P/E (TTM, live)", "—")
+                asked = [
+                    str(item)
+                    for item in ((state.get("query_plan") or {}).get("requested_metrics") or [])
+                    if str(item).strip()
+                ]
+                if not asked or "ebitda_margin" in asked:
+                    add_row("ebitda_margin", "EBITDA Margin", ">25%")
+                if not asked or "operating_margin" in asked:
+                    add_row("operating_margin", "Operating Margin", ">20%")
+                if not asked or "r_and_d_intensity" in asked:
+                    add_row("r_and_d_intensity", "R&D Intensity", "5-15%")
+                if not asked:
+                    add_row("pe_ratio", "P/E (TTM, live)", "—")
                 # Absolute fundamentals (once) for analyst context
                 market = ((state.get("retrieved_docs") or {}).get(company) or {}).get("market_data") or {}
-                abs_bits = []
-                for key, label in (
+                from ..query_focus import format_billion_amount
+
+                abs_keys = (
                     ("revenue", "Revenue"),
                     ("operating_income", "Operating income"),
                     ("r_and_d", "R&D"),
-                ):
+                )
+                if asked:
+                    abs_keys = tuple((key, label) for key, label in abs_keys if key in asked)
+                abs_bits = []
+                for key, label in abs_keys:
                     hits = verified_by_entity(verified_claims, company, metric_name=key)
                     if hits:
                         abs_bits.append(hits[0].render_with_citation(humanize=True))
@@ -476,11 +490,11 @@ class SynthesisMixin:
                             period_bit = " (period not stated in the source)"
                         if cite:
                             abs_bits.append(
-                                f"{company} {label} is {float(raw_abs):.2f} billion USD{period_bit} [{cite}]."
+                                f"{company} {label} is {format_billion_amount(float(raw_abs))} billion USD{period_bit} [{cite}]."
                             )
                         else:
                             abs_bits.append(
-                                f"{company} {label} is {float(raw_abs):.2f} billion USD "
+                                f"{company} {label} is {format_billion_amount(float(raw_abs))} billion USD "
                                 f"(structured fundamentals; claim not bound)."
                             )
                 if abs_bits:

@@ -591,12 +591,24 @@ def chunk_document(
     if tables:
         from ..sec_html import tables_to_financial_facts
 
+        html_source = str(document.get("source_type") or "").lower() == "sec_html" or str(
+            filename
+        ).lower().endswith((".html", ".htm"))
+        if html_source:
+            declared = document.get("page")
+            try:
+                html_page = int(declared) if declared is not None else 1
+            except (TypeError, ValueError):
+                html_page = 1
+            page_offset = html_page if html_page >= 1 else 1
+        else:
+            page_offset = max(page_numbers) if page_numbers else 1
         html_facts = tables_to_financial_facts(
             tables,
             issuers=issuers or tag_pool,
             document_id=document_id,
             filename=filename,
-            page_offset=max(page_numbers) if page_numbers else 1,
+            page_offset=page_offset,
         )
         # Dedupe: for same metric+period, keep higher-ranked (consolidated > segment).
         existing = {

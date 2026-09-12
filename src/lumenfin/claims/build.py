@@ -6,7 +6,9 @@ import re
 from typing import Any
 
 from ..metrics_schema import get_fundamental, period_label_from_meta
-from ..quant_contract import AST_RATIO_KEYS, has_computable_fundamentals
+from ..quant_contract import AST_RATIO_KEYS, has_structured_amounts
+from ..reporting import requested_fiscal_year_for_company
+from ..task_spec import task_spec_from_state
 from .binding import _collect_evidence_pool, _prefer_refs_for_values, _verify_numeric
 from .models import (
     FORMULA_INPUTS,
@@ -17,11 +19,47 @@ from .models import (
     verified_by_entity,
 )
 from .numeric import _fmt_num, _fmt_pct, _text_contains_number
+from .period import is_factual_period_provenance, match_period
+
+
+def _factual_field_period(field_prov: Any) -> str:
+    """Use only a field-bound FY; cover/filename meta is not a substitute."""
+    if not isinstance(field_prov, dict):
+        return ""
+    period = str(field_prov.get("period") or "").strip()
+    if not period:
+        return ""
+    if is_factual_period_provenance(
+        period=period,
+        period_source=str(field_prov.get("period_source") or "") or None,
+        period_alignment=str(field_prov.get("period_alignment") or "") or None,
+    ):
+        return period
+    return ""
+
+
+def _claim_field_period(field_prov: Any, meta: Any) -> str:
+    factual = _factual_field_period(field_prov)
+    if factual:
+        return factual
+    if isinstance(field_prov, dict):
+        return ""
+    label = period_label_from_meta(meta if isinstance(meta, dict) else None)
+    if not label or label in {"latest"}:
+        return ""
+    source = str((meta or {}).get("fiscal_year_source") or "").casefold()
+    if source in {"upload_filename", "upload_text", "query"}:
+        return ""
+    return label
 
 def build_claims(state: dict[str, Any]) -> list[Claim]:
     """Build and verify claims from structured state (no LLM)."""
     claims: list[Claim] = []
     companies = list(state.get("companies") or [])
+    plan = state.get("query_plan") or {}
+    query_named = [str(item) for item in (plan.get("query_companies") or []) if str(item).strip()]
+    if query_named:
+        companies = [company for company in companies if company in set(query_named)] or companies
     metrics_by_co = state.get("financial_metrics") or {}
     retrieved = state.get("retrieved_docs") or {}
     fatal_gap = bool(state.get("fatal_data_gap"))
@@ -33,12 +71,16 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
         period = period_label_from_meta(payload.get("fundamentals_meta"))
         metrics = metrics_by_co.get(company) or {}
         structured = str(payload.get("structured_source") or "none")
-        # Fail-closed: do not mint verified numeric "facts" when fundamentals are absent.
-        block_numeric = fatal_gap or structured == "none" or not has_computable_fundamentals(payload)
+        spec = task_spec_from_state(state)
+        requested_metrics = list(spec.requested_metrics)
+        # Fail-closed: do not mint verified numeric "facts" when no statement amounts exist.
+        block_numeric = fatal_gap or structured == "none" or not has_structured_amounts(payload)
 
         # --- Numeric ratio claims (AST) ---
         if not block_numeric:
             for metric_name in AST_RATIO_KEYS:
+                if requested_metrics and metric_name not in requested_metrics:
+                    continue
                 value = metrics.get(metric_name)
                 if not isinstance(value, (int, float)):
                     continue
@@ -82,16 +124,54 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                 )
 
             # Absolute fundamentals as numeric claims (for ledger + consistency)
+            provenance = payload.get("fundamental_provenance") or {}
             for key, label in (
                 ("revenue", "Revenue"),
                 ("ebitda", "EBITDA"),
                 ("operating_income", "Operating income"),
                 ("r_and_d", "R&D expense"),
             ):
+                if requested_metrics and key not in requested_metrics:
+                    continue
                 raw = get_fundamental(market_data, key)
                 if raw is None:
                     continue
-                statement = f"{company} {label} is {_fmt_num(float(raw))} billion USD for {period}."
+                field_prov = provenance.get(key) if isinstance(provenance, dict) else None
+                field_period = _claim_field_period(field_prov, payload.get("fundamentals_meta"))
+                requested_year = requested_fiscal_year_for_company(state, company)
+                if requested_year is not None:
+                    requested_label = f"FY{requested_year}"
+                    evidence_label = field_period or "an unlabeled field amount"
+                    if not field_period or not match_period(requested_label, field_period, "").matched:
+                        claims.append(
+                            Claim(
+                                claim_id=f"cl_abs_{company}_{key}",
+                                entity=company,
+                                claim_type="numeric",
+                                statement=(
+                                    f"{company} {label} in uploaded materials is {_fmt_num(float(raw))} "
+                                    f"billion USD for {evidence_label}, which does not answer requested {requested_label}."
+                                ),
+                                value=float(raw),
+                                unit="billion_usd",
+                                period=field_period or "unknown",
+                                metric_name=key,
+                                verification="rejected",
+                                verify_reason="Evidence period does not match the requested fiscal year.",
+                            )
+                        )
+                        continue
+                if field_period:
+                    statement = (
+                        f"{company} {label} is {_fmt_num(float(raw))} billion USD for {field_period}."
+                    )
+                    claim_period = field_period
+                else:
+                    statement = (
+                        f"{company} {label} is {_fmt_num(float(raw))} billion USD "
+                        "(period not stated in the source)."
+                    )
+                    claim_period = "unknown"
                 claim = Claim(
                     claim_id=f"cl_abs_{company}_{key}",
                     entity=company,
@@ -99,7 +179,7 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                     statement=statement,
                     value=float(raw),
                     unit="billion_usd",
-                    period=period,
+                    period=claim_period,
                     metric_name=key,
                 )
                 refs = _prefer_refs_for_values(
@@ -109,14 +189,14 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
                     entity=company,
                     metric_name=key,
                     unit="billion_usd",
-                    period=period,
+                    period=claim_period,
                 )
                 claims.append(_verify_numeric(claim, refs, [float(raw)], pool=pool))
 
             # Market snapshot numerics only when structured fundamentals exist.
             snapshot = (state.get("market_snapshots") or {}).get(company) or {}
             pe = snapshot.get("trailing_pe")
-            if isinstance(pe, (int, float)):
+            if isinstance(pe, (int, float)) and not spec.skip_enrichment and not requested_metrics:
                 claim = Claim(
                     claim_id=f"cl_num_{company}_pe_ratio",
                     entity=company,
@@ -174,7 +254,7 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
         supply = payload.get("supply_chain") or {}
         risk_level = str(supply.get("risk_level") or "unknown")
         risk_scores = (state.get("risk_scores") or {}).get(company) or {}
-        if supply or risk_scores or block_numeric:
+        if (supply or risk_scores or block_numeric) and not (spec.skip_enrichment and not block_numeric):
             if block_numeric:
                 statement = (
                     f"{company} data-limitation risk is elevated: no AST-computable fundamentals "
@@ -279,7 +359,10 @@ def build_claims(state: dict[str, Any]) -> list[Claim]:
     for company in companies:
         payload = retrieved.get(company) or {}
         structured = str(payload.get("structured_source") or "none")
-        block_numeric = fatal_gap or structured == "none" or not has_computable_fundamentals(payload)
+        spec = task_spec_from_state(state)
+        if spec.skip_enrichment:
+            continue
+        block_numeric = fatal_gap or structured == "none" or not has_structured_amounts(payload)
         num = verified_by_entity(verified_so_far, company, claim_type="numeric")
         risk = verified_by_entity(verified_so_far, company, claim_type="risk_conclusion")
         # Prefer EBITDA margin; fall back to operating margin for PDF extracts lacking EBITDA.

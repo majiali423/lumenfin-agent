@@ -321,7 +321,9 @@ def tables_to_financial_facts(
                 if re.search(r"^total\s+(net\s+sales|revenue)", label, re.I):
                     scope = "consolidated"
                     statement_type = "income_statement"
-                page = page_offset + (table_i // 3)
+                # HTML has no PDF pagination. #pN must be the source document
+                # page (typically 1), not a table-index or char-window index.
+                page = int(page_offset) if int(page_offset) >= 1 else 1
                 display = (
                     f"{company} {metric_key} {period}: {value} "
                     f"(html table; {scope}; {statement_type}; row={label})."
@@ -389,22 +391,19 @@ def parse_sec_html_document(file_path: Path) -> dict[str, Any]:
 
     text = re.sub(r"[ \t]+", " ", "".join(parser.plain_parts))
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    # Paginate for chunker compatibility (~2800 chars ≈ prior PDF converter).
-    page_size = 2800
-    pages = [text[i : i + page_size] for i in range(0, max(1, len(text)), page_size)] or [text]
-    entity = resolve_document_entities(text=text, pages=pages[:3], filename=path.name)
+    entity = resolve_document_entities(text=text, pages=[text], filename=path.name)
     issuers = list(entity.get("issuer_companies") or entity.get("detected_companies") or [])
     mentioned = list(entity.get("mentioned_companies") or issuers)
     tables = parser.tables
-    # Attach linearized table blocks into pages so narrative chunking still sees numbers.
-    table_pages: list[str] = []
+    table_blocks: list[str] = []
     for t_i, table in enumerate(tables):
         rows = table.get("rows") or []
         lines = [" | ".join(r) for r in rows[:80]]
-        table_pages.append(f"[HTML TABLE {t_i}]\n" + "\n".join(lines))
-    if table_pages:
-        # Append compact table pages after prose pages (facts also emitted separately).
-        pages = pages + table_pages
+        table_blocks.append(f"[HTML TABLE {t_i}]\n" + "\n".join(lines))
+    if table_blocks:
+        text = text + "\n\n" + "\n\n".join(table_blocks)
+    # One source page: HTML is not a PDF. Char windows and tables stay in-page.
+    pages = [text]
 
     hint_scope = issuers or mentioned
     metric_hints = _extract_metric_hints(text)

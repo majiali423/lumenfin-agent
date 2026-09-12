@@ -79,6 +79,20 @@ class SecHtmlFactRankingTestCase(unittest.TestCase):
         self.assertEqual(doc.get("detected_companies"), ["Apple"])
         self.assertGreater(int(doc.get("html_table_count") or 0), 10)
         self.assertEqual(doc.get("source_type"), "sec_html")
+        self.assertEqual(int(doc.get("page_count") or 0), 1)
+        chunks = chunk_document(doc)
+        self.assertTrue(chunks)
+        self.assertEqual({int(item.get("page") or 0) for item in chunks}, {1})
+        hits = _hits_from_scored_chunks(
+            chunks,
+            company="Apple",
+            query="Apple FY2024 operating income",
+            top_k=8,
+        )
+        self.assertTrue(hits)
+        for hit in hits:
+            self.assertEqual(int(hit.get("page") or 0), 1, hit)
+            self.assertTrue(str(hit.get("citation") or "").endswith("#p1"), hit.get("citation"))
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from .rag.factory import build_document_indexer, build_hybrid_retriever, build_r
 from .state import FinanceState
 from .checkpoint_store import WorkflowCheckpointRepository
 from .observability import utc_now_iso
+from .tracing import analysis_trace, attach_llm_tracing
 
 
 def route_after_input_guardrail(state: FinanceState) -> str:
@@ -47,6 +48,8 @@ def route_after_retrieval(state: FinanceState) -> str:
     if state.get("replan_reason"):
         return "appendix_replan"
     if spec.skip_quant:
+        if spec.skip_enrichment:
+            return "claim_binder"
         return "psychologist"
     return "quant"
 
@@ -56,12 +59,19 @@ def route_after_bounded_repair(state: FinanceState) -> str:
     if state.get("fatal_data_gap"):
         return "claim_binder"
     if spec.skip_quant:
+        if spec.skip_enrichment:
+            return "claim_binder"
         return "psychologist"
     return "quant"
 
 
 def route_after_quant(state: FinanceState) -> str:
-    return "appendix_replan" if state.get("replan_reason") else "psychologist"
+    if state.get("replan_reason"):
+        return "appendix_replan"
+    spec = task_spec_from_state(state)
+    if spec.skip_enrichment:
+        return "claim_binder"
+    return "psychologist"
 
 
 def route_after_critic(state: FinanceState) -> str:
@@ -176,6 +186,7 @@ class LumenFinAgentSystem:
             rag_store=self.rag_store,
             indexer=self.document_indexer,
         )
+        self.llm_client = attach_llm_tracing(self.llm_client)
         self.runtime = AgentRuntime(
             session_memory=self.session_memory,
             knowledge_memory=self.knowledge_memory,
@@ -251,7 +262,7 @@ class LumenFinAgentSystem:
         workflow.add_conditional_edges(
             "quant",
             route_after_quant,
-            {"psychologist": "psychologist", "appendix_replan": "appendix_replan"},
+            {"psychologist": "psychologist", "appendix_replan": "appendix_replan", "claim_binder": "claim_binder"},
         )
         workflow.add_edge("psychologist", "critic")
         workflow.add_conditional_edges(
@@ -297,7 +308,16 @@ class LumenFinAgentSystem:
             requested_output_format=output_format,
         )
         config = {"configurable": {"thread_id": thread_id}}
-        result = self.graph.invoke(initial_state, config=config)
+        with analysis_trace(
+            name="lumenfin.graph.run",
+            metadata={
+                "thread_id": thread_id,
+                "system": "b2_agent",
+                "model": getattr(self.llm_client, "model_name", "unknown"),
+            },
+            inputs={"query": query, "thread_id": thread_id},
+        ):
+            result = self.graph.invoke(initial_state, config=config)
         return self._finalize_result(result, thread_id)
 
     def resume_with_clarification(

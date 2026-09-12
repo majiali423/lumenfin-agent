@@ -8,19 +8,22 @@ from ..documents import expand_document_page_contexts, is_trusted_ast_amount, no
 from ..fundamentals import is_plausible_revenue_billion_usd
 from ..input_guardrail import sanitize_retrieval_hits
 from ..market_data import summarize_market_snapshots
-from ..metrics_schema import set_fundamental
+from ..metrics_schema import get_fundamental, set_fundamental
 from ..parallel import map_in_parallel
 from ..rag.dedupe import dedupe_cross_company_rag_hits
 from ..rag.telemetry import summarize_rag_telemetry
-from ..reporting import requested_fiscal_year_from_state, stamp_document_extracted_provenance
+from ..reporting import requested_fiscal_year_for_company, stamp_document_extracted_provenance
 from ..state import FinanceState
 from ..task_spec import task_spec_from_state
-from ..tools import (
+from ..quant_contract import (
     build_coverage_matrix,
     has_computable_fundamentals,
-    has_supply_chain_signal,
+    has_requested_structured_facts,
     is_partial_compare_gap,
     non_comparable_companies,
+)
+from ..tools import (
+    has_supply_chain_signal,
     retrieve_company_payload,
     summarize_document_context,
 )
@@ -47,7 +50,17 @@ class RetrievalMixin:
             "keyword_hits": 0,
             "lexical_fallback_hits": 0,
         }
-        if self.rag_enabled and self.hybrid_retriever and document_contexts:
+        query_plan = state.get("query_plan") or {}
+        upload_only = bool(query_plan.get("prefer_uploaded_only"))
+        gap = bool(query_plan.get("evidence_company_gap"))
+        upload_set = {str(item) for item in (query_plan.get("upload_companies") or [])}
+        scoped_out = gap and upload_set and company not in upload_set
+        if (
+            not scoped_out
+            and self.rag_enabled
+            and self.hybrid_retriever
+            and document_contexts
+        ):
             source_document_ids = list(state.get("rag_document_ids") or [])
             use_stored = self.rag_index_mode == "async_on_upload" and bool(source_document_ids)
             rag_hits, rag_meta = self.hybrid_retriever.retrieve_for_company_with_meta(
@@ -64,6 +77,8 @@ class RetrievalMixin:
                 rag_meta["sanitized_finding_count"] = len(sanitize_findings)
             else:
                 rag_meta["sanitized_finding_count"] = 0
+        elif scoped_out:
+            rag_meta["mode"] = "scoped_out"
 
         if rag_hits:
             document_summary = {
@@ -77,42 +92,48 @@ class RetrievalMixin:
             company,
             include_appendix=include_appendix,
             document_contexts=document_contexts,
-            allow_sample_data=self.allow_sample_data
-            and not bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
+            allow_sample_data=self.allow_sample_data and not upload_only and not scoped_out,
             ticker=state.get("target_symbols", {}).get(company),
-            fetch_live_fundamentals=self.fetch_live_fundamentals
-            and not bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
-            fetch_sec_fundamentals=self.fetch_sec_fundamentals
-            and not bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
-            prefer_uploaded_only=bool((state.get("query_plan") or {}).get("prefer_uploaded_only")),
-            prefer_fiscal_year=requested_fiscal_year_from_state(state),
+            fetch_live_fundamentals=self.fetch_live_fundamentals and not upload_only and not scoped_out,
+            fetch_sec_fundamentals=self.fetch_sec_fundamentals and not upload_only and not scoped_out,
+            prefer_uploaded_only=upload_only or scoped_out,
+            prefer_fiscal_year=requested_fiscal_year_for_company(state, company),
         )
-        try:
-            live_market = self.market_data_client.fetch_company_snapshot(
-                company,
-                state.get("target_symbols", {}).get(company),
-            )
-        except Exception as exc:
-            ticker = state.get("target_symbols", {}).get(company, company)
+        ticker = state.get("target_symbols", {}).get(company, company)
+        if scoped_out:
             live_market = {
                 "provider": getattr(self.market_data_client, "provider", "unknown"),
                 "symbol": ticker,
                 "company": company,
-                "current_price": None,
-                "monthly_return": None,
-                "market_cap": None,
-                "trailing_pe": None,
-                "currency": None,
-                "sector": None,
-                "industry": None,
-                "fifty_two_week_high": None,
-                "fifty_two_week_low": None,
-                "status": "failed",
+                "status": "skipped_scope",
                 "from_cache": False,
-                "fetched_at": None,
-                "provider_chain": [getattr(self.market_data_client, "provider", "unknown")],
-                "error": str(exc),
             }
+        else:
+            try:
+                live_market = self.market_data_client.fetch_company_snapshot(
+                    company,
+                    state.get("target_symbols", {}).get(company),
+                )
+            except Exception as exc:
+                live_market = {
+                    "provider": getattr(self.market_data_client, "provider", "unknown"),
+                    "symbol": ticker,
+                    "company": company,
+                    "current_price": None,
+                    "monthly_return": None,
+                    "market_cap": None,
+                    "trailing_pe": None,
+                    "currency": None,
+                    "sector": None,
+                    "industry": None,
+                    "fifty_two_week_high": None,
+                    "fifty_two_week_low": None,
+                    "status": "failed",
+                    "from_cache": False,
+                    "fetched_at": None,
+                    "provider_chain": [getattr(self.market_data_client, "provider", "unknown")],
+                    "error": str(exc),
+                }
         payload["live_market"] = live_market
         payload["source_documents"] = document_summary["source_documents"]
         field_bound = str(payload.get("structured_source") or "") == "document_extracted" and any(
@@ -438,7 +459,19 @@ class RetrievalMixin:
             spec = task_spec_from_state({**state, "query_plan": query_plan})
             missing_ratios = bool(retrieved_docs) and not computable_companies
             gating = bool(getattr(self, "task_spec_gating", True))
-            fatal_data_gap = missing_ratios and (spec.requires_ast_ratios if gating else True)
+            asked = list(spec.requested_metrics)
+            fact_companies = [
+                company
+                for company, payload in retrieved_docs.items()
+                if has_requested_structured_facts(payload, asked)
+            ]
+            if asked:
+                missing_asked = bool(retrieved_docs) and not fact_companies
+                fatal_data_gap = missing_asked if gating else missing_asked
+                if len(retrieved_docs) > 1 and fact_companies:
+                    fatal_data_gap = False
+            else:
+                fatal_data_gap = missing_ratios and (spec.requires_ast_ratios if gating else True)
             company_names = list(retrieved_docs.keys())
             coverage_matrix = build_coverage_matrix(company_names, retrieved_docs)
             partial_data_gap = is_partial_compare_gap(company_names, coverage_matrix)
@@ -471,28 +504,51 @@ class RetrievalMixin:
             if fatal_data_gap:
                 # Fail-loud: do not enter appendix_replan loop when no AST-computable fundamentals exist.
                 replan_reason = None
-                if prefer_uploaded_only:
-                    action_hint = (
-                        "You asked to use uploaded materials only. The upload lacked extractable "
-                        "revenue/EBITDA/R&D, and live SEC/Yahoo/sample backfill was disabled. "
-                        "Upload a filing/CSV with those metrics, or remove the upload-only wording "
-                        "so the system may fill gaps from SEC/Yahoo."
-                    )
-                elif self.data_mode == "demo":
-                    action_hint = (
-                        "Upload a filing PDF with extractable metrics, or analyze a company covered by "
-                        "the demo sample database. Refusing to invent numbers."
+                upload_issuers = [
+                    str(item) for item in (query_plan.get("upload_companies") or []) if str(item).strip()
+                ]
+                asked_issuers = [
+                    str(item)
+                    for item in (query_plan.get("query_companies") or query_plan.get("companies") or [])
+                    if str(item).strip()
+                ]
+                missing_issuers = [name for name in asked_issuers if name not in set(upload_issuers)]
+                issuer_mismatch = bool(
+                    (query_plan.get("evidence_company_gap") or str(query_plan.get("company_scope") or "") == "mismatch")
+                    and upload_issuers
+                    and missing_issuers
+                )
+                if issuer_mismatch:
+                    covered = ", ".join(upload_issuers)
+                    missing = ", ".join(missing_issuers)
+                    data_gap_detail = (
+                        f"Uploaded materials identify {covered} as the filing issuer(s) "
+                        f"and do not contain statement evidence for {missing}. "
+                        f"{covered} figures are not a substitute answer for {missing}."
                     )
                 else:
-                    action_hint = (
-                        "Upload source filings with extractable metrics, retry the live fundamentals provider, "
-                        "or explicitly switch to DATA_MODE=demo for demonstrations. Refusing to invent numbers."
+                    if prefer_uploaded_only:
+                        action_hint = (
+                            "You asked to use uploaded materials only. The upload lacked extractable "
+                            "revenue/EBITDA/R&D, and live SEC/Yahoo/sample backfill was disabled. "
+                            "Upload a filing/CSV with those metrics, or remove the upload-only wording "
+                            "so the system may fill gaps from SEC/Yahoo."
+                        )
+                    elif self.data_mode == "demo":
+                        action_hint = (
+                            "Upload a filing PDF with extractable metrics, or analyze a company covered by "
+                            "the demo sample database. Refusing to invent numbers."
+                        )
+                    else:
+                        action_hint = (
+                            "Upload source filings with extractable metrics, retry the live fundamentals provider, "
+                            "or explicitly switch to DATA_MODE=demo for demonstrations. Refusing to invent numbers."
+                        )
+                    data_gap_detail = (
+                        "No computable structured fundamentals for "
+                        f"{', '.join(retrieved_docs)} (structured_source has no revenue/EBITDA/R&D inputs). "
+                        f"{action_hint}"
                     )
-                data_gap_detail = (
-                    "No computable structured fundamentals for "
-                    f"{', '.join(retrieved_docs)} (structured_source has no revenue/EBITDA/R&D inputs). "
-                    f"{action_hint}"
-                )
                 if provider_error_summary.get("count"):
                     data_gap_detail += (
                         f" Provider errors: transient={provider_error_summary['transient_count']}, "
@@ -506,12 +562,15 @@ class RetrievalMixin:
                             "this may recover on a later run."
                         )
             else:
-                replan_reason = (
-                    "Appendix / evidence gap detected; switching to supplementary_retrieval "
-                    "(appendix_replan) for one targeted retrieval pass."
-                    if needs_appendix
-                    else None
-                )
+                if spec.skip_enrichment:
+                    replan_reason = None
+                else:
+                    replan_reason = (
+                        "Appendix / evidence gap detected; switching to supplementary_retrieval "
+                        "(appendix_replan) for one targeted retrieval pass."
+                        if needs_appendix
+                        else None
+                    )
                 data_gap_detail = ""
             if missing_ratios and not fatal_data_gap:
                 data_gap_detail = (
@@ -519,6 +578,21 @@ class RetrievalMixin:
                     "Narrative or risk claims may proceed. Numeric margin claims remain blocked."
                 )
                 replan_reason = None
+
+            copied_metrics: dict[str, dict[str, float]] | None = None
+            if spec.skip_quant:
+                copied_metrics = {}
+                for company, payload in retrieved_docs.items():
+                    market = payload.get("market_data") or {}
+                    row: dict[str, float] = {}
+                    for key in ("revenue", "ebitda", "operating_income", "r_and_d"):
+                        value = get_fundamental(market, key)
+                        if value is not None:
+                            row[key] = float(value)
+                    if row:
+                        copied_metrics[company] = row
+                if not copied_metrics:
+                    copied_metrics = None
 
             update: FinanceState = {
                 "retrieved_docs": retrieved_docs,
@@ -541,6 +615,8 @@ class RetrievalMixin:
                 "provider_error_summary": provider_error_summary,
                 "degraded_mode": True if fatal_data_gap else (partial_data_gap or state.get("degraded_mode", False)),
             }
+            if copied_metrics:
+                update["financial_metrics"] = copied_metrics
             rag_chunks = sum(len(hits) for hits in rag_evidence.values())
             if fatal_data_gap:
                 detail = f"FATAL DATA GAP: {data_gap_detail}"

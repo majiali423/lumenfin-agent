@@ -15,6 +15,7 @@ from .quant_contract import (
     build_coverage_matrix,
     classify_quant_status,
     has_computable_fundamentals,
+    has_structured_amounts,
     is_partial_compare_gap,
     non_comparable_companies,
 )
@@ -169,7 +170,31 @@ def retrieve_company_payload(
     # Upload-only mode: never invent numbers from SEC/Yahoo/sample.
     if prefer_uploaded_only:
         result = dict(document_payload)
-        # Narrative excerpts may still exist; without computable metrics this is not a structured source.
+        if has_structured_amounts(result):
+            result["structured_source"] = "document_extracted"
+            meta = dict(result.get("fundamentals_meta") or {})
+            meta.update(
+                {
+                    "upload_present": upload_present,
+                    "upload_had_computable_metrics": False,
+                    "live_fallback_used": False,
+                    "prefer_uploaded_only": True,
+                    "grounding_layer": "document_structured_amounts",
+                }
+            )
+            meta = annotate_upload_period_meta(
+                meta,
+                document_contexts=doc_contexts,
+                company=company,
+                prefer_fiscal_year=prefer_fiscal_year,
+            )
+            result["fundamentals_meta"] = meta
+            result["fundamental_provenance"] = stamp_document_extracted_provenance(
+                result.get("fundamental_provenance"),
+                doc_contexts,
+                company=company,
+            )
+            return _finalize_company_payload(result)
         result["structured_source"] = "none"
         meta = dict(result.get("fundamentals_meta") or {})
         meta.update(
@@ -181,7 +206,7 @@ def retrieve_company_payload(
                 "grounding_layer": "prefer_uploaded_only_refused",
                 "fallback_reason": (
                     "prefer_uploaded_only=true; refused SEC/Yahoo/sample backfill because "
-                    "uploaded materials lacked AST-computable revenue/EBITDA/R&D."
+                    "uploaded materials lacked statement amounts for the asked issuer."
                 ),
             }
         )
@@ -617,7 +642,10 @@ _has_supply_chain_signal = has_supply_chain_signal
 
 
 def _document_applies_to_company(doc: dict[str, Any], company: str) -> bool:
-    """Same issuer scoping as retrieval payload assembly: require explicit detection."""
+    """Issuer scoping: named issuers win over body peer mentions."""
+    issuers = doc.get("issuer_companies") or []
+    if issuers:
+        return company in issuers
     detected = doc.get("detected_companies") or []
     return company in detected
 

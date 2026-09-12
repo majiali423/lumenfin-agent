@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..reporting import format_next_actions, format_rag_citation_section
+from ..reporting import format_answer_scope_lines, format_next_actions, format_rag_citation_section
 
 
 def render_fatal_data_gap_sections(state: dict[str, Any], *, data_mode: str) -> tuple[list[str], str]:
@@ -15,17 +15,25 @@ def render_fatal_data_gap_sections(state: dict[str, Any], *, data_mode: str) -> 
         sections.append(line)
 
     companies = ", ".join(state.get("companies") or []) or "(none)"
-    detail = state.get("data_gap_detail") or (
-        "No computable structured fundamentals were available. "
-        "Upload a filing PDF with extractable metrics or retry the configured live fundamentals provider."
-    )
+    detail = str(
+        state.get("data_gap_detail")
+        or (
+            "No computable structured fundamentals were available. "
+            "Upload a filing PDF with extractable metrics or retry the configured live fundamentals provider."
+        )
+    ).strip()
+    scope_lines = format_answer_scope_lines(state)
+    summary_parts = [line for line in scope_lines if line.strip()]
+    if detail and detail not in "\n".join(summary_parts):
+        summary_parts.append(detail)
+    summary = "\n".join(summary_parts) if summary_parts else detail
     S("# Incomplete Diligence Output (Fail-Loud Data Gap)")
     S("")
     S(f"**Companies:** {companies}")
     S("")
     S("## 1. Executive Summary")
     S("")
-    S(detail)
+    S(summary)
     S("")
     S(
         "**Evidence Boundary:** This run produced no AST-verifiable revenue/EBITDA/R&D inputs. "
@@ -92,4 +100,4 @@ def render_fatal_data_gap_sections(state: dict[str, Any], *, data_mode: str) -> 
             "research purposes only. It does not constitute investment advice, a solicitation, or a "
             "recommendation to buy or sell any security."
         )
-    return sections, str(detail)
+    return sections, summary

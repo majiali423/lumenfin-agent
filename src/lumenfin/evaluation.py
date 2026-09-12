@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Any
 
 
+from .task_spec import task_spec_from_state
+
+
 REQUIRED_STEPS = ("query_planner", "supervisor", "retrieval", "quant", "psychologist", "critic", "synthesizer")
 REQUIRED_REPORT_MARKERS = (
     "Executive Summary",
@@ -44,10 +47,22 @@ def evaluate_run_state(state: dict[str, Any]) -> EvaluationResult:
     return EvaluationResult(score=score, grade=grade, checks=checks, recommendations=recommendations)
 
 
+def _required_steps(state: dict[str, Any]) -> tuple[str, ...]:
+    spec = task_spec_from_state(state)
+    steps = ["query_planner", "supervisor", "retrieval"]
+    if not spec.skip_quant:
+        steps.append("quant")
+    if not spec.skip_enrichment:
+        steps.extend(["psychologist", "critic"])
+    steps.append("synthesizer")
+    return tuple(steps)
+
+
 def _check_pipeline_completeness(state: dict[str, Any]) -> dict[str, Any]:
     audit_log = state.get("audit_log", [])
     observed_steps = [event.get("step") for event in audit_log]
-    missing = [step for step in REQUIRED_STEPS if step not in observed_steps]
+    required = _required_steps(state)
+    missing = [step for step in required if step not in observed_steps]
     blocked = [
         event.get("step")
         for event in audit_log

@@ -19,17 +19,18 @@ from tests.test_graph_routing import build_test_config
 
 
 class CompanyUploadMismatchPlanningTestCase(unittest.TestCase):
-    def test_softbank_query_with_apple_upload_pauses(self) -> None:
+    def test_softbank_query_with_apple_upload_does_not_pause(self) -> None:
         docs = [{"detected_companies": ["Apple", "Microsoft"], "filename": "table.pdf"}]
         plan = build_query_plan(
             "Analyze SoftBank FY2024 profitability using the uploaded materials.",
             document_contexts=docs,
         )
-        self.assertIn("company_upload_mismatch", plan.missing_fields)
+        self.assertTrue(plan.evidence_company_gap)
+        self.assertNotIn("company_upload_mismatch", plan.missing_fields)
         self.assertEqual(plan.companies, ["SoftBank"])
         self.assertEqual(plan.query_companies, ["SoftBank"])
         self.assertEqual(plan.upload_companies, ["Apple", "Microsoft"])
-        self.assertTrue(any("不一致" in q for q in plan.clarification_questions))
+        self.assertFalse(plan.clarification_questions)
 
     def test_clarification_scope_uploaded_resolves(self) -> None:
         docs = [{"detected_companies": ["Apple", "Microsoft"], "filename": "table.pdf"}]
@@ -79,7 +80,7 @@ class CompanyUploadMismatchHitlTestCase(unittest.TestCase):
         )
         self.assertEqual(route_after_query_planner({"missing_fields": []}), "supervisor")
 
-    def test_mismatch_workflow_pause_and_resume_with_scope(self) -> None:
+    def test_mismatch_runs_without_pause_and_does_not_steal_upload_issuer_numbers(self) -> None:
         from dataclasses import replace
 
         config = replace(
@@ -106,21 +107,163 @@ class CompanyUploadMismatchHitlTestCase(unittest.TestCase):
                 "source_type": "pdf",
             }
         ]
-        paused = app.run(
+        result = app.run(
             "Analyze SoftBank FY2024 profitability using the uploaded materials.",
             thread_id=thread_id,
             document_contexts=docs,
         )
-        self.assertEqual(paused.get("workflow_status"), "needs_clarification")
-        self.assertIn("company_upload_mismatch", paused.get("missing_fields") or [])
-        self.assertNotIn("supervisor", [e["step"] for e in paused.get("audit_log", [])])
+        self.assertNotEqual(result.get("workflow_status"), "needs_clarification")
+        self.assertNotIn("company_upload_mismatch", result.get("missing_fields") or [])
+        report = str(result.get("final_report") or "")
+        self.assertNotIn("SoftBank Operating income is 383.3", report)
+        self.assertNotIn("SoftBank Revenue is 383.3", report)
+        self.assertEqual(result.get("companies"), ["SoftBank"])
+        self.assertNotIn("383.3", str((result.get("verified_claims") or [])))
 
-        resumed = app.resume_with_clarification(
-            thread_id,
-            {"company_scope": "uploaded", "time_range": "FY2025"},
+
+class NamedIssuerScopeGraphTestCase(unittest.TestCase):
+    def _app(self, name: str):
+        from dataclasses import replace
+
+        config = replace(
+            build_test_config(ROOT / "test_artifacts" / f"{name}-{uuid4().hex[:8]}"),
+            rag_enabled=False,
         )
-        self.assertIn(resumed.get("workflow_status"), {"completed", "incomplete_data"})
-        self.assertEqual(set(resumed.get("companies") or []), {"Apple", "Microsoft"})
+        return LumenFinAgentSystem(
+            llm_client=LocalFallbackLLMClient(),
+            app_config=config,
+            market_data_client=FakeMarketDataClient(),
+        )
+
+    def test_apple_query_does_not_answer_with_nvidia_issuer_file(self) -> None:
+        docs = [
+            {
+                "issuer_companies": ["NVIDIA"],
+                "detected_companies": ["NVIDIA"],
+                "filename": "nvda.pdf",
+                "text": "NVIDIA FY2025 operating income was 81.453 billion USD. Revenue 130.5. R&D 12.9.",
+                "excerpt": "NVIDIA FY2025 operating income was 81.453 billion USD.",
+                "source_type": "pdf",
+            }
+        ]
+        result = self._app("mismatch-aapl").run(
+            "Using uploaded files only, what was Apple FY2025 operating income?",
+            thread_id="apple-not-in-nvda",
+            document_contexts=docs,
+        )
+        self.assertNotEqual(result.get("workflow_status"), "needs_clarification")
+        self.assertEqual(result.get("companies"), ["Apple"])
+        report = str(result.get("final_report") or "")
+        self.assertNotIn("81.453", report)
+        self.assertIn("Apple", report)
+        self.assertNotRegex(report, r"请填写公司名称")
+        self.assertRegex(
+            report,
+            r"do not contain statement evidence for Apple|not a substitute answer for Apple",
+        )
+        self.assertNotIn("lacked extractable revenue/EBITDA/R&D", report)
+        apple = (result.get("retrieved_docs") or {}).get("Apple") or {}
+        self.assertNotEqual(apple.get("structured_source"), "sample_db")
+        self.assertFalse(any("81.453" in str(claim) for claim in (result.get("verified_claims") or [])))
+
+    def test_peer_mention_without_apple_metrics_is_not_apple_evidence(self) -> None:
+        docs = [
+            {
+                "issuer_companies": ["NVIDIA"],
+                "detected_companies": ["NVIDIA", "Apple"],
+                "filename": "nvda.pdf",
+                "text": (
+                    "NVIDIA FY2025 operating income was 81.453 billion USD. "
+                    "The filing mentions Apple as a customer without Apple operating income."
+                ),
+                "excerpt": "NVIDIA FY2025 operating income was 81.453 billion USD.",
+                "source_type": "pdf",
+            }
+        ]
+        result = self._app("peer-mention").run(
+            "Using uploaded files only, what was Apple FY2025 operating income?",
+            thread_id="apple-peer-mention",
+            document_contexts=docs,
+        )
+        self.assertEqual(result.get("companies"), ["Apple"])
+        report = str(result.get("final_report") or "")
+        self.assertNotIn("81.453", report)
+        apple = (result.get("retrieved_docs") or {}).get("Apple") or {}
+        self.assertIsNone(
+            (apple.get("market_data") or {}).get("operating_income")
+        )
+
+    def test_partial_multi_company_keeps_available_issuer(self) -> None:
+        docs = [
+            {
+                "issuer_companies": ["NVIDIA"],
+                "detected_companies": ["NVIDIA"],
+                "filename": "nvda.pdf",
+                "text": "NVIDIA FY2025 operating income was 81.453 billion USD. Revenue 130.5. R&D 12.9.",
+                "excerpt": "NVIDIA FY2025 operating income was 81.453 billion USD.",
+                "source_type": "pdf",
+            }
+        ]
+        result = self._app("partial-peers").run(
+            "Using uploaded files only, what was Apple FY2025 operating income and NVIDIA FY2025 operating income?",
+            thread_id="partial-aapl-nvda",
+            document_contexts=docs,
+        )
+        self.assertEqual(set(result.get("companies") or []), {"Apple", "NVIDIA"})
+        report = str(result.get("final_report") or "")
+        self.assertIn("81.453", report)
+        self.assertIn("NVIDIA", report)
+        verified = result.get("verified_claims") or []
+        self.assertTrue(
+            any(
+                (item.get("entity") if isinstance(item, dict) else getattr(item, "entity", None)) == "NVIDIA"
+                and "operating_income"
+                in str((item.get("metric_name") if isinstance(item, dict) else getattr(item, "metric_name", None)))
+                for item in verified
+            )
+        )
+        self.assertFalse(
+            any(
+                (item.get("entity") if isinstance(item, dict) else getattr(item, "entity", None)) == "Apple"
+                and (item.get("verification") if isinstance(item, dict) else getattr(item, "verification", None))
+                == "verified"
+                and "operating_income"
+                in str((item.get("metric_name") if isinstance(item, dict) else getattr(item, "metric_name", None)))
+                for item in verified
+            )
+        )
+
+    def test_bilateral_rd_keeps_nvidia_when_microsoft_is_named_first(self) -> None:
+        docs = [
+            {
+                "issuer_companies": ["Microsoft"],
+                "detected_companies": ["Microsoft"],
+                "filename": "msft.pdf",
+                "text": "Microsoft FY2024 research and development expense was 29.51 billion USD.",
+                "excerpt": "Microsoft FY2024 research and development expense was 29.51 billion USD.",
+                "source_type": "pdf",
+            },
+            {
+                "issuer_companies": ["NVIDIA"],
+                "detected_companies": ["NVIDIA"],
+                "filename": "nvda.pdf",
+                "text": "NVIDIA FY2025 research and development expense was 12.914 billion USD.",
+                "excerpt": "NVIDIA FY2025 research and development expense was 12.914 billion USD.",
+                "source_type": "pdf",
+            },
+        ]
+        result = self._app("bilateral-rd").run(
+            "Using uploaded files only, compare Microsoft FY2024 R&D expense with NVIDIA FY2025 R&D expense.",
+            thread_id="msft-nvda-rd",
+            document_contexts=docs,
+        )
+        report = str(result.get("final_report") or "")
+        exec_summary = str(result.get("executive_summary") or "")
+        self.assertIn("29.51", exec_summary)
+        self.assertIn("12.914", exec_summary)
+        self.assertIn("29.51", report)
+        self.assertIn("12.914", report)
+        self.assertNotIn("do not support a verified", exec_summary.lower())
 
 
 if __name__ == "__main__":

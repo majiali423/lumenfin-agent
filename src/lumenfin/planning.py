@@ -17,6 +17,11 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from .data.sample_financial_data import SAMPLE_FINANCIAL_DATA
 from .llm import BaseLLMClient
+from .query_focus import (
+    detect_company_periods,
+    detect_requested_metrics,
+    query_has_relative_unanchored_period,
+)
 from .skills import SKILL_REGISTRY
 from .tools import (
     KNOWN_ALIASES,
@@ -150,6 +155,9 @@ class QueryPlan:
     query_companies: list[str] = field(default_factory=list)
     upload_companies: list[str] = field(default_factory=list)
     company_scope: str = ""
+    requested_metrics: list[str] = field(default_factory=list)
+    company_periods: dict[str, str] = field(default_factory=dict)
+    evidence_company_gap: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -260,6 +268,10 @@ def build_query_plan(
         structure=structure,
         document_contexts=document_contexts,
     )
+    if query_has_relative_unanchored_period(normalized_query):
+        time_notes = time_notes + [
+            "Relative period is unanchored; do not bind cover or filename years as the requested period."
+        ]
     retrieval_query = _validated_retrieval_query(
         structure.get("retrieval_query") if structure else None,
         companies=companies,
@@ -276,7 +288,18 @@ def build_query_plan(
         companies,
         document_contexts,
         has_time_signal=has_time,
-        company_upload_mismatch=has_mismatch,
+        company_upload_mismatch=False,
+    )
+    evidence_company_gap = has_mismatch
+    if has_mismatch:
+        company_notes = company_notes + [
+            "Named issuers are not in the uploaded set; continue and report missing evidence instead of pausing."
+        ]
+    requested_metrics = detect_requested_metrics(normalized_query)
+    company_periods = detect_company_periods(
+        normalized_query,
+        companies or query_companies,
+        aliases=KNOWN_ALIASES,
     )
     clarification_questions = _build_clarification_questions(
         missing_fields,
@@ -312,6 +335,9 @@ def build_query_plan(
         query_companies=query_companies,
         upload_companies=upload_companies,
         company_scope=company_scope,
+        requested_metrics=requested_metrics,
+        company_periods=company_periods,
+        evidence_company_gap=evidence_company_gap,
     )
 
 
@@ -421,7 +447,7 @@ def _select_companies(
     if mismatch:
         notes.append(
             "Company/upload mismatch: "
-            f"query={query_companies} upload={upload_companies}; pausing for HITL."
+            f"query={query_companies} upload={upload_companies}; keep the asked issuers and report missing evidence."
         )
         # Keep query companies visible; do not silently analyze upload issuers.
         return list(query_companies), "mismatch", notes, True
@@ -453,8 +479,17 @@ def _detect_dimensions(query: str, document_contexts: list[dict[str, Any]]) -> l
         for dimension, keywords in DIMENSION_KEYWORDS.items()
         if any_token_in_text(keywords, query)
     ]
+    metrics = detect_requested_metrics(query)
+    if "operating_income" in metrics or "operating_margin" in metrics or "ebitda" in metrics or "revenue" in metrics:
+        if "profitability" not in dimensions:
+            dimensions.append("profitability")
+    if "r_and_d" in metrics or "r_and_d_intensity" in metrics:
+        if "r_and_d" not in dimensions:
+            dimensions.append("r_and_d")
     if document_contexts and "document_evidence" not in dimensions:
         dimensions.append("document_evidence")
+    if metrics:
+        return dimensions or ["document_evidence"]
     if not dimensions:
         dimensions = ["profitability", "r_and_d", "supply_chain", "sentiment", "compliance"]
     if "compliance" not in dimensions:

@@ -107,5 +107,8 @@ class AgentRuntime(
     @contextmanager
     def _track_step(self, step: str) -> Iterator[StepTimer]:
         self.llm_client.mark_usage_start()
-        yield StepTimer(step=step, llm_client=self.llm_client)
+        from lumenfin.tracing import node_span
+
+        with node_span(step):
+            yield StepTimer(step=step, llm_client=self.llm_client)
 

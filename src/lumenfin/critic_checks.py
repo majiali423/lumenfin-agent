@@ -42,7 +42,7 @@ def check_data_completeness(state: dict[str, Any]) -> list[Violation]:
                     repair_target="quant",
                 )
             )
-        if name not in sentiment_analysis:
+        if name not in sentiment_analysis and not spec.skip_enrichment:
             violations.append(
                 Violation(
                     code="missing_sentiment_analysis",
