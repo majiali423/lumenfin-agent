@@ -34,19 +34,26 @@ def execute_analysis_job(
     if service is None:
         config = AppConfig.from_env()
         service = LumenFinAnalysisService(config)
-    service.run_job(
-        job_id=job_id,
-        query=query,
-        thread_id=thread_id,
-        export_artifacts=export_artifacts,
-        document_paths=document_paths or [],
-        output_format=output_format,
-        tenant_id=tenant_id,
-        execution_owner=execution_owner,
-        execution_token=execution_token,
-        lease_seconds=lease_seconds,
-        on_lease_renew=on_lease_renew,
-    )
+    from lumenfin.tracing import analysis_trace
+
+    with analysis_trace(
+        name="lumenfin.worker.job",
+        metadata={"job_id": job_id, "thread_id": thread_id, "system": "b2_agent"},
+        inputs={"query": query, "job_id": job_id, "thread_id": thread_id},
+    ):
+        service.run_job(
+            job_id=job_id,
+            query=query,
+            thread_id=thread_id,
+            export_artifacts=export_artifacts,
+            document_paths=document_paths or [],
+            output_format=output_format,
+            tenant_id=tenant_id,
+            execution_owner=execution_owner,
+            execution_token=execution_token,
+            lease_seconds=lease_seconds,
+            on_lease_renew=on_lease_renew,
+        )
 
 
 def _queue_from_config(config: AppConfig) -> RedisQueueManager:

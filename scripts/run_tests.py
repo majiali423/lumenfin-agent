@@ -45,6 +45,8 @@ FAST_MODULES = (
     "tests.test_frontend_bench_drawer",
     "tests.test_phase5_demo_ui",
     "tests.test_phase4_task_spec",
+    "tests.test_query_answer_focus",
+    "tests.test_company_upload_mismatch",
     "tests.test_phase3_boundaries",
     "tests.test_graph_routing",
     "tests.test_offline_env",
@@ -60,6 +62,7 @@ JOINT_MODULE_FILES = frozenset(
         "test_product_quality_loop.py",
         "test_upload_product_loop.py",
         "test_finrun_adapter_parity.py",
+        "test_eval_contract_runner.py",
     }
 )
 JOINT_MODULES = tuple(f"tests.{name[:-3]}" for name in sorted(JOINT_MODULE_FILES))

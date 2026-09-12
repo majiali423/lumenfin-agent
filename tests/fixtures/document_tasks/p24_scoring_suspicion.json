@@ -1,0 +1,37 @@
+{
+  "task_id": "dt-p24-clarify-period",
+  "classification": "scoring_suspicion",
+  "do_not_change_scorer": true,
+  "do_not_chase_score": true,
+  "not_loaded_by_catalog": true,
+  "source": {
+    "catalog": "tests/fixtures/document_tasks/lumenfin_document_tasks_v1.json",
+    "ledgers": [
+      "outputs/document_task_eval/pilot_live_fair_v3.json",
+      "outputs/document_task_eval/pilot_live_fair_v4.json"
+    ],
+    "note": "Human review of preserved local ledgers. Relative paths only. This file is not gold and is not read by gold_evaluator."
+  },
+  "gold_expected_action": "answer_or_clarify",
+  "catalog_accept_example": "NVIDIA operating income is 32.972 billion USD for FY2024 [file.pdf#p2].",
+  "live_scores_preserved": {
+    "fair_v3": {
+      "system": "b2_agent",
+      "passed": false,
+      "note": "Leave the fair_v3 ledger row unchanged. Do not rescore in place."
+    },
+    "fair_v4": {
+      "system": "b2_agent",
+      "passed": false,
+      "gold_findings": ["expected_answer_or_clarify"],
+      "actual_output_excerpt": "NVIDIA Operating income is 32.972 billion USD for FY2024 … #p2",
+      "product_observation": "The executive summary labeled the field figure FY2024 with a page-2 citation, matching the catalog accept example. The scorer still failed, likely because refuse/clarify lexicon in the long diligence report made action_ok false.",
+      "human_judgment": "Remaining fail is a candidate-gold / full-report lexical interaction, not a missing number or FY2025 substitution."
+    }
+  },
+  "not_a_fix_target": [
+    "Do not edit gold_evaluator.py to special-case p24.",
+    "Do not change catalog expected_action or required_facts to make this pass.",
+    "p23 remains diagnostic-only and is also not a score-chasing target."
+  ]
+}

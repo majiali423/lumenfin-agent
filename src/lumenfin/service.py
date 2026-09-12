@@ -74,6 +74,7 @@ class LumenFinAnalysisService:
             bind(context)
         # Stash for packaging without module globals.
         setattr(llm_client, "_provider_call_context", context)
+        self._last_run_llm = llm_client
         market_data_client = self._market_data_client or self.providers.market_data.client
         rag_store, document_indexer = self._rag_resources()
         return LumenFinAgentSystem(

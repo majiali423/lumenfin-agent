@@ -154,6 +154,7 @@ class DeepSeekChatClient(BaseLLMClient):
         forked._usage_mark = {"prompt_tokens": 0, "completion_tokens": 0}
         forked._owns_client = False
         forked.extra_headers = dict(self.extra_headers)
+        forked._before_provider_http = getattr(self, "_before_provider_http", None)
         return forked
 
     def _policy(self) -> ProviderCallPolicy:
@@ -194,6 +195,9 @@ class DeepSeekChatClient(BaseLLMClient):
         self.last_trace = context.trace_sink
 
         def _once() -> tuple[str, dict]:
+            hook = getattr(self, "_before_provider_http", None)
+            if callable(hook):
+                hook()
             remaining = context.remaining_seconds()
             timeout = policy.httpx_timeout(remaining_seconds=remaining)
             client = self._client(timeout)
