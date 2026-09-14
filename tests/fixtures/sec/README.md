@@ -12,7 +12,9 @@ not imply SEC affiliation or endorsement.
 - Derived PDFs contain selected or paraphrased content and explicit labels.
 - Images, logos, scripts, exhibits and signature pages are omitted.
 - `manifest.json` records issuer, CIK, form, accession, filing date, source URL,
-  retrieval date and SHA-256 checksums.
+  retrieval date and SHA-256 checksums. Text extracts use `canonical_text_eol_lf.v1`
+  (LF-normalized); derived PDFs keep raw bytes. Prior HTML/TXT checksums were
+  Windows CRLF checkout identities, not filing-content changes.
 
 ## Commands
 

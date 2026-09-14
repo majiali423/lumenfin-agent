@@ -1,6 +1,17 @@
 {
   "dataset_id": "lumenfin_document_tasks_v1",
-  "version": "2026-09-10.pilot24",
+  "version": "2026-09-14.pilot24",
+  "document_hash_policy": {
+    "id": "canonical_text_eol_lf.v1",
+    "version_date": "2026-09-14",
+    "text_suffixes": [".html", ".htm", ".txt", ".md"],
+    "text_rule": "SHA-256 after CR LF and CR are normalized to LF. This is the Git blob / POSIX checkout identity for text extracts.",
+    "binary_rule": "SHA-256 of original bytes. PDFs and other non-text suffixes are not newline-normalized.",
+    "migration": "Hashes before this policy used raw working-tree bytes. On Windows with core.autocrlf=true, aapl_fy2024_10k_extract.html was stored as the CRLF identity 73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456. That was a newline checkout artifact, not a change to filing text or gold answers. canonical_text_eol_lf.v1 replaces text hashes with the LF identity. PDF hashes, quotes, values and tolerances are unchanged.",
+    "prior_text_sha256": {
+      "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html": "73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456"
+    }
+  },
     "gold_policy": "Labels are read from listed public derived fixtures, not Agent or FinAgentBench outputs. This 24-task set is candidate gold for a development diagnostic. It is not independent human review, not a freeze, and not formal accuracy.",
     "review_status": "pilot_source_checked_not_human_frozen; remaining_96_blocked_on_human_review_and_source_extracts",
     "formal_accuracy_eligible": false,
@@ -90,7 +101,7 @@
       "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm",
       "query": "Using uploaded files only, what was Apple FY2024 operating income?",
       "expected_action": "answer",
-      "allowed_documents": [{"document_id": "aapl-fy2024-html", "path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html", "sha256": "73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456"}],
+      "allowed_documents": [{"document_id": "aapl-fy2024-html", "path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html", "sha256": "bd58a4258a53c1ef74e9b42c930e2146ed9355bfc7f920cceabb6020ccb8ce94"}],
       "required_facts": [{"entity": "Apple", "metric": "operating_income", "period": "FY2024", "raw_value": 123216, "raw_unit": "million", "value": 123.216, "unit": "billion", "currency": "USD", "abs_tolerance": 0.002, "accepted_evidence_sets": [[{"document_id": "aapl-fy2024-html", "page": 1, "quote": "Operating income</td><td>123,216"}]]}],
       "forbidden_claims": [],
       "annotation_note": "HTML table in aapl_fy2024_10k_extract.html."
@@ -151,7 +162,7 @@
       "gold_origin": "derived_fixture_text",
       "query": "Using uploaded files only, what was Apple FY2024 operating margin from net sales and operating income?",
       "expected_action": "answer",
-      "allowed_documents": [{"document_id": "aapl-fy2024-html", "path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html", "sha256": "73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456"}],
+      "allowed_documents": [{"document_id": "aapl-fy2024-html", "path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html", "sha256": "bd58a4258a53c1ef74e9b42c930e2146ed9355bfc7f920cceabb6020ccb8ce94"}],
       "required_facts": [{"entity": "Apple", "metric": "operating_margin", "period": "FY2024", "value": 0.3151, "unit": "ratio", "abs_tolerance": 0.0003, "formula": "operating_income / revenue", "operands": {"operating_income": 123216, "revenue": 391035}, "accepted_evidence_sets": [[{"document_id": "aapl-fy2024-html", "page": 1, "quote": "Total net sales</td><td>391,035"}, {"document_id": "aapl-fy2024-html", "page": 1, "quote": "Operating income</td><td>123,216"}]]}],
       "forbidden_claims": [],
       "annotation_note": "123216/391035."
@@ -363,7 +374,7 @@
       "gold_origin": "derived_fixture_text",
       "query": "Using uploaded files only, what supply-chain related risk does the Apple extract mention?",
       "expected_action": "answer",
-      "allowed_documents": [{"document_id": "aapl-fy2024-html", "path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html", "sha256": "73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456"}],
+      "allowed_documents": [{"document_id": "aapl-fy2024-html", "path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html", "sha256": "bd58a4258a53c1ef74e9b42c930e2146ed9355bfc7f920cceabb6020ccb8ce94"}],
       "required_facts": [],
       "required_risk_points": [{"id": "supply_chain", "must_cover": ["supply chain"], "accepted_evidence_sets": [[{"document_id": "aapl-fy2024-html", "page": 1, "quote": "global supply chains"}]]}],
       "forbidden_claims": [],

@@ -9,9 +9,9 @@ described by ``tests/fixtures/sec/manifest.json``.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -19,17 +19,16 @@ import fitz
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+for path in (ROOT, SRC):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+from lumenfin.eval.document_tasks import sha256_document, sha256_file
+
 FIXTURE_ROOT = ROOT / "tests" / "fixtures" / "sec"
 MANIFEST_PATH = FIXTURE_ROOT / "manifest.json"
 DOWNLOAD_ROOT = ROOT / ".local-fixtures" / "sec" / "downloads"
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def load_manifest() -> dict:
@@ -99,7 +98,7 @@ def build_derived() -> int:
             pages=int(derived["pages"]),
         )
         path = ROOT / derived["path"]
-        print(f"built {path} sha256={sha256_file(path)}")
+        print(f"built {path} sha256={sha256_document(path)}")
     return 0
 
 
@@ -115,7 +114,7 @@ def verify() -> int:
             if not raw_path:
                 continue
             path = ROOT / raw_path
-            actual = sha256_file(path) if path.exists() else "missing"
+            actual = sha256_document(path) if path.exists() else "missing"
             ok = bool(expected) and actual == expected
             print(f"{'PASS' if ok else 'FAIL'} {raw_path} sha256={actual}")
             failures += 0 if ok else 1
@@ -127,7 +126,7 @@ def inventory(paths: list[str]) -> int:
         matches = list(ROOT.glob(pattern))
         for path in matches:
             if path.is_file():
-                print(f"{path.relative_to(ROOT)} {sha256_file(path)}")
+                print(f"{path.relative_to(ROOT)} {sha256_document(path)}")
     return 0
 
 

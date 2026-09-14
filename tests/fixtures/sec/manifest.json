@@ -3,7 +3,13 @@
   "policy": {
     "full_download_root": ".local-fixtures/sec/downloads",
     "full_filings_committed": false,
-    "sec_affiliation": false
+    "sec_affiliation": false,
+    "document_hash_policy": {
+      "id": "canonical_text_eol_lf.v1",
+      "text_rule": "Committed HTML/TXT checksums are SHA-256 after CR LF and CR are normalized to LF (Git blob identity).",
+      "binary_rule": "Derived PDFs keep raw-byte SHA-256.",
+      "migration": "Previous HTML/TXT fixture_sha256 values were Windows CRLF working-tree identities, not filing-content changes."
+    }
   },
   "fixtures": [
     {
@@ -17,7 +23,7 @@
       "retrieved_at": "2026-07-24",
       "source_sha256": "",
       "fixture_path": "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html",
-      "fixture_sha256": "73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456",
+      "fixture_sha256": "bd58a4258a53c1ef74e9b42c930e2146ed9355bfc7f920cceabb6020ccb8ce94",
       "transformation": "Minimal table and risk extract authored for parser tests; scripts, images, logos, signatures and unrelated exhibits omitted.",
       "official_sec_pdf": false
     },
@@ -32,7 +38,7 @@
       "retrieved_at": "2026-07-24",
       "source_sha256": "",
       "source_extract": "tests/fixtures/sec/sources/nvda_fy2025_10k_extract.txt",
-      "source_extract_sha256": "f54c45fd82caf41a1c6ea80999212f4202ad2a6f87f0f2269f66b6adac34d9fb",
+      "source_extract_sha256": "87e02a378b497dc0740c7d9fd83b8976b004cd9d6dea195a49483b301a032f0e",
       "fixture_path": "tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf",
       "fixture_sha256": "7f85d2c353ab625abb6a779d2175be499ee8e53970d49b3eb574ec1c34b68208",
       "derived_pdf": {
@@ -53,7 +59,7 @@
       "retrieved_at": "2026-07-24",
       "source_sha256": "",
       "source_extract": "tests/fixtures/sec/sources/msft_fy2024_10k_long_extract.txt",
-      "source_extract_sha256": "6911d6844b872d512df5783b60475648c8036549b392944906831d99d9f3a030",
+      "source_extract_sha256": "b7cbc4fe05b41cfc834484e0d7955e703851336ec79f92a76ce9c1e1648e24f2",
       "fixture_path": "tests/fixtures/sec/derived/msft_fy2024_10k_long_excerpt.pdf",
       "fixture_sha256": "6835c9c67947bed3acd6eb282885b8698ba1f4e0d928f1788acf539665a61480",
       "derived_pdf": {

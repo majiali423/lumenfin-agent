@@ -25,9 +25,31 @@ ALLOWED_REVIEW = {
     "frozen",
 }
 
+# Text extracts: hash the Git-blob / POSIX identity (LF newlines).
+# PDFs and other binaries keep raw bytes. Do not treat CRLF checkout as a
+# filing-content change, and do not newline-normalize PDF bytes.
+DOCUMENT_HASH_POLICY_ID = "canonical_text_eol_lf.v1"
+TEXT_HASH_SUFFIXES = {".html", ".htm", ".txt", ".md"}
+
+
+def canonicalize_text_bytes(data: bytes) -> bytes:
+    """Normalize CR LF and bare CR to LF. Does not decode or rewrite content."""
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def sha256_bytes(data: bytes, *, suffix: str) -> str:
+    payload = canonicalize_text_bytes(data) if suffix.lower() in TEXT_HASH_SUFFIXES else data
+    return hashlib.sha256(payload).hexdigest()
+
 
 def sha256_file(path: Path) -> str:
+    """Raw-byte SHA-256. Use sha256_document for catalog / fixture identity."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def sha256_document(path: Path) -> str:
+    """Catalog identity: LF-canonical for text extracts, raw bytes for PDFs."""
+    return sha256_bytes(path.read_bytes(), suffix=path.suffix)
 
 
 def load_catalog(path: Path | None = None) -> dict[str, Any]:
@@ -41,6 +63,7 @@ def _validate_catalog(payload: dict[str, Any]) -> None:
     required = (
         "dataset_id",
         "version",
+        "document_hash_policy",
         "inclusion_rules",
         "exclusion_rules",
         "source_limitations",
@@ -50,6 +73,11 @@ def _validate_catalog(payload: dict[str, Any]) -> None:
     missing = [key for key in required if key not in payload]
     if missing:
         raise ValueError(f"catalog missing {missing}")
+    policy = payload.get("document_hash_policy") or {}
+    if str(policy.get("id") or "") != DOCUMENT_HASH_POLICY_ID:
+        raise ValueError(
+            f"catalog document_hash_policy.id must be {DOCUMENT_HASH_POLICY_ID}"
+        )
     seen: set[str] = set()
     for task in payload["tasks"]:
         task_id = str(task.get("id") or "")
@@ -64,7 +92,7 @@ def _validate_catalog(payload: dict[str, Any]) -> None:
             raise ValueError(f"{task_id} expected_action invalid")
         for doc in task.get("allowed_documents") or []:
             rel = ROOT / str(doc["path"])
-            digest = sha256_file(rel)
+            digest = sha256_document(rel)
             if digest != doc["sha256"]:
                 raise ValueError(f"{task_id} document hash mismatch for {doc['path']}")
         if task.get("gold_origin") == "product_output":
