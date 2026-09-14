@@ -1,15 +1,32 @@
 from __future__ import annotations
 
+import hashlib
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
-from lumenfin.eval.document_tasks import evidence_quote_issues, freeze_readiness, load_catalog, tasks_for
-from lumenfin.eval.gold_evaluator import score_task
+from lumenfin.eval.document_tasks import (
+    CATALOG_PATH,
+    DOCUMENT_HASH_POLICY_ID,
+    ROOT,
+    evidence_quote_issues,
+    freeze_readiness,
+    load_catalog,
+    sha256_bytes,
+    sha256_document,
+    sha256_file,
+    tasks_for,
+)
+from lumenfin.eval.gold_evaluator import CITATION_SUPPORT_POLICY_VERSION, score_task
 
 
 class CatalogTestCase(unittest.TestCase):
     def test_pilot_has_24_tasks_with_honest_review_status(self) -> None:
         catalog = load_catalog()
         self.assertEqual(catalog["dataset_id"], "lumenfin_document_tasks_v1")
+        self.assertEqual(catalog["version"], "2026-09-14.pilot24")
+        self.assertEqual(catalog["document_hash_policy"]["id"], "canonical_text_eol_lf.v1")
         pilots = tasks_for(pilot_only=True)
         self.assertEqual(len(pilots), 24)
         families = {row["family"] for row in pilots}
@@ -316,3 +333,252 @@ class AmbiguousTaskRulesTestCase(unittest.TestCase):
         self.assertFalse(
             score_task(task, final_output="NVIDIA FY2025 operating income was 32.972 billion USD [file.pdf#p2].")["passed"]
         )
+
+
+class DocumentHashPolicyTestCase(unittest.TestCase):
+    HTML_REL = "tests/fixtures/sec/minimal/aapl_fy2024_10k_extract.html"
+    PDF_REL = "tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf"
+    PRIOR_HTML_CRLF = "73d60feeffe30932ea10bbc5a7f99e575ca325860f32d3631255306100d2f456"
+
+    def _git_blob(self, rel: str) -> bytes:
+        return subprocess.check_output(
+            ["git", "cat-file", "blob", f"HEAD:{rel}"],
+            cwd=str(ROOT),
+        )
+
+    def test_lf_and_crlf_text_share_git_blob_identity(self) -> None:
+        blob = self._git_blob(self.HTML_REL)
+        self.assertNotIn(b"\r\n", blob)
+        crlf = blob.replace(b"\n", b"\r\n")
+        self.assertNotEqual(hashlib.sha256(blob).hexdigest(), hashlib.sha256(crlf).hexdigest())
+        self.assertEqual(sha256_bytes(blob, suffix=".html"), sha256_bytes(crlf, suffix=".html"))
+        catalog = load_catalog()
+        expected = None
+        for task in catalog["tasks"]:
+            for doc in task.get("allowed_documents") or []:
+                if doc.get("path") == self.HTML_REL:
+                    expected = doc["sha256"]
+                    break
+        self.assertEqual(expected, sha256_bytes(blob, suffix=".html"))
+        self.assertEqual(catalog["document_hash_policy"]["id"], DOCUMENT_HASH_POLICY_ID)
+        self.assertEqual(catalog["document_hash_policy"]["prior_text_sha256"][self.HTML_REL], self.PRIOR_HTML_CRLF)
+        self.assertNotEqual(expected, self.PRIOR_HTML_CRLF)
+        with tempfile.TemporaryDirectory() as tmp:
+            lf_path = Path(tmp) / "a.html"
+            crlf_path = Path(tmp) / "b.html"
+            lf_path.write_bytes(blob)
+            crlf_path.write_bytes(crlf)
+            self.assertEqual(sha256_document(lf_path), sha256_document(crlf_path))
+            self.assertEqual(sha256_document(lf_path), expected)
+
+    def test_real_content_change_changes_text_hash(self) -> None:
+        blob = self._git_blob(self.HTML_REL)
+        mutated = blob.replace(b"123,216", b"999,999", 1)
+        self.assertNotEqual(blob, mutated)
+        self.assertNotEqual(sha256_bytes(blob, suffix=".html"), sha256_bytes(mutated, suffix=".html"))
+
+    def test_pdf_keeps_raw_bytes(self) -> None:
+        pdf = ROOT / self.PDF_REL
+        blob = self._git_blob(self.PDF_REL)
+        self.assertEqual(sha256_document(pdf), sha256_file(pdf))
+        self.assertEqual(sha256_document(pdf), hashlib.sha256(blob).hexdigest())
+        self.assertNotEqual(sha256_bytes(blob, suffix=".html"), hashlib.sha256(blob).hexdigest())
+
+    def test_catalog_load_matches_git_checkout_bytes(self) -> None:
+        catalog = load_catalog()
+        self.assertEqual(CATALOG_PATH.name, "lumenfin_document_tasks_v1.json")
+        by_path: dict[str, str] = {}
+        for task in catalog["tasks"]:
+            for doc in task.get("allowed_documents") or []:
+                by_path[str(doc["path"])] = str(doc["sha256"])
+        for rel, digest in by_path.items():
+            blob = self._git_blob(rel)
+            suffix = Path(rel).suffix
+            self.assertEqual(sha256_bytes(blob, suffix=suffix), digest, rel)
+
+
+class CitationSupportTestCase(unittest.TestCase):
+    def _two_issuer_task(self) -> dict:
+        return {
+            "id": "unit-two-docs",
+            "family": "comparison_scope",
+            "expected_action": "answer",
+            "required_facts": [
+                {
+                    "entity": "NVIDIA",
+                    "metric": "operating_income",
+                    "period": "FY2025",
+                    "value": 81.453,
+                    "unit": "billion",
+                    "abs_tolerance": 0.002,
+                    "accepted_evidence_sets": [[{"document_id": "nvda-excerpt", "page": 1}]],
+                },
+                {
+                    "entity": "Microsoft",
+                    "metric": "operating_income",
+                    "period": "FY2024",
+                    "value": 109.433,
+                    "unit": "billion",
+                    "abs_tolerance": 0.002,
+                    "accepted_evidence_sets": [[{"document_id": "msft-excerpt", "page": 1}]],
+                },
+            ],
+            "allowed_documents": [
+                {
+                    "document_id": "nvda-excerpt",
+                    "path": "tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf",
+                },
+                {
+                    "document_id": "msft-excerpt",
+                    "path": "tests/fixtures/sec/derived/msft_fy2024_10k_long_excerpt.pdf",
+                },
+            ],
+            "forbidden_claims": [],
+        }
+
+    def test_unannotated_task_is_undetermined_not_claimed_supported(self) -> None:
+        task = {
+            "id": "unit-no-evidence",
+            "family": "financial_fact",
+            "expected_action": "answer",
+            "required_facts": [{
+                "entity": "NVIDIA",
+                "metric": "operating_income",
+                "period": "FY2025",
+                "value": 81.453,
+                "unit": "billion",
+                "abs_tolerance": 0.002,
+            }],
+            "allowed_documents": [{"path": "excerpt.pdf", "document_id": "excerpt"}],
+            "forbidden_claims": [],
+        }
+        scored = score_task(
+            task,
+            final_output="NVIDIA FY2025 operating income was 81.453 billion USD [excerpt.pdf#p1].",
+        )
+        self.assertTrue(scored["passed"], scored["findings"])
+        self.assertTrue(scored["citation_valid"])
+        self.assertEqual(scored["citation_supported"], "undetermined")
+        self.assertEqual(scored["citation_support_policy_version"], CITATION_SUPPORT_POLICY_VERSION)
+
+    def test_one_legal_cite_does_not_support_every_fact(self) -> None:
+        task = self._two_issuer_task()
+        both = (
+            "NVIDIA FY2025 operating income was 81.453 billion USD. "
+            "Microsoft FY2024 operating income was 109.433 billion USD "
+            "[nvda_fy2025_10k_excerpt.pdf#p1]."
+        )
+        scored = score_task(task, final_output=both)
+        self.assertEqual(scored["required_fact_coverage"]["hits"], 2)
+        self.assertTrue(scored["citation_valid"])
+        self.assertEqual(scored["citation_supported"], "failed")
+        self.assertFalse(scored["passed"])
+        self.assertIn("unsupported_citation", scored["findings"])
+        complete = (
+            "NVIDIA FY2025 operating income was 81.453 billion USD "
+            "[nvda_fy2025_10k_excerpt.pdf#p1]. "
+            "Microsoft FY2024 operating income was 109.433 billion USD "
+            "[msft_fy2024_10k_long_excerpt.pdf#p1]."
+        )
+        ok = score_task(task, final_output=complete)
+        self.assertEqual(ok["citation_supported"], "passed")
+        self.assertTrue(ok["passed"], ok["findings"])
+
+    def test_same_page_number_from_another_document_is_not_support(self) -> None:
+        task = {
+            "id": "unit-page-mix",
+            "family": "multipage_period",
+            "expected_action": "answer",
+            "required_facts": [{
+                "entity": "NVIDIA",
+                "metric": "operating_income",
+                "period": "FY2024",
+                "value": 32.972,
+                "unit": "billion",
+                "abs_tolerance": 0.002,
+                "accepted_evidence_sets": [[{"document_id": "nvda-fy2024", "page": 2}]],
+            }],
+            "allowed_documents": [
+                {
+                    "document_id": "nvda-fy2024",
+                    "path": "tests/fixtures/sec/derived/nvda_cover_fy2025_oi_fy2024.pdf",
+                },
+                {
+                    "document_id": "nvda-unspecified",
+                    "path": "tests/fixtures/sec/derived/nvda_cover_fy2025_oi_unspecified.pdf",
+                },
+            ],
+            "forbidden_claims": [],
+        }
+        mixed = score_task(
+            task,
+            final_output=(
+                "NVIDIA FY2024 operating income was 32.972 billion USD "
+                "[nvda_cover_fy2025_oi_unspecified.pdf#p2]."
+            ),
+        )
+        self.assertTrue(mixed["citation_valid"])
+        self.assertEqual(mixed["citation_supported"], "failed")
+        self.assertFalse(mixed["passed"])
+        cover = score_task(
+            task,
+            final_output=(
+                "NVIDIA FY2024 operating income was 32.972 billion USD "
+                "[nvda_cover_fy2025_oi_fy2024.pdf#p1]."
+            ),
+        )
+        self.assertTrue(cover["citation_valid"])
+        self.assertEqual(cover["citation_supported"], "failed")
+        ok = score_task(
+            task,
+            final_output=(
+                "NVIDIA FY2024 operating income was 32.972 billion USD "
+                "[nvda_cover_fy2025_oi_fy2024.pdf#p2]."
+            ),
+        )
+        self.assertEqual(ok["citation_supported"], "passed")
+        self.assertTrue(ok["passed"], ok["findings"])
+
+    def test_alternate_evidence_set_is_accepted(self) -> None:
+        task = {
+            "id": "unit-alt-evidence",
+            "family": "financial_fact",
+            "expected_action": "answer",
+            "required_facts": [{
+                "entity": "NVIDIA",
+                "metric": "operating_income",
+                "period": "FY2025",
+                "value": 81.453,
+                "unit": "billion",
+                "abs_tolerance": 0.002,
+                "accepted_evidence_sets": [
+                    [{"document_id": "excerpt", "page": 1}],
+                    [{"document_id": "excerpt", "page": 3}],
+                ],
+            }],
+            "allowed_documents": [{
+                "document_id": "excerpt",
+                "path": "tests/fixtures/sec/derived/nvda_fy2025_10k_excerpt.pdf",
+            }],
+            "forbidden_claims": [],
+        }
+        first = score_task(
+            task,
+            final_output="NVIDIA FY2025 operating income was 81.453 billion USD [nvda_fy2025_10k_excerpt.pdf#p1].",
+        )
+        alt = score_task(
+            task,
+            final_output="NVIDIA FY2025 operating income was 81.453 billion USD [nvda_fy2025_10k_excerpt.pdf#p3].",
+        )
+        wrong = score_task(
+            task,
+            final_output="NVIDIA FY2025 operating income was 81.453 billion USD [nvda_fy2025_10k_excerpt.pdf#p5].",
+        )
+        self.assertEqual(first["citation_supported"], "passed")
+        self.assertTrue(first["passed"], first["findings"])
+        self.assertEqual(alt["citation_supported"], "passed")
+        self.assertTrue(alt["passed"], alt["findings"])
+        self.assertTrue(wrong["citation_valid"])
+        self.assertEqual(wrong["citation_supported"], "failed")
+        self.assertFalse(wrong["passed"])
+

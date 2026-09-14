@@ -214,7 +214,9 @@ FinAgentBench 负责**可复用运行契约**与导出域一致性（`evaluate_r
 | `task_result` | 独立 gold：事实与任务完成 | 新结构；`passed`/`diagnostic_pass` 仍只表示 gold |
 | `contract_result` | 适用的 Bench 导出/可见断言检查 | 新；不再只保存直调 `visible_supported_claims` |
 | `b2_internal_result` | B2 专属结构（主体覆盖、公式复算、单位） | 新；不计入 B1 任务成绩，不与 B1 混成不公平总分 |
-| `diagnostic_pass` | 与 `task_result.passed` 相同 | **不改含义** |
+| `diagnostic_pass` | 与 `task_result.passed` 相同 | **不改含义**；本轮 `citation_supported=failed` 会使 gold `passed` 失败，但不自动重评历史账本 |
+| `citation_valid` | 引用文件名合法且页码在允许范围内 | 原 `citation_support` 布尔含义；字段名保留以免旧消费者把有效性当成证据支持 |
+| `citation_supported` | `lumenfin_eval_citation_support.v1`：gold `document_id` + `accepted_evidence_sets` 是否支持该事实 | **新字段**；无标注为 `undetermined`，不得写成已验证支持；不改 `fair_v2`/`v3`/`v4` |
 | `eval_acceptance_v1` | gold 通过，且 `contract_result.status` 为 `passed` 或 `not_applicable` | **新字段**；`unavailable`/`error`/`undetermined`/`failed` 不能算通过 |
 | `formal_pass` | 仍要求任务 `formal_accuracy_eligible` | 开发试点仍为 false |
 
@@ -299,7 +301,7 @@ README 可展示有对照、分母清晰且能够复现的结论，例如完成�
 
 ## 10. 当前入口与收口状态
 
-1. 24 题 dev pilot：`tests/fixtures/document_tasks/lumenfin_document_tasks_v1.json`（每族 4 题）。`gold_origin` 为派生夹具文本；多数题 `review_status=source_quote_checked`。`dt-p23-clarify-company` 仍是诊断题（`needs_human_review`），不能靠迎合候选 gold 修复。不是独立人工评审，不是冻结，`formal_accuracy_eligible=false`。评分接入版本 `lumenfin_eval_contract.v1`；历史 `fair_v2`/`v3`/`v4` 账本不覆盖、不自动重评。
+1. 24 题 dev pilot：`tests/fixtures/document_tasks/lumenfin_document_tasks_v1.json`（每族 4 题，目录版本 `2026-09-14.pilot24`）。`gold_origin` 为派生夹具文本；多数题 `review_status=source_quote_checked`。`dt-p23-clarify-company` 仍是诊断题（`needs_human_review`），不能靠迎合候选 gold 修复。不是独立人工评审，不是冻结，`formal_accuracy_eligible=false`。文本夹具哈希策略 `canonical_text_eol_lf.v1`（换行规范化，不是财务内容改写）。评分接入版本 `lumenfin_eval_contract.v1`；引用支持策略 `lumenfin_eval_citation_support.v1`。历史 `fair_v2`/`v3`/`v4` 账本不覆盖、不自动重评。
 2. 离线：`python scripts/run_document_task_eval.py --pilot --offline`（process overlay + 出站阻断；不改 `.env`）。
 3. 冻结检查（预期退出码 2）：`python scripts/run_document_task_eval.py --freeze-check`
 4. 真实实验准备：`python scripts/run_document_task_eval.py --prepare-live`（不再授权新的 live 批次，除非另行批准）。

@@ -147,6 +147,23 @@ class ContractPolicyTestCase(unittest.TestCase):
         self.assertEqual(vsc["status"], "not_applicable")
         self.assertTrue(scored["eval_acceptance_v1"])
 
+    def test_percent_sign_and_sentence_punctuation_are_numeric_assertions(self) -> None:
+        self.assertTrue(
+            output_has_numeric_assertions("I cannot answer. NVIDIA operating margin is 99.9%.")
+        )
+        self.assertTrue(output_has_numeric_assertions("Operating margin was 62.42%."))
+        self.assertTrue(output_has_numeric_assertions("The margin is 99.9 percent."))
+        self.assertTrue(output_has_numeric_assertions("Operating income was 81.453 billion."))
+        self.assertFalse(
+            output_has_numeric_assertions(
+                "I cannot answer from aapl_fy2024_10k_extract.html page 1 (FY2024)."
+            )
+        )
+        self.assertFalse(
+            output_has_numeric_assertions("See nvda_fy2025_10k_excerpt.pdf#p2 filed in 2024.")
+        )
+        self.assertFalse(output_has_numeric_assertions("The uploaded files do not provide a number."))
+
     def test_refuse_with_unsupported_number_does_not_skip_checks(self) -> None:
         output = "I must refuse, but Apple FY2025 operating income was 81.453 billion USD."
         self.assertTrue(output_has_numeric_assertions(output))

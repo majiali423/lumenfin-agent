@@ -81,7 +81,7 @@ FAMILY_CHECK_MATRIX: dict[str, dict[str, Any]] = {
 _FILENAME_RE = re.compile(r"[\w.\-]+\.(?:pdf|txt|html|md)(?:#p\d+)?", re.IGNORECASE)
 _AMOUNT_RE = re.compile(
     r"(?P<num>-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?)\s*"
-    r"(?P<unit>billion|million|percent|%|bn|mm)\b",
+    r"(?:(?P<unit>billion|million|percent|bn|mm)\b|(?P<pct>%))",
     re.IGNORECASE,
 )
 _METRICISH = re.compile(

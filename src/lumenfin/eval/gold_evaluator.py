@@ -51,6 +51,7 @@ _CITE_RE = re.compile(
 )
 _FILENAME_RE = re.compile(r"[\w.\-]+\.(?:pdf|txt|html|md)(?:#p\d+)?", re.IGNORECASE)
 _GENERIC_CITE_NAMES = {"file.pdf", "excerpt.pdf", "x.pdf", "extract.pdf", "doc.pdf"}
+CITATION_SUPPORT_POLICY_VERSION = "lumenfin_eval_citation_support.v1"
 _ENTITY_ALIASES = {
     "nvidia": ("nvidia", "nvda"),
     "microsoft": ("microsoft", "msft"),
@@ -409,6 +410,7 @@ def _citations(text: str, extra: list[str] | None) -> list[tuple[str, int]]:
 
 
 def _citation_ok(task: dict[str, Any], text: str, extra: list[str] | None) -> tuple[bool, str | None]:
+    """File exists in the allowed set and the page is in range. Not evidence support."""
     cites = _citations(text, extra)
     if not cites:
         return False, "missing_citation"
@@ -420,30 +422,168 @@ def _citation_ok(task: dict[str, Any], text: str, extra: list[str] | None) -> tu
         count = _page_count(ROOT / rel) if rel.parts else None
         if count:
             page_limits[rel.name.lower()] = count
-    evidence_pages: set[int] = set()
-    for fact in task.get("required_facts") or []:
-        for group in fact.get("accepted_evidence_sets") or []:
-            for item in group:
-                try:
-                    evidence_pages.add(int(item.get("page")))
-                except (TypeError, ValueError):
-                    continue
     for name, page in cites:
-        if page < 1:
-            continue
-        if allowed_names and not _cite_name_allowed(name, allowed_names):
-            continue
-        limit = None
-        if name in page_limits:
-            limit = page_limits[name]
-        elif len(page_limits) == 1:
-            limit = next(iter(page_limits.values()))
-        if limit is not None and page > limit:
-            continue
-        if not allowed_names and (name == "unrelated.pdf" or page > 50):
+        if not _citation_valid_one(name, page, allowed_names, page_limits):
             continue
         return True, None
     return False, "invalid_citation"
+
+
+def _citation_valid_one(
+    name: str,
+    page: int,
+    allowed_names: set[str],
+    page_limits: dict[str, int],
+) -> bool:
+    if page < 1:
+        return False
+    if allowed_names and not _cite_name_allowed(name, allowed_names):
+        return False
+    limit = None
+    if name in page_limits:
+        limit = page_limits[name]
+    elif len(page_limits) == 1:
+        limit = next(iter(page_limits.values()))
+    if limit is not None and page > limit:
+        return False
+    if not allowed_names and (name == "unrelated.pdf" or page > 50):
+        return False
+    return True
+
+
+def _document_ids_for_cite(name: str, allowed_docs: list[dict[str, Any]]) -> list[str]:
+    """Bind a cited filename to at most one gold document_id. Never mix files."""
+    needle = str(name or "").lower()
+    exact: list[str] = []
+    for doc in allowed_docs:
+        path_name = Path(str(doc.get("path") or "")).name.lower()
+        doc_id = str(doc.get("document_id") or "").strip()
+        if path_name == needle and doc_id:
+            exact.append(doc_id)
+    if len(exact) == 1:
+        return exact
+    if len(exact) > 1:
+        return []
+    if needle in _GENERIC_CITE_NAMES:
+        ids = [str(doc.get("document_id") or "").strip() for doc in allowed_docs]
+        ids = [item for item in ids if item]
+        return ids if len(ids) == 1 else []
+    fuzzy: list[str] = []
+    for doc in allowed_docs:
+        path_name = Path(str(doc.get("path") or "")).name.lower()
+        doc_id = str(doc.get("document_id") or "").strip()
+        if doc_id and _cite_name_allowed(needle, {path_name}):
+            fuzzy.append(doc_id)
+    return fuzzy if len(fuzzy) == 1 else []
+
+
+def _covered_locator_set(
+    cites: list[tuple[str, int]],
+    allowed_docs: list[dict[str, Any]],
+) -> set[tuple[str, int]]:
+    covered: set[tuple[str, int]] = set()
+    for name, page in cites:
+        ids = _document_ids_for_cite(name, allowed_docs)
+        if len(ids) != 1:
+            continue
+        covered.add((ids[0], page))
+    return covered
+
+
+def _group_locators(group: list[Any]) -> list[tuple[str, int]] | None:
+    locators: list[tuple[str, int]] = []
+    for item in group or []:
+        if not isinstance(item, dict):
+            return None
+        doc_id = str(item.get("document_id") or "").strip()
+        try:
+            page = int(item.get("page"))
+        except (TypeError, ValueError):
+            return None
+        if not doc_id or page < 1:
+            return None
+        locators.append((doc_id, page))
+    return locators
+
+
+def _target_support_status(
+    sets: list[Any],
+    covered: set[tuple[str, int]],
+) -> str:
+    usable: list[list[tuple[str, int]]] = []
+    for group in sets:
+        locators = _group_locators(list(group or []))
+        if locators is None:
+            continue
+        if not locators:
+            continue
+        usable.append(locators)
+    if not usable:
+        return "undetermined"
+    for locators in usable:
+        if set(locators) <= covered:
+            return "passed"
+    return "failed"
+
+
+def _citation_support_detail(
+    task: dict[str, Any],
+    *,
+    text: str,
+    extra: list[str] | None,
+    needs_cite: bool,
+    citation_valid: bool,
+) -> dict[str, Any]:
+    cites = _citations(text, extra)
+    allowed_docs = list(task.get("allowed_documents") or [])
+    covered = _covered_locator_set(cites, allowed_docs)
+    targets: list[dict[str, Any]] = []
+    for fact in task.get("required_facts") or []:
+        sets = fact.get("accepted_evidence_sets")
+        if not sets:
+            continue
+        targets.append(
+            {
+                "kind": "fact",
+                "entity": fact.get("entity"),
+                "metric": fact.get("metric"),
+                "period": fact.get("period"),
+                "status": _target_support_status(list(sets), covered),
+            }
+        )
+    for point in task.get("required_risk_points") or []:
+        sets = point.get("accepted_evidence_sets")
+        if not sets:
+            continue
+        targets.append(
+            {
+                "kind": "risk",
+                "id": point.get("id"),
+                "status": _target_support_status(list(sets), covered),
+            }
+        )
+    if not needs_cite:
+        status = "not_applicable"
+    elif not targets:
+        status = "undetermined"
+    elif any(item["status"] == "failed" for item in targets):
+        status = "failed"
+    elif any(item["status"] == "undetermined" for item in targets):
+        status = "undetermined"
+    else:
+        status = "passed"
+    return {
+        "policy_version": CITATION_SUPPORT_POLICY_VERSION,
+        "valid": bool(citation_valid) if needs_cite else True,
+        "supported": status,
+        "targets": targets,
+        "note": (
+            "citation_valid is file+page legality. citation_supported uses gold "
+            "document_id and accepted_evidence_sets. Missing labels stay "
+            "undetermined. Repeated-page stress files still require the labeled "
+            "page of that document_id; this does not relax other documents."
+        ),
+    }
 
 
 def _cite_name_allowed(name: str, allowed_names: set[str]) -> bool:
@@ -609,6 +749,13 @@ def score_task(
             findings.append("forbidden_claim")
 
     citation_ok = True
+    support_detail = {
+        "policy_version": CITATION_SUPPORT_POLICY_VERSION,
+        "valid": True,
+        "supported": "not_applicable",
+        "targets": [],
+        "note": "citation not required for this action",
+    }
     needs_cite = (facts or risks) and action in {"answer", "answer_or_clarify"} and not (
         action == "answer_or_clarify" and clarify_ok and fact_hits < len(facts)
     )
@@ -616,6 +763,15 @@ def score_task(
         citation_ok, cite_reason = _citation_ok(task, text, citations)
         if not citation_ok:
             findings.append(cite_reason or "missing_citation")
+        support_detail = _citation_support_detail(
+            task,
+            text=text,
+            extra=citations,
+            needs_cite=True,
+            citation_valid=citation_ok,
+        )
+        if support_detail["supported"] == "failed":
+            findings.append("unsupported_citation")
 
     fact_total = len(facts)
     if action == "answer" and not facts and not risks:
@@ -638,6 +794,7 @@ def score_task(
         and complete
         and extra_unsupported == 0
         and (citation_ok or not needs_cite)
+        and support_detail.get("supported") != "failed"
         and not undetermined
         and "empty_output" not in findings
     )
@@ -653,6 +810,7 @@ def score_task(
             and complete
             and extra_unsupported == 0
             and (citation_ok or clarify_ok)
+            and support_detail.get("supported") != "failed"
             and not undetermined
         )
 
@@ -666,6 +824,7 @@ def score_task(
         risk_hits=risk_hits,
         extra_unsupported=extra_unsupported,
         citation_ok=citation_ok,
+        citation_support_detail=support_detail,
         undetermined=undetermined,
         error=None,
         final_output=text,
@@ -694,6 +853,7 @@ def _pack(
     internal_gold_disagreements: list[str] | None = None,
     formal_pass: bool | None = None,
     scoring_eligibility: str | None = None,
+    citation_support_detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from lumenfin.eval.contract_policy import SCORING_POLICY_VERSION
     from lumenfin.eval.contract_runner import acceptance_from_layers, evaluate_contract
@@ -748,11 +908,19 @@ def _pack(
         "replaced_by": "contract_result",
         "runner": contract.get("runner"),
     }
+    support = citation_support_detail or {
+        "policy_version": CITATION_SUPPORT_POLICY_VERSION,
+        "valid": bool(citation_ok),
+        "supported": "not_applicable",
+        "targets": [],
+        "note": "citation support was not evaluated for this outcome",
+    }
     return {
         "task_id": task.get("id"),
         "family": task.get("family"),
         "expected_action": task.get("expected_action"),
         "scoring_policy_version": SCORING_POLICY_VERSION,
+        "citation_support_policy_version": CITATION_SUPPORT_POLICY_VERSION,
         "passed": passed,
         "diagnostic_pass": bool(passed),
         "formal_pass": formal,
@@ -772,6 +940,9 @@ def _pack(
         },
         "risk_points": {"hits": risk_hits, "total": len(task.get("required_risk_points") or [])},
         "citation_support": citation_ok,
+        "citation_valid": bool(support.get("valid")),
+        "citation_supported": support.get("supported"),
+        "citation_support_detail": support,
         "extra_unsupported_claims": extra_unsupported,
         "findings": findings,
         "undetermined": undetermined,
@@ -785,6 +956,8 @@ def _pack(
                 "hits": fact_hits,
                 "total": fact_total,
             },
+            "citation_valid": bool(support.get("valid")),
+            "citation_supported": support.get("supported"),
             "note": "Independent gold: source facts and whether the user task is complete.",
         },
         "contract_result": contract_result,
@@ -793,8 +966,10 @@ def _pack(
         "layer_a_finagentbench": layer_a,
         "note": (
             "Candidate gold diagnostic. diagnostic_pass remains gold-only and is not "
-            "architecture-fair accuracy. eval_acceptance_v1 is a new development "
-            "gate and does not change diagnostic_pass. formal_pass requires "
+            "architecture-fair accuracy. citation_support keeps file+page validity; "
+            "citation_supported is lumenfin_eval_citation_support.v1 and is not an "
+            "automatic rescore of historical ledgers. eval_acceptance_v1 is a new "
+            "development gate and does not change diagnostic_pass. formal_pass requires "
             "formal_accuracy_eligible on the task and is false for this development pilot."
         ),
     }
